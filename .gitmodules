@@ -1,0 +1,3 @@
+[submodule "docs/td_propofol"]
+	path = docs/td_propofol
+	url = https://github.com/UMCU-Digital-Health/td_propofol.git
