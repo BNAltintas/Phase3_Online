@@ -138,4 +138,4 @@ We use a **branch-based workflow with code review**. No one edits `main` directl
      * Tests and documentation
 8. **Merge**
    * After approval (and passing automated tests, if configured), the reviewer merges the PR into main (preferably using “Squash and merge”).
-   * The feature branch is then deleted.
+   * The feature branch is then deleted by the author of the branch.
