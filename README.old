@@ -1,46 +1,11 @@
 # PROPOFOL-model
 
-[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-
-Author: Luke van Boven
-Email: L.vanBoven@umcutrecht.nl
-
-## Installation
-
-To install the propofol package use:
-
-```{bash}
-uv sync
-```
-
-This will also install the nbstripout package, which will strip out the output of notebooks when committing to git.
-The nbstripout package should be installed automatically when running this cookiecutter template, to check if it is installed run:
-
-```{bash}
-nbstripout --status
-```
-
-If it is not installed, you can install it manually by running:
-
-```{bash}
-nbstripout --install
-```
-
-## Deploying to PositConnect
-
-To deploy to PositConnect install rsconnect (`pip install rsconnect-python`) and run (in case of a dash app):
-```{bash}
-rsconnect deploy dash --server https://rsc.ds.umcutrecht.nl/ --api-key <(user specific key)> --entrypoint run.app:app .
-```
-
-## Documentation
-Dataset and model information can be found in the [dataset card](docs/dataset_card.md) and [model card](docs/model_card.md), respectively.
-
+**Aim:**  
 Development of the model for the dose decision-support tool of propofol.
 
 ---
 
-### Background
+## Background
 
 Despite the frequent long-term use of propofol, the anesthesia induction dose targeted to an individual and resulting in sufficient anesthetic depth to perform highly stimulating airway manipulation without significant cardiovascular side effects or awareness is insufficiently known. Moreover, the state-of-the-art propofol dosing schemes based on PK–PD modeling do not take into account important patient-related factors, nor hemodynamic side effects. As a result of attempts to avoid awareness, significant hemodynamic side effects occur every day in the operating room. In particular, hypotension has repeatedly been associated with adverse outcomes, such as acute kidney injury and myocardial injury.
 
@@ -48,7 +13,7 @@ To prevent post-induction hypotension while achieving sufficient anesthetic dept
 
 ---
 
-### Model objectives
+## Model objectives
 
 The PROPOFOL-model repository contains code and documentation to:
 
@@ -68,7 +33,7 @@ The final model is intended to be integrated into a clinical decision-support to
 
 ---
 
-### Repository scope
+## Repository scope
 
 This repository focuses on **model development**:
 
@@ -77,15 +42,15 @@ This repository focuses on **model development**:
 - Simulation of dosing strategies and hemodynamic responses
 - Export of model parameters and logic for use in the interface tool
 
-Other parts of the project (data cleaning) live in separate repositories and are **not** included here.
+Other parts of the project (data cleaning, UI) live in separate repositories and are **not** included here.
 
 ---
 
-#### Development workflow
+## Development workflow
 
 We use a **branch-based workflow with code review**. No one edits `main` directly.
 
-#### Branching model
+### Branching model
 
 - **`main`**
   - Always stable and reproducible.
@@ -139,3 +104,7 @@ We use a **branch-based workflow with code review**. No one edits `main` directl
 8. **Merge**
    * After approval (and passing automated tests, if configured), the reviewer merges the PR into main (preferably using “Squash and merge”).
    * The feature branch is then deleted.
+
+
+
+

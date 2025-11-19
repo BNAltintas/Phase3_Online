@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "propofol"
+version = "0.1.0"
+authors = [
+  { name="Richard Bartels", email="r.t.bartels-6@umcutrecht.nl" },
+]
+description = "Development of the model for the dose decision-support tool of propofol."
+readme = "README.md"
+requires-python = ">=3.12"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies =[]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.29.2",
+    "pytest>=8.0.1",
+    "nbstripout>=0.7.1",
+    "pytest-cov>=5.0.0",
+    "rsconnect-python>=1.24.0",
+]
+lint = [
+    "ruff>=0.7.1",
+]
+
+[tool.uv]
+default-groups = ["dev", "lint"]
+
+[tool.ruff]
+src = ["src"]
+
+[tool.ruff.lint]
+select = [
+    "B",  # flake8-bugbear
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "C90",  # mccabe complexity
+    "I",  # isort
+]
