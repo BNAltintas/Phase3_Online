@@ -1,78 +1,15 @@
 import logging
+from typing import Optional, Sequence
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy import integrate
 from scipy.optimize import brentq
 
+from propofol.patient import EleveldPatient
 from propofol.protocols import Patient
 
 logger = logging.getLogger(__name__)
-
-
-class EleveldPatient():
-    def __init__(self, age: float, weight: float, height: float, sex: str,
-                 opiates: bool, pma: float = 40,
-                 blood_sampling_site: str = 'arterial')  -> None:
-        """
-        Initialize patient parameters for PK/PD modelling.
-
-        Parameters
-        ----------
-        age : float
-            Age in years.
-        weight : float
-            Body weight in kilograms.
-        height : float
-            Height in centimeters.
-        sex : str
-            Biological sex ('male' or 'female', case-insensitive).
-        opiates : bool
-            Indicator of perioperative/opioid exposure.
-        pma : float, optional
-            Postmenstrual age baseline in weeks (default: 40).
-            Total PMA used by the model is computed as pma + age * 52.
-            Called 'PMW' in the NONMEM control files.
-        blood_sampling_site : str, optional
-            Blood sampling site ('arterial' (default) or 'venous')).
-
-        Notes
-        -----
-        - Units: age (years), weight (kg), height (cm), pma (weeks).
-        """
-        # Note: NONMEM control file uses 52, not (365 * 3 + 366) / 4 / 7 ~ 52.18
-        self.years_to_weeks = 52.  # weeks / year
-        self.weeks_to_years = 1 / self.years_to_weeks  # year / week
-
-        # individual setting
-        self.age = age  # years
-        self.weight = weight
-        self.height = height
-        self.bmi = self.weight / (self.height / 100.)**2
-        # Note: if PMA was not recorded it was assumed to be 40 weeks longer than age.
-        self.pma = self.age * self.years_to_weeks + pma # weeks
-        self.sex = sex.lower()
-        self.opiates = opiates
-        self.blood_sampling_site = blood_sampling_site
-
-        # Fat free mass (kg)
-        self.ffm = self.__f_al_sallami(self.age, self.weight, self.bmi)
-
-    def __f_al_sallami(self, age, weight, bmi):
-        """ Fat free mass in kg from Al Sallami
-
-        Notes
-        -----
-        In the nonmem control files the last part appears slightly different
-        # For male: 42.92*wgt/(30.93+BMI)
-        # For female 37.99*Wgt/(35.98+BMI)
-        """
-
-        if self.sex == 'male':
-            return ((0.88 + (1 - 0.88) / (1 + (age / 13.4)**(-12.7)))
-                    * (9270 * weight) / (6680 + 216 * bmi))
-        elif self.sex == 'female':
-            return ((1.11 + (1 - 1.11) / (1 + (age / 7.1)**(-1.1)))
-                    * (9270 * weight) / (8780 + 244 * bmi))
 
 
 class EleveldPK():
@@ -84,7 +21,16 @@ class EleveldPK():
     Note: some of the values in the table of the paper correspond to
     exp(Theta) in the NONMEM control file.
     """
-    def __init__(self, patient: Patient, use_bsv: bool = False):
+    def __init__(self, patient: Patient, use_bsv: bool = False) -> None:
+        """Initialize PK model parameters for a patient.
+
+        Parameters
+        ----------
+        patient : Patient
+            Patient descriptor used to parameterize the PK model.
+        use_bsv : bool, default=False
+            If ``True``, draw between-subject variability terms at initialization.
+        """
         self.patient = patient
         self.patient_ref = EleveldPatient(age=35, height=170, weight=70, sex='male',
                                           opiates=False)
@@ -212,10 +158,8 @@ class EleveldPK():
         # Update pk parameters after drawing new etas
         self._update_pk()
 
-    def reset_eta(self):
-        """
-        (Re)set all etas to 0 and (re)compute PK parameters accordingly.
-        """
+    def reset_eta(self) -> None:
+        """Reset all PK random effects to zero and recompute parameters."""
         self.eta1 = 0
         self.eta2 = 0
         self.eta3 = 0
@@ -227,27 +171,79 @@ class EleveldPK():
         # Update pk parameters after drawing new etas
         self._update_pk()
 
-    def draw_epsilon(self):
-        """Residual error in the log-domain with variance fixed to 1"""
+    def draw_epsilon(self) -> None:
+        """Draw residual error for concentration observations."""
         self.epsilon = np.random.normal(loc=0, scale=1)
 
-    def reset_epsilon(self):
-        """(Re)set epsilon to 0"""
+    def reset_epsilon(self) -> None:
+        """Reset residual error term to zero."""
         self.epsilon = 0
 
-    def f_sigmoid(self, x, E50, lmbda):
+    def f_sigmoid(self, x: float, E50: float, lmbda: float) -> float:
+        """Compute a sigmoidal maturation/scale function.
+
+        Parameters
+        ----------
+        x : float
+            Input variable.
+        E50 : float
+            Half-maximum value of ``x``.
+        lmbda : float
+            Hill coefficient.
+
+        Returns
+        -------
+        float
+            Sigmoid-transformed value.
+        """
         return x**lmbda / (x**lmbda + E50**lmbda)
 
-    def f_central(self, x):
+    def f_central(self, x: float) -> float:
+        """Compute central compartment scaling as a sigmoid of body weight.
+
+        Parameters
+        ----------
+        x : float
+            Body weight in kg.
+
+        Returns
+        -------
+        float
+            Central scaling factor.
+        """
         return self.f_sigmoid(x, self.Theta12, 1)
 
-    def f_opiates(self, x):
+    def f_opiates(self, x: float) -> float:
+        """Compute opiate effect modifier.
+
+        Parameters
+        ----------
+        x : float
+            Opiate effect coefficient.
+
+        Returns
+        -------
+        float
+            Multiplicative modifier for opiate co-administration.
+        """
         if self.patient.opiates:
             return np.exp(x * self.patient.age)  # TODO: yr or weeks?
         else:
             return 1  # absence of opiates
 
-    def f_cl_maturation(self, pma):
+    def f_cl_maturation(self, pma: float) -> float:
+        """Compute maturation factor for clearance.
+
+        Parameters
+        ----------
+        pma : float
+            Post-menstrual age in weeks.
+
+        Returns
+        -------
+        float
+            Clearance maturation factor.
+        """
         return self.f_sigmoid(pma, self.Theta8, self.Theta9)
 
     def _elimination_clearance(self):
@@ -262,11 +258,35 @@ class EleveldPK():
                 / self.f_cl_maturation(self.patient_ref.pma)
                 * self.f_opiates(self.Theta11) * np.exp(self.eta4)
                 )
-    def f_q3_maturation(self, age):
+    def f_q3_maturation(self, age: float) -> float:
+        """Compute maturation factor for inter-compartmental flow ``Q3``.
+
+        Parameters
+        ----------
+        age : float
+            Age in years.
+
+        Returns
+        -------
+        float
+            ``Q3`` maturation factor.
+        """
         # 90% at 11 years
         return self.f_sigmoid(age * 52 + 40, self.Theta14, 1)
 
-    def C_obs(self, x):
+    def c_obs(self, x: float) -> float:
+        """Apply observation model to latent concentration.
+
+        Parameters
+        ----------
+        x : float
+            Latent concentration.
+
+        Returns
+        -------
+        float
+            Observed concentration after residual variability.
+        """
         return x * np.exp(self.Theta7 * self.epsilon * np.exp(self.eta7))
 
 class EleveldPD():
@@ -278,7 +298,16 @@ class EleveldPD():
     - Note: some of the values in the table of the paper correspond to exp(Theta) in the
     NONMEM control.
     """
-    def __init__(self, patient: Patient, use_bsv: bool = False):
+    def __init__(self, patient: Patient, use_bsv: bool = False) -> None:
+        """Initialize PD model parameters for a patient.
+
+        Parameters
+        ----------
+        patient : Patient
+            Patient descriptor used to parameterize the PD model.
+        use_bsv : bool, default=False
+            If ``True``, draw between-subject variability terms at initialization.
+        """
         self.patient = patient
         self.patient_ref = EleveldPatient(age=35, height=170, weight=70, sex='male',
                                           opiates=False)
@@ -325,10 +354,8 @@ class EleveldPD():
         self.bis_delay = (15. + np.exp(self.Theta6 * self.patient.age)) / 60.  # minutes
 
 
-    def draw_eta(self):
-        """
-        Draw independent eta ~ N(0, sqrt(omega^2)) for  Ce50, ke0 and bis_baseline
-        and recompute PD parameters accordingly.
+    def draw_eta(self) -> None:
+        """Draw random effects for PD parameters and recompute model constants.
         """
         # Variances from the NONMEM code
         omega2 = np.array([
@@ -346,10 +373,8 @@ class EleveldPD():
         # Update pd parameters after drawing new etas
         self._update_pd()
 
-    def reset_eta(self):
-        """
-        (Re)set all etas to 0 and (re)compute PD parameters accordingly.
-        """
+    def reset_eta(self) -> None:
+        """Reset all PD random effects to zero and recompute parameters."""
         self.eta1 = 0
         self.eta2 = 0
         self.eta3 = 0
@@ -358,12 +383,13 @@ class EleveldPD():
         self._update_pd()
 
     # TODO: setting epsilon could be moved into a Parent base class
-    def draw_epsilon(self):
-        """Residual error in the log-domain with variance fixed to 1"""
+    def draw_epsilon(self) -> None:
+        """Draw residual error for BIS observations.
+        """
         self.epsilon = np.random.normal(loc=0, scale=1)
 
-    def reset_epsilon(self):
-        """(Re)set epsilon to 0"""
+    def reset_epsilon(self) -> None:
+        """Reset residual error term to zero."""
         self.epsilon = 0
 
     def _get_ke0(self):
@@ -373,13 +399,37 @@ class EleveldPD():
             theta = self.Theta8
         return theta * (self.patient.weight / 70)**-0.25 * np.exp(self.eta2)
 
-    def gamma(self, x):
+    def gamma(self, x: float) -> float:
+        """Return Hill coefficient as a function of effect-site concentration.
+
+        Parameters
+        ----------
+        x : float
+            Effect-site concentration.
+
+        Returns
+        -------
+        float
+            Concentration-dependent Hill coefficient.
+        """
         if x <= self.Ce50:
             return self.Theta4
         elif x > self.Ce50:
             return self.Theta9
 
-    def bis(self, x):
+    def bis(self, x: float) -> float:
+        """Compute BIS prediction from effect-site concentration.
+
+        Parameters
+        ----------
+        x : float
+            Effect-site concentration.
+
+        Returns
+        -------
+        float
+            Predicted BIS value including residual error.
+        """
         y = self.gamma(x)
 
         return (self.bis_baseline
@@ -387,15 +437,66 @@ class EleveldPD():
                 + self.Theta5 * self.epsilon * np.exp(self.eta3)  # RESD in NONMEM file
         )
 
-class PKPD_solver():
-    def __init__(self, patient, pk, pd):
+class PKPDSolver():
+    """Solver class for 3-compartment PKPD model"""
+    def __init__(self, patient: Patient, pk: EleveldPK, pd: EleveldPD) -> None:
+        """Initialize a coupled PK/PD solver.
+
+        Parameters
+        ----------
+        patient : Patient
+            Patient descriptor.
+        pk : EleveldPK
+            Pharmacokinetic model instance.
+        pd : EleveldPD
+            Pharmacodynamic model instance.
+        """
         # TODO: patient argument can be removed if we move blood_sampling_site
         self.patient = patient
         self.pk = pk
         self.pd = pd
 
 
-    def derivative(self, X, t, V1, k10, k12, k13, k21, k31, ke0):
+    def derivative(
+        self,
+        X: Sequence[float],
+        t: float,
+        V1: float,
+        k10: float,
+        k12: float,
+        k13: float,
+        k21: float,
+        k31: float,
+        ke0: float,
+    ) -> NDArray[np.float64]:
+        """Evaluate the ODE derivatives for the 3-compartment PK/PD system.
+
+        Parameters
+        ----------
+        X : Sequence[float]
+            State vector ``[A1, A2, A3, Ce]``.
+        t : float
+            Time point (unused by this autonomous system, required by ``odeint``).
+        V1 : float
+            Central compartment volume.
+        k10 : float
+            Elimination rate constant from central compartment.
+        k12 : float
+            Distribution rate from central to peripheral compartment 2.
+        k13 : float
+            Distribution rate from central to peripheral compartment 3.
+        k21 : float
+            Redistribution rate from compartment 2 to central.
+        k31 : float
+            Redistribution rate from compartment 3 to central.
+        ke0 : float
+            Effect-site rate constant.
+
+        Returns
+        -------
+        numpy.ndarray
+            Time derivatives ``[dA1/dt, dA2/dt, dA3/dt, dCe/dt]``.
+        """
         A1, A2, A3, Ce = X
 
         dotA1 = (- (k10 + k12 + k13) * A1
@@ -408,9 +509,23 @@ class PKPD_solver():
         dotCe = ke0 * (A1 / V1 - Ce)
         return np.array([dotA1, dotA2, dotA3, dotCe])
 
-    def solve_ode(self, t, X0):
+    def solve_ode(self, t: NDArray[np.float64], y0: Sequence[float]) -> NDArray[np.float64]:
+        """Solve the PK/PD ODE system.
+
+        Parameters
+        ----------
+        t : numpy.ndarray
+            Time grid in minutes.
+        y0 : Sequence[float]
+            Initial state ``[A1, A2, A3, Ce]``.
+
+        Returns
+        -------
+        numpy.ndarray
+            State trajectories with shape ``(4, n_timepoints)``.
+        """
         # TODO: replace by integrate.solve_ivp
-        res = integrate.odeint(self.derivative, X0, t,
+        res = integrate.odeint(self.derivative, y0, t,
                         args = (self.pk.V1,
                                 self.pk.k10,
                                 self.pk.k12,
@@ -422,6 +537,18 @@ class PKPD_solver():
         return res.T  # A1[mg], A2[mg], A3[mg], Ce[mg/L] with units [mg, mg, mg, mg / L]
 
     def find_dose_drug_effect_50(self) -> float:
+        """Find bolus dose yielding peak effect-site concentration equal to ``Ce50``.
+
+        Returns
+        -------
+        float
+            Dose in mg that yields a 50% drug effect.
+
+        Raises
+        ------
+        ValueError
+            If blood sampling site is venous.
+        """
         if self.patient.blood_sampling_site == 'venous':
             raise ValueError(
                 f"Blood sampling site {self.patient.blood_sampling_site} "
@@ -429,12 +556,14 @@ class PKPD_solver():
                 "(see 'Drug transport to the effect site' in Eleveld et al. 2018)."
             )
         def f(x):
-            _, _, _, Ce = self.solve_ode(t = np.linspace(0, 15, 15*60+1), X0 = [x, 0, 0, 0])
+            _, _, _, Ce = self.solve_ode(t = np.linspace(0, 15, 15*60+1), y0 = [x, 0, 0, 0])
             return Ce.max() - self.pd.Ce50
         dose50 = brentq(f, 0.1, 10000)
         return dose50 # mg
 
-    def print_model_parameters(self):
+
+    def print_model_parameters(self) -> None:
+        """Log patient and PK/PD parameter values."""
         logger.info(f"BW:{self.patient.weight}kg")
         logger.info(f"BH:{self.patient.height}cm")
         logger.info(f"BMI:{self.patient.bmi:.2f}")
@@ -450,26 +579,30 @@ class PKPD_solver():
         logger.info(f"k31 = {self.pk.k31:.8f}")
         logger.info(f"ke0 = {self.pd.ke0:.8f}")
 
-        # Compare to simtiva:
-        # AGe 1
-        # Correct v1,v2,v3,k10,ke0
-        # Incorrect k12, k21,
-        # Close: k13, k31
 
-        # Age 35
-        # Correct v1,v2,v3,k10,ke0
-        # Incorrect k31, k13,
-        # Close: k12, k21
+    def __call__(
+        self,
+        t: Optional[NDArray[np.float64]] = None,
+        y0: Optional[Sequence[float]] = None,
+    ) -> NDArray[np.float64]:
+        """Run the PK/PD simulation using optional custom initial conditions.
 
-        # Age 70
-        # Incorrect: k12, k21, k13, k31
+        Parameters
+        ----------
+        t : numpy.ndarray, optional
+            Time grid in minutes. If ``None``, uses ``np.linspace(0, 15, 15*60+1)``.
+        y0 : Sequence[float], optional
+            Initial state ``[A1, A2, A3, Ce]``. If ``None``, uses ``[1, 0, 0, 0]``.
 
-
-    def __call__(self, t = None, X0  = None):
+        Returns
+        -------
+        numpy.ndarray
+            Simulated state trajectories with shape ``(4, n_timepoints)``.
+        """
         if t is None:
             t = np.linspace(0, 15, 15*60+1)
-        if X0 is None:
-            X0 = [1, 0, 0, 0]
-        return self.solve_ode(t, X0)
+        if y0 is None:
+            y0 = [1, 0, 0, 0]
+        return self.solve_ode(t, y0)
 
 

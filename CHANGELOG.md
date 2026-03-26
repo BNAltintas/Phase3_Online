@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-03-25
+
+### Added
+- Su 2022 haemodynamic model
+- Class to convert dosing strategy or cumulative dose to dosing rates
+- Tests script
+
+### Changed
+- Updated ruff specs in `pyproject.toml`
 
 ## [0.2.0] - 2025-11-19
 

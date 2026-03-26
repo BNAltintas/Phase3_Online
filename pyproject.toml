@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=64.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "propofol"
-version = "0.2.0"
+version = "0.3.0"
 authors = [
   { name="Richard Bartels", email="r.t.bartels-6@umcutrecht.nl" },
   { name="Luke van Boven", email="L.vanBoven@umcutrecht.nl" },
@@ -46,10 +46,33 @@ line-length = 100
 
 [tool.ruff.lint]
 select = [
-    "B",  # flake8-bugbear
-    "E",  # pycodestyle errors
-    "W",  # pycodestyle warnings
-    "F",  # pyflakes
+    "B",    # flake8-bugbear
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
     "C90",  # mccabe complexity
-    "I",  # isort
+    "I",    # isort
+    "ERA",  # Eradicate (commented out code)
+    "A",    # flake8-builtins (overwriting python builtins)
+    "PTH",  # flake8-use-pathlib
+    "N",    # pep8-naming
+    "D101", # pydocstyle: Missing docstring in class
+    "D102", # pydocstyle: Missing docstring in method
+    "D103", # pydocstyle: Missing docstring in function
 ]
+
+[tool.ruff.lint.pep8-naming]
+ignore-names = [
+    "X",  # Allow the use of X as variable in scikit-learn
+    # Allow capitals similar to use in pkpd literature
+    # As PEP 20 says, "Readability counts" (also pep8 "know when to be inconsistent")
+    "MAP*", "RMAP",  # Allow the use of MAP (mean arterial pressure) as there is a build-in map function
+    "A0", "A1", "A2", "A3",
+    "Cp*", "Ce*",
+    "V1", "V2", "V3",
+    "E50",
+    "*dotA*", "*dotC*",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["D101", "D102", "D103"] # Allow unit tests without docstring

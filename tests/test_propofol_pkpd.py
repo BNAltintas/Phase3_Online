@@ -1,6 +1,6 @@
 import numpy as np
 
-from propofol.pkpd import EleveldPatient, EleveldPD, EleveldPK
+from propofol.propofol_pkpd import EleveldPatient, EleveldPD, EleveldPK
 
 # Reproducibility
 np.random.seed(0)
