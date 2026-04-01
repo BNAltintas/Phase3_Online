@@ -517,6 +517,5 @@ def recommend_propofol_regimen(
 
     rec = recommender.optimize()
     print_summary(rec, baseline_map)
-    plot_recommendation(rec, baseline_map)
     return rec
 
