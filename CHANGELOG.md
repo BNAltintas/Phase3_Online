@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-02
+
+### Added
+- `recommend_regimen.py`: code to predict optimal induction dose + minute-wise maintenance rates for 15 minutes based on BIS and MAP thresholds.
+- `dashboard_layout.py`: build lay-out for dashboard.
+- `app.py`: dashboard with input parameters, recommended dose and figures.
+
+### Changed
+- `patient.py`: option added to calculate MAP and PP from SAP and DAP.
+
 ## [0.3.0] - 2026-03-25
 
 ### Added
