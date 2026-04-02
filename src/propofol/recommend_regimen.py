@@ -17,7 +17,7 @@ from propofol.haemo_pd import SuHaemoPD
 
 SIM_MIN = 15
 TIME = np.linspace(0.0, SIM_MIN, SIM_MIN * 60 + 1)  # 1-second steps, time in minutes
-N_INTERVALS = 15  # one maintenance decision per minute
+N_INTERVALS = SIM_MIN  # one maintenance decision per minute
 
 # BIS targets
 BIS_LOW = 40.0
@@ -404,13 +404,14 @@ class PropofolDoseRecommender:
             self.objective,
             bounds=bounds,
             strategy="best1bin",
-            maxiter=80,
-            popsize=16,
-            seed=42,
-            polish=True,
-            tol=0.02,
+            maxiter=20,
+            popsize=6,
+            tol=0.08,
+            polish=False,
+            init="sobol",
+            updating="immediate",
             workers=1,
-            updating="deferred",
+            seed=42,
         )
 
         bolus_mgkg = float(result.x[0])
@@ -519,6 +520,5 @@ def recommend_propofol_regimen(
     )
 
     rec = recommender.optimize()
-    print_summary(rec, baseline_map)
     return rec
 
