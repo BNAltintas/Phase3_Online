@@ -40,11 +40,12 @@ def _button_styles(selected: str, current: str):
 
 
 def compute_map_and_pp(sap: float, dap: float) -> tuple[float, float]:
+    """Compute MAP and PP from SAP and DAP for display."""
     baseline_map = (sap + 2.0 * dap) / 3.0
     baseline_pp = sap - dap
     return baseline_map, baseline_pp
 
-
+# Button callbacks (sex, opiates, mode) - update stored value and button styles
 @app.callback(
     Output("sex-store", "data"),
     Output("sex-male-btn", "style"),
@@ -122,7 +123,7 @@ def update_mode(lazy_clicks, auto_clicks, accurate_clicks, current_value):
         _button_styles(value, "accurate"),
     )
 
-
+# Update derived MAP and PP when baseline SAP or DAP changes
 @app.callback(
     Output("derived-map", "children"),
     Output("derived-pp", "children"),
@@ -139,7 +140,7 @@ def update_derived_pressures(baseline_sap, baseline_dap):
     except Exception:
         return "-", "-"
 
-
+# Build figures for PK, BIS, and MAP from the recommendation result
 def make_pk_figure(time_min, cp, ce):
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=time_min, y=cp, mode="lines", name="Plasma concentration (Cp)"))
@@ -180,7 +181,7 @@ def make_map_figure(time_min, map_mmHg, baseline_map):
     )
     return fig
 
-
+# Main callback to run the model and update outputs
 @app.callback(
     Output("summary-output", "children"),
     Output("pk-graph", "figure"),
@@ -216,7 +217,7 @@ def run_model(
         baseline_sap = float(baseline_sap)
         baseline_dap = float(baseline_dap)
         baseline_hr = float(baseline_hr)
-        baseline_map, baseline_pp = compute_map_and_pp(baseline_sap, baseline_dap)
+        baseline_map, _ = compute_map_and_pp(baseline_sap, baseline_dap)
 
         patient = Patient(
             age=float(age),
