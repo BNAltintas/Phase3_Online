@@ -91,6 +91,10 @@ class EleveldPatient:
 
         # Derive PP and MAP from SAP/DAP if available
         if base_sap is not None and base_dap is not None:
+            if base_sap <= 0 or base_dap <= 0 or base_sap <= base_dap:
+                raise ValueError(
+                    "Invalid baseline pressures: expected base_sap > base_dap and both > 0."
+                )
             self.base_pp = base_sap - base_dap
             self.base_map = (base_sap + 2.0 * base_dap) / 3.0
         else:
