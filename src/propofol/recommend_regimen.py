@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Sequence
 
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy.optimize import differential_evolution
 
 from propofol.propofol_pkpd import EleveldPK, EleveldPD
@@ -29,9 +28,9 @@ BIS_TARGET = 50.0
 MAP_ABS_MIN = 65.0
 MAP_REL_FRAC = 0.70
 
-# Search bounds
-BOLUS_MGKG_BOUNDS = (0.2, 3.5)
-INFUSION_MGKGH_BOUNDS = (0.0, 20.0)  # includes pause at 0
+# Drug bounds
+BOLUS_MGKG_BOUNDS = (0.2, 3.5) #To-do: change to ranges in dataset
+INFUSION_MGKGH_BOUNDS = (0.0, 20.0) #To-do: change to ranges in dataset
 
 # Optional clinical rounding for maintenance rates
 # e.g. 0.5 or 1.0. Leave None for continuous rates.
@@ -43,16 +42,12 @@ MAINTENANCE_RATE_STEP = None
 # ============================================================
 
 def round_to_5mg(x_mg: float) -> float:
+    """Round bolus to nearest 5 mg."""
     return float(5.0 * np.round(x_mg / 5.0))
 
 
-def round_rate(rate_mgkgh: float, step: float | None) -> float:
-    if step is None:
-        return float(rate_mgkgh)
-    return float(step * np.round(rate_mgkgh / step))
-
-
 def round_rate_vector(rates: Sequence[float], step: float | None) -> np.ndarray:
+    """Round a vector of maintenance rates to the nearest step."""
     rates = np.asarray(rates, dtype=float)
     if step is None:
         return rates.copy()
@@ -60,6 +55,7 @@ def round_rate_vector(rates: Sequence[float], step: float | None) -> np.ndarray:
 
 
 def mode_to_max_changes(mode: str) -> int:
+    """Convert mode string to maximum number of allowed rate changes."""
     mode = mode.lower()
     if mode == "lazy":
         return 1
@@ -71,6 +67,7 @@ def mode_to_max_changes(mode: str) -> int:
 
 
 def count_rate_changes(rates: Sequence[float], tol: float = 1e-8) -> int:
+    """Count the number of rate changes in a sequence of rates."""
     rates = np.asarray(rates, dtype=float)
     return int(np.sum(np.abs(np.diff(rates)) > tol))
 
@@ -82,24 +79,51 @@ def decode_segment_schedule(
     rate_step: float | None = MAINTENANCE_RATE_STEP,
 ) -> np.ndarray:
     """
-    Decode optimizer variables into a 15-minute schedule that can NEVER exceed
-    the allowed number of changes.
+    Convert the optimizer parameter vector into a minute-wise maintenance
+    infusion schedule with a hard upper bound on the number of rate changes.
 
-    Construction:
-      - Let max_changes = K
-      - Then use exactly K+1 contiguous segments
-      - Each segment has one rate
-      - Segments may collapse to identical rates, so actual changes can be fewer
-      - But actual changes can never exceed K
+    The schedule is represented as a fixed number of contiguous segments.
+    For a mode allowing K rate changes, the schedule is parameterized with
+    K + 1 segments. Because each segment has 
+    a single constant infusion rate, the resulting schedule can never contain 
+    more than K transitions between adjacent minutes.
 
-    Parameterization:
-      x_schedule = [rate_1, ..., rate_S, w_1, ..., w_S]
-      where S = K + 1
+    Parameterization
+    ----------------
+    x_schedule is split into two parts:
 
-      - rates are segment rates
-      - w are positive-like raw segment weights
-      - normalized weights determine segment lengths that sum to n_minutes
-      - each segment gets at least 1 minute
+        [rate_1, ..., rate_S, weight_1, ..., weight_S]
+
+    where:
+        S = max_changes + 1
+
+    - rate_i:
+        Infusion rate assigned to segment i.
+    - weight_i:
+        Raw positive segment-size parameter used to determine how many minutes
+        segment i occupies.
+
+    Segment duration construction
+    -----------------------------
+    The raw weights are normalized to relative proportions and then converted
+    to integer segment lengths that sum exactly to `n_minutes`.
+
+    The conversion is performed in three steps:
+    1. Each segment is first assigned a minimum length of 1 minute.
+    2. The remaining minutes are distributed across segments according to the
+       normalized weights.
+    3. Any leftover minutes caused by flooring are assigned to the segments
+       with the largest fractional remainders.
+
+    This ensures that:
+    - every segment is present,
+    - total schedule length is exactly `n_minutes`,
+    - the number of possible rate changes is strictly bounded by construction.
+
+    Notes
+    -----
+    - To do: consider segments of variable length with second-wise infusion rate changes.
+             Discuss if this is feasible for clinical implementation.
     """
     mode = mode.lower()
     max_changes = mode_to_max_changes(mode)
@@ -146,13 +170,6 @@ def decode_segment_schedule(
         raise RuntimeError("Internal error: decoded schedule length mismatch.")
 
     return minute_rates.astype(float)
-
-
-def n_schedule_params_for_mode(mode: str) -> int:
-    max_changes = mode_to_max_changes(mode)
-    n_segments = max_changes + 1
-    return 2 * n_segments
-
 
 # ============================================================
 # Dosing object for SuHaemoPD.solve_ode()
@@ -223,8 +240,8 @@ class PropofolDoseRecommender:
         self,
         patient,
         baseline_map: float,
-        hemo_model: str = "Su2022",
-        use_bsv: bool = False,
+        hemo_model: str = "Su2022", #To-do: add option for Su2023
+        use_bsv: bool = False, #To-do: add option for between-subject variability
         mode: str = "auto",
         maintenance_rate_step: float | None = MAINTENANCE_RATE_STEP,
     ) -> None:
@@ -291,6 +308,8 @@ class PropofolDoseRecommender:
         Cp = A1 / self.pk.V1
         BIS = np.array([self.pd.bis(x) for x in Ce], dtype=float)
 
+        # Convert haemodynamic model output to MAP, scaled to baseline provided by user. Corrects for anxiety effects on baseline MAP from model.
+        # To-do: for altered Su2023 model, ensure that baseline scaling is still appropriate. Anxiety effect might be removed in Su2023.
         map0 = MAP_model[0]
         if map0 <= 0:
             raise ValueError("Initial haemodynamic MAP model output is non-positive.")
@@ -307,9 +326,7 @@ class PropofolDoseRecommender:
             schedule_params=schedule_params,
         )
 
-        map_min_allowed = max(MAP_ABS_MIN, MAP_REL_FRAC * self.baseline_map)
-
-        # BIS penalty: prioritized
+        # BIS penalty: priority is to avoid underdosing (BIS > 60)
         bis_under = np.clip(BIS_LOW - bis, 0.0, None)
         bis_over = np.clip(bis - BIS_HIGH, 0.0, None)
         bis_target_dev = np.abs(bis - BIS_TARGET)
@@ -319,21 +336,26 @@ class PropofolDoseRecommender:
             700.0  * np.sum(bis_under ** 2) +
             2.5    * np.sum(bis_target_dev ** 2)
         )
-
+        
+        # Time to adequate BIS penalty: priority is to achieve adequate sedation quickly
+        # To-do: consider adding option in dashboard to choose maximal acceptable time to adequate sedation.
         adequate_idx = np.where(bis <= BIS_HIGH)[0]
         if len(adequate_idx) == 0:
             time_to_adequate_penalty = 25000.0
         else:
             time_to_adequate_penalty = 80.0 * t[adequate_idx[0]]
 
-        # MAP penalty
+        # MAP penalty: priority is to avoid hypotension, with increasing penalty for more severe hypotension.
+        map_min_allowed = max(MAP_ABS_MIN, MAP_REL_FRAC * self.baseline_map)
+
         map_violation = np.clip(map_min_allowed - map_mmHg, 0.0, None)
         map_penalty = 140.0 * np.sum(map_violation ** 2)
 
         severe_hypo = np.clip(55.0 - map_mmHg, 0.0, None)
         map_penalty += 600.0 * np.sum(severe_hypo ** 2)
 
-        # Regularization
+        # Regularization: priority is to ensure smooth infusion rates and limit total dose.
+        # To do: consider if penalty on total dose is needed.
         smoothness_penalty = 10.0 * np.sum(np.diff(minute_rates_used) ** 2)
         rate_l1_penalty = 1.5 * np.sum(minute_rates_used)
 
@@ -352,7 +374,24 @@ class PropofolDoseRecommender:
         )
 
     def optimize(self) -> RecommendationResult:
-        n_sched = n_schedule_params_for_mode(self.mode)
+        """
+        Optimize the regimen using differential evolution.
+
+        Optimization workflow
+        ---------------------
+        1. Construct parameter bounds for:
+        - bolus dose,
+        - segment rates,
+        - segment weights.
+        2. Run `scipy.optimize.differential_evolution` on the regimen objective.
+        3. Decode the optimal parameter vector into a full minute-wise schedule.
+        4. Re-simulate the optimal regimen to obtain PK, BIS, and MAP trajectories.
+        5. Evaluate feasibility against BIS and MAP criteria.
+        6. Return all results in a `RecommendationResult` object.
+
+        Notes
+        - To do: consider alternative (faster) optimization algorithms.
+        """
         n_segments = mode_to_max_changes(self.mode) + 1
 
         # First n_segments vars = rates
@@ -415,7 +454,7 @@ class PropofolDoseRecommender:
 
 
 # ============================================================
-# Reporting
+# Reporting in terminal
 # ============================================================
 
 def print_summary(rec: RecommendationResult, baseline_map: float) -> None:
@@ -423,7 +462,7 @@ def print_summary(rec: RecommendationResult, baseline_map: float) -> None:
 
     print("\n================ RECOMMENDED REGIMEN ================\n")
     print(f"Mode: {rec.mode}")
-    print(f"Bolus: {rec.bolus_mg:.0f} mg ({rec.bolus_mgkg:.3f} mg/kg)\n")
+    print(f"Induction dose: {rec.bolus_mg:.0f} mg ({rec.bolus_mgkg:.3f} mg/kg)\n")
 
     print("Minute-wise maintenance schedule (mg/kg/h):")
     for i, r in enumerate(rec.infusion_rates_mgkgh):
@@ -436,43 +475,7 @@ def print_summary(rec: RecommendationResult, baseline_map: float) -> None:
         print(f"  time to BIS <= 60: {rec.time_min[adequate_idx[0]]:.2f} min")
     else:
         print("  time to BIS <= 60: not reached")
-
-
-# ============================================================
-# Plotting
-# ============================================================
-
-def plot_recommendation(rec: RecommendationResult, baseline_map: float) -> None:
-    map_min_allowed = max(MAP_ABS_MIN, MAP_REL_FRAC * baseline_map)
-
-    plt.figure(figsize=(10, 5))
-    plt.plot(rec.time_min, rec.cp, label="Plasma concentration (Cp)")
-    plt.plot(rec.time_min, rec.ce, label="Effect-site concentration (Ce)")
-    plt.xlabel("Time (min)")
-    plt.ylabel("Concentration (mg/L)")
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
-
-    plt.figure(figsize=(10, 5))
-    plt.plot(rec.time_min, rec.bis)
-    plt.axhline(BIS_LOW, linestyle="--")
-    plt.axhline(BIS_HIGH, linestyle="--")
-    plt.ylim(0, 100)
-    plt.xlabel("Time (min)")
-    plt.ylabel("BIS")
-    plt.tight_layout()
-    plt.show()
-
-    plt.figure(figsize=(10, 5))
-    plt.plot(rec.time_min, rec.map_mmHg)
-    plt.axhline(map_min_allowed, linestyle="--")
-    plt.ylim(0, max(160, float(np.max(rec.map_mmHg)) * 1.1))
-    plt.xlabel("Time (min)")
-    plt.ylabel("MAP (mmHg)")
-    plt.tight_layout()
-    plt.show()
-
+    print(f"  Chosen threshold for MAP: {map_min_allowed:.1f} mmHg")
 
 # ============================================================
 # User-facing function
@@ -492,7 +495,7 @@ def recommend_propofol_regimen(
     patient :
         Patient object compatible with EleveldPK / EleveldPD / SuHaemoPD.
     baseline_map : float
-        Baseline MAP in mmHg.
+        Baseline MAP in mmHg. Used for scaling the haemodynamic model output to correct for anxiety effects.
     hemo_model : str
         Currently only "Su2022".
     use_bsv : bool
