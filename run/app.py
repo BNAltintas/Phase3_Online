@@ -14,7 +14,6 @@ app = dash.Dash(__name__)
 app.title = "Propofol Dashboard"
 app.layout = build_layout()
 
-
 def _button_styles(selected: str, current: str):
     if selected == current:
         return {
@@ -38,12 +37,16 @@ def _button_styles(selected: str, current: str):
         "fontWeight": "600",
     }
 
+def compute_map(sap: float, dap: float) -> float:
+    """Compute MAP from SAP and DAP for display."""
+    map = (sap + 2.0 * dap) / 3.0
+    return map
 
-def compute_map_and_pp(sap: float, dap: float) -> tuple[float, float]:
-    """Compute MAP and PP from SAP and DAP for display."""
-    baseline_map = (sap + 2.0 * dap) / 3.0
-    baseline_pp = sap - dap
-    return baseline_map, baseline_pp
+def compute_pp(sap: float, dap: float) -> float:
+    """Compute PP from SAP and DAP for display."""
+    pp = sap - dap
+    return pp
+
 
 # Button callbacks (sex, opiates, mode) - update stored value and button styles
 @app.callback(
@@ -135,7 +138,8 @@ def update_derived_pressures(baseline_sap, baseline_dap):
         return "-", "-"
 
     try:
-        baseline_map, baseline_pp = compute_map_and_pp(float(baseline_sap), float(baseline_dap))
+        baseline_map = compute_map(float(baseline_sap), float(baseline_dap))
+        baseline_pp = compute_pp(float(baseline_sap), float(baseline_dap))
         return f"{baseline_map:.1f}", f"{baseline_pp:.1f}"
     except Exception:
         return "-", "-"
@@ -217,7 +221,6 @@ def run_model(
         baseline_sap = float(baseline_sap)
         baseline_dap = float(baseline_dap)
         baseline_hr = float(baseline_hr)
-        baseline_map, _ = compute_map_and_pp(baseline_sap, baseline_dap)
 
         patient = Patient(
             age=float(age),
@@ -233,8 +236,6 @@ def run_model(
 
         rec = recommend_propofol_regimen(
             patient=patient,
-            baseline_map=baseline_map,
-            hemo_model="Su2022",
             mode=mode,
             maintenance_rate_step=maintenance_rate_step,
         )
@@ -251,7 +252,7 @@ def run_model(
 
         pk_fig = make_pk_figure(rec.time_min, rec.cp, rec.ce)
         bis_fig = make_bis_figure(rec.time_min, rec.bis)
-        map_fig = make_map_figure(rec.time_min, rec.map_mmHg, baseline_map)
+        map_fig = make_map_figure(rec.time_min, rec.map_mmHg, patient.base_map)
 
         return summary, pk_fig, bis_fig, map_fig
 
