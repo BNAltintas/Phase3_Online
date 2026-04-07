@@ -8,19 +8,19 @@ import numpy as np
 from scipy.optimize import differential_evolution
 
 from propofol.config import (
-    TIME,
-    N_INTERVALS,
-    BIS_LOW,
     BIS_HIGH,
+    BIS_LOW,
     BIS_TARGET,
-    MAP_ABS_MIN,
-    MAP_REL_FRAC,
     BOLUS_MGKG_BOUNDS,
     INFUSION_MGKGH_BOUNDS,
     MAINTENANCE_RATE_STEP,
+    MAP_ABS_MIN,
+    MAP_REL_FRAC,
+    N_INTERVALS,
+    TIME,
 )
-from propofol.propofol_pkpd import EleveldPK, EleveldPD
 from propofol.haemo_pd import SuHaemoPD
+from propofol.propofol_pkpd import EleveldPD, EleveldPK
 
 # ============================================================
 # Helpers
