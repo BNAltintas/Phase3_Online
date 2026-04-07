@@ -183,6 +183,7 @@ class PiecewisePropofolDosing:
         ))
 
     def dotA0(self, t: float) -> float:
+        """Return propofol input rate in mg/min at time t (in minutes)."""
         if 0.0 <= t < (1.0 / 60.0):
             return self.bolus_mg / (1.0 / 60.0)  # mg/min
 
@@ -197,6 +198,7 @@ class PiecewisePropofolDosing:
 
 @dataclass
 class RecommendationResult:
+    """Container for recommended regimen and associated simulation results."""
     bolus_mg: float
     bolus_mgkg: float
     infusion_rates_mgkgh: np.ndarray
@@ -206,7 +208,7 @@ class RecommendationResult:
     cp: np.ndarray
     ce: np.ndarray
     bis: np.ndarray
-    map_mmHg: np.ndarray
+    map_mmhg: np.ndarray
 
     objective_value: float
     feasible_bis: bool
@@ -220,6 +222,9 @@ class RecommendationResult:
 # ============================================================
 
 class PropofolDoseRecommender:
+    """Recommends a propofol regimen by optimizing over bolus dose and piecewise maintenance
+    infusion rates with a hard limit on the number of rate changes.
+    """
     def __init__(
         self,
         patient,
@@ -257,7 +262,7 @@ class PropofolDoseRecommender:
 
         Returns
         -------
-        t, Cp, Ce, BIS, MAP_mmHg, bolus_mg, minute_rates_used
+        t, Cp, Ce, bis, map_mmhg, bolus_mg, minute_rates_used
         """
         bolus_mg_raw = float(bolus_mgkg) * self.weight_kg
         bolus_mg = round_to_5mg(bolus_mg_raw)
@@ -282,22 +287,23 @@ class PropofolDoseRecommender:
         )
 
         Cp = A1 / self.pk.V1
-        BIS = np.array([self.pd.bis(x) for x in Ce], dtype=float)
+        bis = np.array([self.pd.bis(x) for x in Ce], dtype=float)
 
         # Convert haemodynamic model output to MAP, scaled to baseline provided by user.
         # To-do: for altered Su2023 model, ensure that baseline scaling is still appropriate.
         map0 = MAP_model[0]
         if map0 <= 0:
             raise ValueError("Initial haemodynamic MAP model output is non-positive.")
-        MAP_mmHg = self.baseline_map * (MAP_model / map0)
+        map_mmhg = self.baseline_map * (MAP_model / map0)
 
-        return TIME, Cp, Ce, BIS, MAP_mmHg, bolus_mg, minute_rates_used
+        return TIME, Cp, Ce, bis, map_mmhg, bolus_mg, minute_rates_used
 
     def objective(self, x: np.ndarray) -> float:
+        """Objective function for optimization."""
         bolus_mgkg = float(x[0])
         schedule_params = np.asarray(x[1:], dtype=float)
 
-        t, cp, ce, bis, map_mmHg, bolus_mg, minute_rates_used = self.simulate(
+        t, cp, ce, bis, map_mmhg, bolus_mg, minute_rates_used = self.simulate(
             bolus_mgkg=bolus_mgkg,
             schedule_params=schedule_params,
         )
@@ -325,10 +331,10 @@ class PropofolDoseRecommender:
         # Increasing penalty for severe hypotension.
         map_min_allowed = max(MAP_ABS_MIN, MAP_REL_FRAC * self.baseline_map)
 
-        map_violation = np.clip(map_min_allowed - map_mmHg, 0.0, None)
+        map_violation = np.clip(map_min_allowed - map_mmhg, 0.0, None)
         map_penalty = 140.0 * np.sum(map_violation ** 2)
 
-        severe_hypo = np.clip(55.0 - map_mmHg, 0.0, None)
+        severe_hypo = np.clip(55.0 - map_mmhg, 0.0, None)
         map_penalty += 600.0 * np.sum(severe_hypo ** 2)
 
         # Regularization: priority is to ensure smooth infusion rates and limit total dose.
@@ -394,7 +400,7 @@ class PropofolDoseRecommender:
         bolus_mgkg = float(result.x[0])
         schedule_params = np.asarray(result.x[1:], dtype=float)
 
-        t, cp, ce, bis, map_mmHg, bolus_mg, minute_rates_used = self.simulate(
+        t, cp, ce, bis, map_mmhg, bolus_mg, minute_rates_used = self.simulate(
             bolus_mgkg=bolus_mgkg,
             schedule_params=schedule_params,
         )
@@ -402,7 +408,7 @@ class PropofolDoseRecommender:
         map_min_allowed = max(MAP_ABS_MIN, MAP_REL_FRAC * self.baseline_map)
 
         feasible_bis = bool(np.all((bis >= BIS_LOW) & (bis <= BIS_HIGH)))
-        feasible_map = bool(np.all(map_mmHg >= map_min_allowed))
+        feasible_map = bool(np.all(map_mmhg >= map_min_allowed))
 
         bolus_mgkg_effective = bolus_mg / self.weight_kg
         n_changes = count_rate_changes(minute_rates_used)
@@ -422,7 +428,7 @@ class PropofolDoseRecommender:
             cp=cp,
             ce=ce,
             bis=bis,
-            map_mmHg=map_mmHg,
+            map_mmhg=map_mmhg,
             objective_value=float(result.fun),
             feasible_bis=feasible_bis,
             feasible_map=feasible_map,
@@ -436,6 +442,7 @@ class PropofolDoseRecommender:
 # ============================================================
 
 def print_summary(rec: RecommendationResult, baseline_map: float) -> None:
+    """Print a summary of the recommended regimen and its performance."""
     map_min_allowed = max(MAP_ABS_MIN, MAP_REL_FRAC * baseline_map)
 
     print("\n================ RECOMMENDED REGIMEN ================\n")
