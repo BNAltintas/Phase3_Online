@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "propofol"
-version = "0.3.0"
+version = "0.4.0"
 authors = [
   { name="Richard Bartels", email="r.t.bartels-6@umcutrecht.nl" },
   { name="Luke van Boven", email="L.vanBoven@umcutrecht.nl" },
@@ -18,10 +18,11 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies =[
+  "dash>=4.1.0",
   "numpy~=2.2",
   "pandas~=2.2",
+  "plotly>=6.6.0",
   "scipy~=1.15",
-
 ]
 
 [dependency-groups]
