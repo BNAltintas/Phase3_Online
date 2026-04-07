@@ -1,6 +1,13 @@
 from __future__ import annotations
 
 from dash import dcc, html
+from propofol.config import (
+    BIS_HIGH,
+    BIS_LOW,
+    MAP_ABS_MIN,
+    MAP_REL_FRAC,
+    SIM_MIN,
+)
 
 
 def input_block(label: str, component, width: str = "220px"):
@@ -157,8 +164,9 @@ def build_layout():
             html.H2("Propofol Induction & Initial Maintenance Recommended Dose"),
 
             html.Div(
-                "Predicts a recommended bolus and minute-wise maintenance schedule for 15 minutes, "
-                "constraining BIS between 40 and 60, and MAP above 65 mmHg or 70% of baseline.",
+                f"Predicts a recommended bolus and minute-wise maintenance schedule for {SIM_MIN} "
+                f"minutes, constraining BIS between {BIS_LOW} and {BIS_HIGH}, and MAP above "
+                f"{MAP_ABS_MIN} mmHg or {int(MAP_REL_FRAC * 100)}% of baseline.",
                 style={"marginBottom": "20px"},
             ),
 
