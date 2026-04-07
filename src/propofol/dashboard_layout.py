@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dash import dcc, html
+
 from propofol.config import (
     BIS_HIGH,
     BIS_LOW,
