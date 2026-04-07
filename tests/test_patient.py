@@ -19,7 +19,7 @@ def test_base_values():
     assert patient4.base_pp == 50
     assert patient4.base_map == (130 + 2 * 80) / 3.0
     assert patient4.base_sv == 75
-    
+
 
 
 
