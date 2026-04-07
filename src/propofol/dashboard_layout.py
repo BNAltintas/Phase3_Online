@@ -4,6 +4,22 @@ from dash import dcc, html
 
 
 def input_block(label: str, component, width: str = "220px"):
+    """Create a labeled input block with consistent styling.
+    
+    Parameters
+    ----------
+    label : str
+        The label text displayed above the input component.
+    component
+        The Dash component (e.g., dcc.Input) to display.
+    width : str, optional
+        CSS width of the block, by default "220px".
+    
+    Returns
+    -------
+    html.Div
+        A styled container with the label and component.
+    """
     return html.Div(
         [
             html.Label(
@@ -27,6 +43,22 @@ def input_block(label: str, component, width: str = "220px"):
 
 
 def value_display_block(label: str, value_id: str, width: str = "220px"):
+    """Create a labeled read-only value display block.
+    
+    Parameters
+    ----------
+    label : str
+        The label text displayed above the value.
+    value_id : str
+        The Dash component ID where the value will be updated.
+    width : str, optional
+        CSS width of the block, by default "220px".
+    
+    Returns
+    -------
+    html.Div
+        A styled container with the label and a value display area.
+    """
     return html.Div(
         [
             html.Label(
@@ -60,6 +92,20 @@ def value_display_block(label: str, value_id: str, width: str = "220px"):
 
 
 def segmented_buttons(label: str, button_ids_and_labels: list[tuple[str, str]]):
+    """Create a group of segmented buttons with a label.
+    
+    Parameters
+    ----------
+    label : str
+        The label text displayed above the button group.
+    button_ids_and_labels : list[tuple[str, str]]
+        List of (button_id, button_label) tuples defining the buttons.
+    
+    Returns
+    -------
+    html.Div
+        A styled container with the label and segmented button group.
+    """
     buttons = [
         html.Button(
             text,
@@ -95,6 +141,13 @@ def segmented_buttons(label: str, button_ids_and_labels: list[tuple[str, str]]):
 
 
 def build_layout():
+    """Build the main dashboard layout structure.
+    
+    Returns
+    -------
+    html.Div
+        The complete dashboard layout with patient inputs, options, and output sections.
+    """
     return html.Div(
         [
             dcc.Store(id="sex-store", data="male"),
@@ -129,15 +182,18 @@ def build_layout():
                             ),
                             input_block(
                                 "Baseline SAP (mmHg)",
-                                dcc.Input(id="baseline_sap", type="number", value=120, min=1, step=0.1),
+                                dcc.Input(id="baseline_sap", type="number", value=120, min=1, 
+                                          step=0.1),
                             ),
                             input_block(
                                 "Baseline DAP (mmHg)",
-                                dcc.Input(id="baseline_dap", type="number", value=70, min=1, step=0.1),
+                                dcc.Input(id="baseline_dap", type="number", value=70, min=1, 
+                                          step=0.1),
                             ),
                             input_block(
                                 "Baseline HR (bpm)",
-                                dcc.Input(id="baseline_hr", type="number", value=70, min=1, step=0.1),
+                                dcc.Input(id="baseline_hr", type="number", value=70, min=1, 
+                                          step=0.1),
                             ),
                         ]
                     ),
