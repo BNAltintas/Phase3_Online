@@ -7,35 +7,20 @@ from typing import Sequence
 import numpy as np
 from scipy.optimize import differential_evolution
 
+from propofol.config import (
+    TIME,
+    N_INTERVALS,
+    BIS_LOW,
+    BIS_HIGH,
+    BIS_TARGET,
+    MAP_ABS_MIN,
+    MAP_REL_FRAC,
+    BOLUS_MGKG_BOUNDS,
+    INFUSION_MGKGH_BOUNDS,
+    MAINTENANCE_RATE_STEP,
+)
 from propofol.propofol_pkpd import EleveldPK, EleveldPD
 from propofol.haemo_pd import SuHaemoPD
-
-
-# ============================================================
-# Configuration
-# ============================================================
-
-SIM_MIN = 15
-TIME = np.linspace(0.0, SIM_MIN, SIM_MIN * 60 + 1)  # 1-second steps, time in minutes
-N_INTERVALS = SIM_MIN  # one maintenance decision per minute
-
-# BIS targets
-BIS_LOW = 40.0
-BIS_HIGH = 60.0
-BIS_TARGET = 50.0
-
-# MAP thresholds
-MAP_ABS_MIN = 65.0
-MAP_REL_FRAC = 0.70
-
-# Drug bounds
-BOLUS_MGKG_BOUNDS = (0.2, 3.5) #To-do: change to ranges in dataset
-INFUSION_MGKGH_BOUNDS = (0.0, 20.0) #To-do: change to ranges in dataset
-
-# Optional clinical rounding for maintenance rates
-# e.g. 0.5 or 1.0. Leave None for continuous rates.
-MAINTENANCE_RATE_STEP = None
-
 
 # ============================================================
 # Helpers
@@ -84,9 +69,8 @@ def decode_segment_schedule(
 
     The schedule is represented as a fixed number of contiguous segments.
     For a mode allowing K rate changes, the schedule is parameterized with
-    K + 1 segments. Because each segment has 
-    a single constant infusion rate, the resulting schedule can never contain 
-    more than K transitions between adjacent minutes.
+    K + 1 segments. Because each segment has a single constant infusion rate,
+    the resulting schedule can never contain more than K transitions between adjacent minutes.
 
     Parameterization
     ----------------
@@ -240,15 +224,13 @@ class PropofolDoseRecommender:
         self,
         patient,
         baseline_map: float,
-        hemo_model: str = "Su2022", #To-do: add option for Su2023
-        use_bsv: bool = False, #To-do: add option for between-subject variability
+        use_bsv: bool = False,
         mode: str = "auto",
         maintenance_rate_step: float | None = MAINTENANCE_RATE_STEP,
     ) -> None:
         self.patient = patient
         self.weight_kg = float(patient.weight)
         self.baseline_map = float(baseline_map)
-        self.hemo_model = hemo_model
         self.use_bsv = use_bsv
         self.mode = mode.lower()
         self.maintenance_rate_step = maintenance_rate_step
@@ -256,12 +238,6 @@ class PropofolDoseRecommender:
 
         self.pk = EleveldPK(patient=patient, use_bsv=use_bsv)
         self.pd = EleveldPD(patient=patient, use_bsv=use_bsv)
-
-        if self.hemo_model != "Su2022":
-            raise ValueError(
-                f"Unsupported hemodynamic model '{self.hemo_model}'. "
-                "Currently only 'Su2022' is implemented."
-            )
 
         self.haemo = SuHaemoPD(
             patient=patient,
@@ -308,8 +284,8 @@ class PropofolDoseRecommender:
         Cp = A1 / self.pk.V1
         BIS = np.array([self.pd.bis(x) for x in Ce], dtype=float)
 
-        # Convert haemodynamic model output to MAP, scaled to baseline provided by user. Corrects for anxiety effects on baseline MAP from model.
-        # To-do: for altered Su2023 model, ensure that baseline scaling is still appropriate. Anxiety effect might be removed in Su2023.
+        # Convert haemodynamic model output to MAP, scaled to baseline provided by user.
+        # To-do: for altered Su2023 model, ensure that baseline scaling is still appropriate.
         map0 = MAP_model[0]
         if map0 <= 0:
             raise ValueError("Initial haemodynamic MAP model output is non-positive.")
@@ -336,16 +312,17 @@ class PropofolDoseRecommender:
             700.0  * np.sum(bis_under ** 2) +
             2.5    * np.sum(bis_target_dev ** 2)
         )
-        
+
         # Time to adequate BIS penalty: priority is to achieve adequate sedation quickly
-        # To-do: consider adding option in dashboard to choose maximal acceptable time to adequate sedation.
+        # To-do: consider adding option in dashboard to choose maximal acceptable time to sedation.
         adequate_idx = np.where(bis <= BIS_HIGH)[0]
         if len(adequate_idx) == 0:
             time_to_adequate_penalty = 25000.0
         else:
             time_to_adequate_penalty = 80.0 * t[adequate_idx[0]]
 
-        # MAP penalty: priority is to avoid hypotension, with increasing penalty for more severe hypotension.
+        # MAP penalty: priority is to avoid hypotension.
+        # Increasing penalty for severe hypotension.
         map_min_allowed = max(MAP_ABS_MIN, MAP_REL_FRAC * self.baseline_map)
 
         map_violation = np.clip(map_min_allowed - map_mmHg, 0.0, None)
@@ -484,8 +461,6 @@ def print_summary(rec: RecommendationResult, baseline_map: float) -> None:
 
 def recommend_propofol_regimen(
     patient,
-    baseline_map: float,
-    hemo_model: str = "Su2022",
     use_bsv: bool = False,
     mode: str = "auto",
     maintenance_rate_step: float | None = MAINTENANCE_RATE_STEP,
@@ -495,10 +470,6 @@ def recommend_propofol_regimen(
     ----------
     patient :
         Patient object compatible with EleveldPK / EleveldPD / SuHaemoPD.
-    baseline_map : float
-        Baseline MAP in mmHg. Used for scaling the haemodynamic model output to correct for anxiety effects.
-    hemo_model : str
-        Currently only "Su2022".
     use_bsv : bool
         Whether to sample between-subject variability.
     mode : str
@@ -512,8 +483,7 @@ def recommend_propofol_regimen(
     """
     recommender = PropofolDoseRecommender(
         patient=patient,
-        baseline_map=baseline_map,
-        hemo_model=hemo_model,
+        baseline_map=patient.base_map,
         use_bsv=use_bsv,
         mode=mode,
         maintenance_rate_step=maintenance_rate_step,
