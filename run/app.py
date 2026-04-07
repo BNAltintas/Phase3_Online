@@ -38,8 +38,8 @@ def _button_styles(selected: str, current: str):
 
 def compute_map(sap: float, dap: float) -> float:
     """Compute MAP from SAP and DAP for display."""
-    map = (sap + 2.0 * dap) / 3.0
-    return map
+    MAP = (sap + 2.0 * dap) / 3.0
+    return MAP
 
 def compute_pp(sap: float, dap: float) -> float:
     """Compute PP from SAP and DAP for display."""
@@ -57,6 +57,7 @@ def compute_pp(sap: float, dap: float) -> float:
     State("sex-store", "data"),
 )
 def update_sex(male_clicks, female_clicks, current_value):
+    """Update selected sex and button styles based on clicks."""
     triggered = ctx.triggered_id
     value = current_value or "male"
 
@@ -81,6 +82,7 @@ def update_sex(male_clicks, female_clicks, current_value):
     State("opiates-store", "data"),
 )
 def update_opiates(no_clicks, yes_clicks, current_value):
+    """Update selected opiates status and button styles based on clicks."""
     triggered = ctx.triggered_id
     value = current_value if current_value is not None else False
 
@@ -108,6 +110,7 @@ def update_opiates(no_clicks, yes_clicks, current_value):
     State("mode-store", "data"),
 )
 def update_mode(lazy_clicks, auto_clicks, accurate_clicks, current_value):
+    """Update selected mode and button styles based on clicks."""
     triggered = ctx.triggered_id
     value = current_value or "auto"
 
@@ -133,6 +136,7 @@ def update_mode(lazy_clicks, auto_clicks, accurate_clicks, current_value):
     Input("baseline_dap", "value"),
 )
 def update_derived_pressures(baseline_sap, baseline_dap):
+    """Update displayed MAP and PP based on baseline SAP and DAP inputs."""
     if baseline_sap is None or baseline_dap is None:
         return "-", "-"
 
@@ -145,6 +149,7 @@ def update_derived_pressures(baseline_sap, baseline_dap):
 
 # Build figures for PK, BIS, and MAP from the recommendation result
 def make_pk_figure(time_min, cp, ce):
+    """Build a Plotly figure showing plasma and effect-site concentrations over time."""
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=time_min, y=cp, mode="lines", name="Plasma concentration (Cp)"))
     fig.add_trace(go.Scatter(x=time_min, y=ce, mode="lines", name="Effect-site concentration (Ce)"))
@@ -157,6 +162,7 @@ def make_pk_figure(time_min, cp, ce):
 
 
 def make_bis_figure(time_min, bis):
+    """Build a Plotly figure showing BIS over time."""
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=time_min, y=bis, mode="lines"))
     fig.add_hline(y=40, line_dash="dash")
@@ -170,11 +176,12 @@ def make_bis_figure(time_min, bis):
     return fig
 
 
-def make_map_figure(time_min, map_mmHg, baseline_map):
+def make_map_figure(time_min, map_mmhg, baseline_map):
+    """Build a Plotly figure showing MAP over time."""
     lower_bound = max(65.0, 0.70 * baseline_map)
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=time_min, y=map_mmHg, mode="lines"))
+    fig.add_trace(go.Scatter(x=time_min, y=map_mmhg, mode="lines"))
     fig.add_hline(y=lower_bound, line_dash="dash", annotation_text="Lower bound")
     fig.update_layout(
         xaxis_title="Time (min)",
@@ -216,6 +223,7 @@ def run_model(
     mode,
     maintenance_rate_step,
 ):
+    """Run the propofol regimen recommendation model and update the summary and figures."""
     try:
         baseline_sap = float(baseline_sap)
         baseline_dap = float(baseline_dap)
@@ -251,7 +259,7 @@ def run_model(
 
         pk_fig = make_pk_figure(rec.time_min, rec.cp, rec.ce)
         bis_fig = make_bis_figure(rec.time_min, rec.bis)
-        map_fig = make_map_figure(rec.time_min, rec.map_mmHg, patient.base_map)
+        map_fig = make_map_figure(rec.time_min, rec.map_mmhg, patient.base_map)
 
         return summary, pk_fig, bis_fig, map_fig
 
