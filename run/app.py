@@ -5,6 +5,12 @@ import numpy as np
 import plotly.graph_objects as go
 from dash import Input, Output, State, ctx
 
+from propofol.config import (
+    BIS_HIGH,
+    BIS_LOW,
+    MAP_ABS_MIN,
+    MAP_REL_FRAC,
+)
 from propofol.dashboard_layout import build_layout
 from propofol.patient import EleveldPatient as Patient
 from propofol.recommend_regimen import recommend_propofol_regimen
@@ -165,8 +171,8 @@ def make_bis_figure(time_min, bis):
     """Build a Plotly figure showing BIS over time."""
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=time_min, y=bis, mode="lines"))
-    fig.add_hline(y=40, line_dash="dash")
-    fig.add_hline(y=60, line_dash="dash")
+    fig.add_hline(y=BIS_LOW, line_dash="dash")
+    fig.add_hline(y=BIS_HIGH, line_dash="dash")
     fig.update_layout(
         xaxis_title="Time (min)",
         yaxis_title="BIS",
@@ -178,7 +184,7 @@ def make_bis_figure(time_min, bis):
 
 def make_map_figure(time_min, map_mmhg, baseline_map):
     """Build a Plotly figure showing MAP over time."""
-    lower_bound = max(65.0, 0.70 * baseline_map)
+    lower_bound = max(MAP_ABS_MIN, MAP_REL_FRAC * baseline_map)
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=time_min, y=map_mmhg, mode="lines"))
