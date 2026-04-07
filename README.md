@@ -38,6 +38,13 @@ Dataset and model information can be found in the [dataset card](docs/dataset_ca
 
 Development of the model for the dose decision-support tool of propofol.
 
+## How to run the app
+
+To use the app (draft-version) use:
+```{bash}
+uv run python run/app.py    
+```
+
 ---
 
 ### Background
