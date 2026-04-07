@@ -182,17 +182,17 @@ def build_layout():
                             ),
                             input_block(
                                 "Baseline SAP (mmHg)",
-                                dcc.Input(id="baseline_sap", type="number", value=120, min=1, 
+                                dcc.Input(id="baseline_sap", type="number", value=120, min=1,
                                           step=0.1),
                             ),
                             input_block(
                                 "Baseline DAP (mmHg)",
-                                dcc.Input(id="baseline_dap", type="number", value=70, min=1, 
+                                dcc.Input(id="baseline_dap", type="number", value=70, min=1,
                                           step=0.1),
                             ),
                             input_block(
                                 "Baseline HR (bpm)",
-                                dcc.Input(id="baseline_hr", type="number", value=70, min=1, 
+                                dcc.Input(id="baseline_hr", type="number", value=70, min=1,
                                           step=0.1),
                             ),
                         ]
