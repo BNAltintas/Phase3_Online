@@ -6,9 +6,8 @@ import plotly.graph_objects as go
 from dash import Input, Output, State, ctx
 
 from propofol.dashboard_layout import build_layout
-from propofol.recommend_regimen import recommend_propofol_regimen
 from propofol.patient import EleveldPatient as Patient
-
+from propofol.recommend_regimen import recommend_propofol_regimen
 
 app = dash.Dash(__name__)
 app.title = "Propofol Dashboard"
