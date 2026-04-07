@@ -36,6 +36,8 @@ def round_rate_vector(rates: Sequence[float], step: float | None) -> np.ndarray:
     rates = np.asarray(rates, dtype=float)
     if step is None:
         return rates.copy()
+    if step <= 0:
+        raise ValueError("step must be positive when provided")
     return step * np.round(rates / step)
 
 
