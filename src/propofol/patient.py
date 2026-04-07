@@ -37,8 +37,9 @@ class EleveldPatient:
         pma : float, optional
             Postmenstrual age baseline in weeks (default: 40).
             Total PMA used by the model is computed as pma + age * 52.
+            Called 'PMW' in the NONMEM control files.
         blood_sampling_site : str, optional
-            Blood sampling site ('arterial' or 'venous').
+            Blood sampling site ('arterial' (default) or 'venous').
         base_sap : float, optional
             Baseline systolic arterial pressure in mmHg.
         base_dap : float, optional
