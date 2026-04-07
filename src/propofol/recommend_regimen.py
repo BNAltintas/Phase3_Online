@@ -498,10 +498,6 @@ def recommend_propofol_regimen(
         maintenance_rate_step=maintenance_rate_step,
     )
 
-    if baseline_map := patient.base_map is None:
-        print("Warning: baseline MAP is not defined for this patient. Using default of 90 mmHg.")
-        recommender.baseline_map = 90.0
-
     rec = recommender.optimize()
     return rec
 
