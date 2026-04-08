@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -21,6 +20,7 @@ from propofol.config import (
 )
 from propofol.haemo_pd import SuHaemoPD
 from propofol.propofol_pkpd import EleveldPD, EleveldPK
+
 
 # ============================================================
 # Helpers
@@ -59,79 +59,22 @@ def count_rate_changes(rates: Sequence[float], tol: float = 1e-8) -> int:
     return int(np.sum(np.abs(np.diff(rates)) > tol))
 
 
-def decode_segment_schedule(
-    x_schedule: Sequence[float],
-    mode: str,
-    n_minutes: int = N_INTERVALS,
-    rate_step: float | None = MAINTENANCE_RATE_STEP,
-) -> np.ndarray:
+def build_segment_lengths(weights: Sequence[float], n_minutes: int) -> np.ndarray:
     """
-    Convert the optimizer parameter vector into a minute-wise maintenance
-    infusion schedule with a hard upper bound on the number of rate changes.
+    Convert positive segment weights to integer segment lengths summing exactly to n_minutes.
 
-    The schedule is represented as a fixed number of contiguous segments.
-    For a mode allowing K rate changes, the schedule is parameterized with
-    K + 1 segments. Because each segment has a single constant infusion rate,
-    the resulting schedule can never contain more than K transitions between adjacent minutes.
-
-    Parameterization
-    ----------------
-    x_schedule is split into two parts:
-
-        [rate_1, ..., rate_S, weight_1, ..., weight_S]
-
-    where:
-        S = max_changes + 1
-
-    - rate_i:
-        Infusion rate assigned to segment i.
-    - weight_i:
-        Raw positive segment-size parameter used to determine how many minutes
-        segment i occupies.
-
-    Segment duration construction
-    -----------------------------
-    The raw weights are normalized to relative proportions and then converted
-    to integer segment lengths that sum exactly to `n_minutes`.
-
-    The conversion is performed in three steps:
-    1. Each segment is first assigned a minimum length of 1 minute.
-    2. The remaining minutes are distributed across segments according to the
-       normalized weights.
-    3. Any leftover minutes caused by flooring are assigned to the segments
-       with the largest fractional remainders.
-
-    This ensures that:
-    - every segment is present,
-    - total schedule length is exactly `n_minutes`,
-    - the number of possible rate changes is strictly bounded by construction.
-
-    Notes
-    -----
-    - To do: consider segments of variable length with second-wise infusion rate changes.
-             Discuss if this is feasible for clinical implementation.
+    Every segment gets at least 1 minute.
     """
-    mode = mode.lower()
-    max_changes = mode_to_max_changes(mode)
-    n_segments = max_changes + 1
+    weights = np.asarray(weights, dtype=float)
+    if weights.ndim != 1:
+        raise ValueError("weights must be a 1D array")
+    if len(weights) == 0:
+        raise ValueError("weights must not be empty")
 
-    x_schedule = np.asarray(x_schedule, dtype=float)
-    if len(x_schedule) != 2 * n_segments:
-        raise ValueError(
-            f"Expected {2 * n_segments} schedule variables for mode '{mode}', got {len(x_schedule)}"
-        )
-
-    raw_rates = x_schedule[:n_segments]
-    raw_weights = x_schedule[n_segments:]
-
-    segment_rates = round_rate_vector(raw_rates, step=rate_step)
-
-    # Ensure positive weights, then allocate integer minute lengths summing to n_minutes
-    weights = np.clip(raw_weights, 1e-6, None)
+    weights = np.clip(weights, 1e-6, None)
     frac = weights / np.sum(weights)
 
-    # Give every segment at least 1 minute
-    # This is feasible because n_segments = max_changes + 1 <= 15 for all modes
+    n_segments = len(weights)
     base_lengths = np.ones(n_segments, dtype=int)
     remaining = n_minutes - n_segments
 
@@ -150,12 +93,68 @@ def decode_segment_schedule(
     if np.sum(lengths) != n_minutes:
         raise RuntimeError("Internal error: segment lengths do not sum to n_minutes.")
 
+    return lengths
+
+
+def decode_segment_schedule(
+    x_schedule: Sequence[float],
+    mode: str,
+    n_minutes: int = N_INTERVALS,
+    rate_step: float | None = MAINTENANCE_RATE_STEP,
+    apply_rounding: bool = False,
+) -> np.ndarray:
+    """
+    Convert the optimizer parameter vector into a minute-wise maintenance
+    infusion schedule with a hard upper bound on the number of rate changes.
+
+    x_schedule is split into:
+        [rate_1, ..., rate_S, weight_1, ..., weight_S]
+    where S = max_changes + 1.
+
+    Parameters
+    ----------
+    apply_rounding : bool
+        If True, round segment rates to the requested clinical step.
+        If False, keep them continuous for optimization.
+    """
+    mode = mode.lower()
+    max_changes = mode_to_max_changes(mode)
+    n_segments = max_changes + 1
+
+    x_schedule = np.asarray(x_schedule, dtype=float)
+    if len(x_schedule) != 2 * n_segments:
+        raise ValueError(
+            f"Expected {2 * n_segments} schedule variables for mode '{mode}', got {len(x_schedule)}"
+        )
+
+    raw_rates = x_schedule[:n_segments]
+    raw_weights = x_schedule[n_segments:]
+
+    if apply_rounding:
+        segment_rates = round_rate_vector(raw_rates, step=rate_step)
+    else:
+        segment_rates = np.asarray(raw_rates, dtype=float).copy()
+
+    lengths = build_segment_lengths(raw_weights, n_minutes=n_minutes)
     minute_rates = np.repeat(segment_rates, lengths)
 
     if len(minute_rates) != n_minutes:
         raise RuntimeError("Internal error: decoded schedule length mismatch.")
 
     return minute_rates.astype(float)
+
+
+def encode_schedule_from_segment_solution(
+    segment_rates: Sequence[float],
+    segment_weights: Sequence[float],
+) -> np.ndarray:
+    """Concatenate segment rates and weights into optimizer format."""
+    segment_rates = np.asarray(segment_rates, dtype=float)
+    segment_weights = np.asarray(segment_weights, dtype=float)
+    if len(segment_rates) != len(segment_weights):
+        raise ValueError("segment_rates and segment_weights must have equal length")
+    return np.concatenate([segment_rates, segment_weights])
+
 
 # ============================================================
 # Dosing object for SuHaemoPD.solve_ode()
@@ -187,11 +186,11 @@ class PiecewisePropofolDosing:
     def dotA0(self, t: float) -> float:
         """Return propofol input rate in mg/min at time t (in minutes)."""
         if 0.0 <= t < (1.0 / 60.0):
-            return self.bolus_mg / (1.0 / 60.0)  # mg/min
+            return self.bolus_mg / (1.0 / 60.0)
 
         idx = int(np.floor(t))
         idx = max(0, min(idx, len(self.infusion_rates_mgkgh) - 1))
-        return self.infusion_rates_mgkgh[idx] * self.weight_kg / 60.0  # mg/min
+        return self.infusion_rates_mgkgh[idx] * self.weight_kg / 60.0
 
 
 # ============================================================
@@ -213,6 +212,7 @@ class RecommendationResult:
     map_mmhg: np.ndarray
 
     objective_value: float
+    objective_value_continuous: float
     feasible_bis: bool
     feasible_map: bool
     n_rate_changes: int
@@ -224,9 +224,23 @@ class RecommendationResult:
 # ============================================================
 
 class PropofolDoseRecommender:
-    """Recommends a propofol regimen by optimizing over bolus dose and piecewise maintenance
-    infusion rates with a hard limit on the number of rate changes.
     """
+    Recommends a propofol regimen by optimizing over bolus dose and piecewise maintenance
+    infusion rates with a hard limit on the number of rate changes.
+
+    Key design choice
+    -----------------
+    The optimizer searches a continuous space:
+    - bolus is continuous during optimization
+    - maintenance segment rates are continuous during optimization
+
+    Rounding to clinically implementable increments is applied only after optimization,
+    followed by re-simulation of the rounded regimen.
+
+    This avoids unnecessary flat regions in the objective caused by rounding inside
+    differential evolution.
+    """
+
     def __init__(
         self,
         patient,
@@ -252,32 +266,46 @@ class PropofolDoseRecommender:
             pd_propofol=self.pd,
         )
 
+    # --------------------------------------------------------
+    # Regimen decoding / simulation
+    # --------------------------------------------------------
+
     def simulate(
         self,
         bolus_mgkg: float,
         schedule_params: Sequence[float],
+        apply_rounding: bool = False,
     ):
         """
-        Simulate regimen defined by:
+        Simulate a regimen defined by:
           - bolus (mg/kg)
-          - schedule_params decoded into a strict-change-limited 15-min schedule
+          - schedule_params decoded into a strict-change-limited schedule
+
+        Parameters
+        ----------
+        apply_rounding : bool
+            If False:
+                use continuous bolus and continuous maintenance rates.
+            If True:
+                round bolus to nearest 5 mg and maintenance rates to the configured step.
 
         Returns
         -------
-        t, Cp, Ce, bis, map_mmhg, bolus_mg, minute_rates_used
+        t, Cp, Ce, bis, map_mmhg, bolus_mg_used, minute_rates_used
         """
         bolus_mg_raw = float(bolus_mgkg) * self.weight_kg
-        bolus_mg = round_to_5mg(bolus_mg_raw)
+        bolus_mg_used = round_to_5mg(bolus_mg_raw) if apply_rounding else bolus_mg_raw
 
         minute_rates_used = decode_segment_schedule(
             schedule_params,
             mode=self.mode,
             n_minutes=N_INTERVALS,
             rate_step=self.maintenance_rate_step,
+            apply_rounding=apply_rounding,
         )
 
         dosing = PiecewisePropofolDosing(
-            bolus_mg=bolus_mg,
+            bolus_mg=bolus_mg_used,
             infusion_rates_mgkgh=minute_rates_used,
             weight_kg=self.weight_kg,
         )
@@ -291,26 +319,35 @@ class PropofolDoseRecommender:
         Cp = A1 / self.pk.V1
         bis = np.vectorize(self.pd.bis)(Ce)
 
-        # Convert haemodynamic model output to MAP, scaled to baseline provided by user.
-        # To-do: for altered Su2023 model, ensure that baseline scaling is still appropriate.
         map0 = MAP_model[0]
         if map0 <= 0:
             raise ValueError("Initial haemodynamic MAP model output is non-positive.")
         map_mmhg = self.baseline_map * (MAP_model / map0)
 
-        return TIME, Cp, Ce, bis, map_mmhg, bolus_mg, minute_rates_used
+        return TIME, Cp, Ce, bis, map_mmhg, bolus_mg_used, minute_rates_used
+
+    # --------------------------------------------------------
+    # Objective
+    # --------------------------------------------------------
 
     def objective(self, x: np.ndarray) -> float:
-        """Objective function for optimization."""
+        """
+        Objective function evaluated on the continuous regimen.
+        """
         bolus_mgkg = float(x[0])
         schedule_params = np.asarray(x[1:], dtype=float)
 
         t, cp, ce, bis, map_mmhg, bolus_mg, minute_rates_used = self.simulate(
             bolus_mgkg=bolus_mgkg,
             schedule_params=schedule_params,
+            apply_rounding=False,
         )
 
-        # BIS penalty: priority is to avoid underdosing (BIS > 60)
+        # BIS penalty
+        # Priority:
+        # 1) avoid BIS > BIS_HIGH (too light)
+        # 2) avoid BIS < BIS_LOW (too deep)
+        # 3) remain near BIS_TARGET
         bis_under = np.clip(BIS_LOW - bis, 0.0, None)
         bis_over = np.clip(bis - BIS_HIGH, 0.0, None)
         bis_target_dev = np.abs(bis - BIS_TARGET)
@@ -321,16 +358,14 @@ class PropofolDoseRecommender:
             2.5    * np.sum(bis_target_dev ** 2)
         )
 
-        # Time to adequate BIS penalty: priority is to achieve adequate sedation quickly
-        # To-do: consider adding option in dashboard to choose maximal acceptable time to sedation.
+        # Time to adequate BIS penalty
         adequate_idx = np.where(bis <= BIS_HIGH)[0]
         if len(adequate_idx) == 0:
             time_to_adequate_penalty = 25000.0
         else:
             time_to_adequate_penalty = 80.0 * t[adequate_idx[0]]
 
-        # MAP penalty: priority is to avoid hypotension.
-        # Increasing penalty for severe hypotension.
+        # MAP penalty
         map_min_allowed = max(MAP_ABS_MIN, MAP_REL_FRAC * self.baseline_map)
 
         map_violation = np.clip(map_min_allowed - map_mmhg, 0.0, None)
@@ -339,16 +374,13 @@ class PropofolDoseRecommender:
         severe_hypo = np.clip(55.0 - map_mmhg, 0.0, None)
         map_penalty += 600.0 * np.sum(severe_hypo ** 2)
 
-        # Regularization: priority is to ensure smooth infusion rates and limit total dose.
-        # To do: consider if penalty on total dose is needed.
+        # Regularization
         smoothness_penalty = 10.0 * np.sum(np.diff(minute_rates_used) ** 2)
         rate_l1_penalty = 1.5 * np.sum(minute_rates_used)
 
         total_maint_mg = np.sum(minute_rates_used * self.weight_kg / 60.0)
         total_dose_penalty = 0.15 * (bolus_mg + total_maint_mg)
 
-        # No change-limit penalty needed:
-        # the limit is guaranteed by construction
         return float(
             bis_penalty
             + time_to_adequate_penalty
@@ -358,32 +390,200 @@ class PropofolDoseRecommender:
             + total_dose_penalty
         )
 
+    # --------------------------------------------------------
+    # Post-optimization rounded refinement
+    # --------------------------------------------------------
+
+    def rounded_objective_from_components(
+        self,
+        bolus_mg: float,
+        segment_rates: Sequence[float],
+        segment_weights: Sequence[float],
+    ) -> float:
+        """
+        Evaluate the objective after explicit rounding / discretization.
+
+        This is used for local post-DE refinement in a discrete neighborhood.
+        """
+        bolus_mgkg = float(bolus_mg) / self.weight_kg
+        schedule_params = encode_schedule_from_segment_solution(
+            segment_rates=segment_rates,
+            segment_weights=segment_weights,
+        )
+
+        t, cp, ce, bis, map_mmhg, bolus_mg_used, minute_rates_used = self.simulate(
+            bolus_mgkg=bolus_mgkg,
+            schedule_params=schedule_params,
+            apply_rounding=True,
+        )
+
+        bis_under = np.clip(BIS_LOW - bis, 0.0, None)
+        bis_over = np.clip(bis - BIS_HIGH, 0.0, None)
+        bis_target_dev = np.abs(bis - BIS_TARGET)
+
+        bis_penalty = (
+            1800.0 * np.sum(bis_over ** 2) +
+            700.0  * np.sum(bis_under ** 2) +
+            2.5    * np.sum(bis_target_dev ** 2)
+        )
+
+        adequate_idx = np.where(bis <= BIS_HIGH)[0]
+        if len(adequate_idx) == 0:
+            time_to_adequate_penalty = 25000.0
+        else:
+            time_to_adequate_penalty = 80.0 * t[adequate_idx[0]]
+
+        map_min_allowed = max(MAP_ABS_MIN, MAP_REL_FRAC * self.baseline_map)
+
+        map_violation = np.clip(map_min_allowed - map_mmhg, 0.0, None)
+        map_penalty = 140.0 * np.sum(map_violation ** 2)
+
+        severe_hypo = np.clip(55.0 - map_mmhg, 0.0, None)
+        map_penalty += 600.0 * np.sum(severe_hypo ** 2)
+
+        smoothness_penalty = 10.0 * np.sum(np.diff(minute_rates_used) ** 2)
+        rate_l1_penalty = 1.5 * np.sum(minute_rates_used)
+
+        total_maint_mg = np.sum(minute_rates_used * self.weight_kg / 60.0)
+        total_dose_penalty = 0.15 * (bolus_mg_used + total_maint_mg)
+
+        return float(
+            bis_penalty
+            + time_to_adequate_penalty
+            + map_penalty
+            + smoothness_penalty
+            + rate_l1_penalty
+            + total_dose_penalty
+        )
+
+    def refine_discrete_solution(
+        self,
+        bolus_mgkg_cont: float,
+        schedule_params_cont: Sequence[float],
+    ) -> tuple[float, np.ndarray]:
+        """
+        Small local refinement around the continuous optimum after rounding.
+
+        Strategy
+        --------
+        - Round bolus to nearest 5 mg, then try {rounded - 5, rounded, rounded + 5}
+        - Round each segment rate to the nearest allowed step, then independently
+          try {-step, 0, +step} for each segment with coordinate descent
+        - Keep segment weights fixed; they already define the change-limited segmentation
+
+        Returns
+        -------
+        best_bolus_mgkg, best_schedule_params
+            Parameters encoded in the same format as the optimizer uses.
+            These parameters are intended for simulation with apply_rounding=True.
+        """
+        n_segments = self.max_changes + 1
+        schedule_params_cont = np.asarray(schedule_params_cont, dtype=float)
+
+        segment_rates_cont = schedule_params_cont[:n_segments]
+        segment_weights = schedule_params_cont[n_segments:]
+
+        # Initial rounded values
+        bolus_mg_cont = float(bolus_mgkg_cont) * self.weight_kg
+        bolus_mg_rounded = round_to_5mg(bolus_mg_cont)
+
+        if self.maintenance_rate_step is None:
+            rate_step = None
+            segment_rates_rounded = np.asarray(segment_rates_cont, dtype=float).copy()
+        else:
+            rate_step = float(self.maintenance_rate_step)
+            segment_rates_rounded = round_rate_vector(segment_rates_cont, step=rate_step)
+
+        best_bolus_mg = bolus_mg_rounded
+        best_segment_rates = segment_rates_rounded.copy()
+
+        best_obj = self.rounded_objective_from_components(
+            bolus_mg=best_bolus_mg,
+            segment_rates=best_segment_rates,
+            segment_weights=segment_weights,
+        )
+
+        # Bolus local search: nearest neighbors in 5 mg increments
+        bolus_candidates = [best_bolus_mg]
+        bolus_candidates += [best_bolus_mg - 5.0, best_bolus_mg + 5.0]
+
+        bolus_min_mg = BOLUS_MGKG_BOUNDS[0] * self.weight_kg
+        bolus_max_mg = BOLUS_MGKG_BOUNDS[1] * self.weight_kg
+
+        for b in bolus_candidates:
+            if b < bolus_min_mg or b > bolus_max_mg:
+                continue
+            obj = self.rounded_objective_from_components(
+                bolus_mg=b,
+                segment_rates=best_segment_rates,
+                segment_weights=segment_weights,
+            )
+            if obj < best_obj:
+                best_obj = obj
+                best_bolus_mg = b
+
+        # Coordinate descent over rounded segment rates
+        if rate_step is not None:
+            improved = True
+            while improved:
+                improved = False
+                for j in range(n_segments):
+                    current = best_segment_rates[j]
+                    candidates = [current - rate_step, current, current + rate_step]
+
+                    seg_min, seg_max = INFUSION_MGKGH_BOUNDS
+                    local_best_rate = current
+                    local_best_obj = best_obj
+
+                    for cand in candidates:
+                        if cand < seg_min or cand > seg_max:
+                            continue
+
+                        trial_rates = best_segment_rates.copy()
+                        trial_rates[j] = cand
+
+                        obj = self.rounded_objective_from_components(
+                            bolus_mg=best_bolus_mg,
+                            segment_rates=trial_rates,
+                            segment_weights=segment_weights,
+                        )
+                        if obj < local_best_obj:
+                            local_best_obj = obj
+                            local_best_rate = cand
+
+                    if not np.isclose(local_best_rate, current):
+                        best_segment_rates[j] = local_best_rate
+                        best_obj = local_best_obj
+                        improved = True
+
+        best_schedule_params = encode_schedule_from_segment_solution(
+            segment_rates=best_segment_rates,
+            segment_weights=segment_weights,
+        )
+        best_bolus_mgkg = best_bolus_mg / self.weight_kg
+
+        return float(best_bolus_mgkg), best_schedule_params
+
+    # --------------------------------------------------------
+    # Optimization
+    # --------------------------------------------------------
+
     def optimize(self) -> RecommendationResult:
         """
         Optimize the regimen using differential evolution.
 
-        Optimization workflow
-        ---------------------
-        1. Construct parameter bounds for:
-        - bolus dose,
-        - segment rates,
-        - segment weights.
-        2. Run `scipy.optimize.differential_evolution` on the regimen objective.
-        3. Decode the optimal parameter vector into a full minute-wise schedule.
-        4. Re-simulate the optimal regimen to obtain PK, BIS, and MAP trajectories.
-        5. Evaluate feasibility against BIS and MAP criteria.
-        6. Return all results in a `RecommendationResult` object.
-
-        Notes
-        - To do: consider alternative (faster) optimization algorithms.
+        Workflow
+        --------
+        1. Optimize the continuous regimen.
+        2. Round and locally refine the continuous optimum.
+        3. Re-simulate the final rounded regimen.
+        4. Return the clinically implementable recommendation.
         """
-        n_segments = mode_to_max_changes(self.mode) + 1
+        n_segments = self.max_changes + 1
 
-        # First n_segments vars = rates
-        # Next n_segments vars = segment weights
         bounds = [BOLUS_MGKG_BOUNDS]
         bounds += [INFUSION_MGKGH_BOUNDS] * n_segments
-        bounds += [(0.1, 10.0)] * n_segments  # segment weights
+        bounds += [(0.1, 10.0)] * n_segments
 
         result = differential_evolution(
             self.objective,
@@ -399,12 +599,32 @@ class PropofolDoseRecommender:
             seed=42,
         )
 
-        bolus_mgkg = float(result.x[0])
-        schedule_params = np.asarray(result.x[1:], dtype=float)
+        # Best continuous solution
+        bolus_mgkg_cont = float(result.x[0])
+        schedule_params_cont = np.asarray(result.x[1:], dtype=float)
 
+        objective_value_continuous = float(result.fun)
+
+        # Refine in the discrete / rounded neighborhood
+        bolus_mgkg_final, schedule_params_final = self.refine_discrete_solution(
+            bolus_mgkg_cont=bolus_mgkg_cont,
+            schedule_params_cont=schedule_params_cont,
+        )
+
+        # Final simulation uses the rounded regimen
         t, cp, ce, bis, map_mmhg, bolus_mg, minute_rates_used = self.simulate(
-            bolus_mgkg=bolus_mgkg,
-            schedule_params=schedule_params,
+            bolus_mgkg=bolus_mgkg_final,
+            schedule_params=schedule_params_final,
+            apply_rounding=True,
+        )
+
+        objective_value_final = self.objective(
+            np.concatenate([[bolus_mgkg_final], np.asarray(schedule_params_final, dtype=float)])
+        )
+        objective_value_final = self.rounded_objective_from_components(
+            bolus_mg=bolus_mg,
+            segment_rates=np.asarray(schedule_params_final[:n_segments], dtype=float),
+            segment_weights=np.asarray(schedule_params_final[n_segments:], dtype=float),
         )
 
         map_min_allowed = max(MAP_ABS_MIN, MAP_REL_FRAC * self.baseline_map)
@@ -415,7 +635,6 @@ class PropofolDoseRecommender:
         bolus_mgkg_effective = bolus_mg / self.weight_kg
         n_changes = count_rate_changes(minute_rates_used)
 
-        # Sanity check: guaranteed by construction
         if n_changes > self.max_changes:
             raise RuntimeError(
                 f"Internal error: produced {n_changes} changes, exceeds allowed {self.max_changes}."
@@ -431,7 +650,8 @@ class PropofolDoseRecommender:
             ce=ce,
             bis=bis,
             map_mmhg=map_mmhg,
-            objective_value=float(result.fun),
+            objective_value=float(objective_value_final),
+            objective_value_continuous=objective_value_continuous,
             feasible_bis=feasible_bis,
             feasible_map=feasible_map,
             n_rate_changes=n_changes,
@@ -459,10 +679,17 @@ def print_summary(rec: RecommendationResult, baseline_map: float) -> None:
     print("\nPerformance:")
     adequate_idx = np.where(rec.bis <= BIS_HIGH)[0]
     if len(adequate_idx) > 0:
-        print(f"  time to BIS <= 60: {rec.time_min[adequate_idx[0]]:.2f} min")
+        print(f"  time to BIS <= {BIS_HIGH}: {rec.time_min[adequate_idx[0]]:.2f} min")
     else:
-        print("  time to BIS <= 60: not reached")
+        print(f"  time to BIS <= {BIS_HIGH}: not reached")
+
     print(f"  Chosen threshold for MAP: {map_min_allowed:.1f} mmHg")
+    print(f"  Feasible BIS: {rec.feasible_bis}")
+    print(f"  Feasible MAP: {rec.feasible_map}")
+    print(f"  Rate changes: {rec.n_rate_changes} / {rec.max_rate_changes_allowed}")
+    print(f"  Final rounded objective: {rec.objective_value:.2f}")
+    print(f"  Best continuous objective: {rec.objective_value_continuous:.2f}")
+
 
 # ============================================================
 # User-facing function
@@ -485,6 +712,7 @@ def recommend_propofol_regimen(
         "lazy", "auto", or "accurate".
     maintenance_rate_step : float | None
         Optional maintenance rate rounding step, e.g. 0.5 or 1.0 mg/kg/h.
+        Use None to keep the final rates continuous.
 
     Returns
     -------
@@ -497,7 +725,4 @@ def recommend_propofol_regimen(
         mode=mode,
         maintenance_rate_step=maintenance_rate_step,
     )
-
-    rec = recommender.optimize()
-    return rec
-
+    return recommender.optimize()
