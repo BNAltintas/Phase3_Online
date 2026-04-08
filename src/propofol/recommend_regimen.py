@@ -289,7 +289,7 @@ class PropofolDoseRecommender:
         )
 
         Cp = A1 / self.pk.V1
-        bis = np.array([self.pd.bis(x) for x in Ce], dtype=float)
+        bis = np.vectorize(self.pd.bis)(Ce)
 
         # Convert haemodynamic model output to MAP, scaled to baseline provided by user.
         # To-do: for altered Su2023 model, ensure that baseline scaling is still appropriate.
