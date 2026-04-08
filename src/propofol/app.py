@@ -3,7 +3,7 @@ from __future__ import annotations
 import dash
 import numpy as np
 import plotly.graph_objects as go
-from dash import Input, Output, State, ctx
+from dash import Dash, Input, Output, State, ctx
 
 from propofol.config import (
     BIS_HIGH,
@@ -276,5 +276,6 @@ def run_model(
         return error_text, empty_fig, empty_fig, empty_fig
 
 def main() -> None:
+    """Run the Dash app."""
     app.run(debug=False)
 
