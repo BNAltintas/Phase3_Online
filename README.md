@@ -13,17 +13,11 @@ To install the propofol package use:
 uv sync
 ```
 
-This will also install the nbstripout package, which will strip out the output of notebooks when committing to git.
-The nbstripout package should be installed automatically when running this cookiecutter template, to check if it is installed run:
+## How to run the app
 
+To use the app use:
 ```{bash}
-nbstripout --status
-```
-
-If it is not installed, you can install it manually by running:
-
-```{bash}
-nbstripout --install
+uv run propofol-dashboard
 ```
 
 ## Deploying to PositConnect
@@ -38,12 +32,6 @@ Dataset and model information can be found in the [dataset card](docs/dataset_ca
 
 Development of the model for the dose decision-support tool of propofol.
 
-## How to run the app
-
-To use the app (draft-version) use:
-```{bash}
-uv run python run/app.py    
-```
 
 ---
 
@@ -66,9 +54,9 @@ The PROPOFOL-model repository contains code and documentation to:
 - **For TCI (target-controlled infusion)**:
   - Predict the **optimal target effect-site concentration** (Eleveld model) to induce general anesthesia.
 - **Incorporate clinical endpoints**:
-  - Anesthetic depth target: **BIS < 60**
+  - Anesthetic depth target: **40 < BIS < 60**
   - Hemodynamic safety targets:
-    - **MAP drop < 20% from baseline**, and/or  
+    - **MAP drop < 30% from baseline**, and/or  
     - **Absolute MAP ≥ 65 mmHg**
 
 The final model is intended to be integrated into a clinical decision-support tool used at the bedside.
