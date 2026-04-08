@@ -275,6 +275,6 @@ def run_model(
         empty_fig.update_layout(template="plotly_white")
         return error_text, empty_fig, empty_fig, empty_fig
 
-
-if __name__ == "__main__":
+def main() -> None:
     app.run(debug=False)
+
