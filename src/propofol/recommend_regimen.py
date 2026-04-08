@@ -293,7 +293,7 @@ class PropofolDoseRecommender:
         )
 
         Cp = A1 / self.pk.V1
-        bis = np.vectorize(self.pd.bis)(Ce)
+        bis = self.pd.bis(Ce)
 
         map0 = MAP_model[0]
         if map0 <= 0:
