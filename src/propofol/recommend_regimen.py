@@ -20,6 +20,7 @@ from propofol.config import (
 )
 from propofol.haemo_pd import SuHaemoPD
 from propofol.propofol_pkpd import EleveldPD, EleveldPK
+from propofol.patient import EleveldPatient as Patient
 
 # ============================================================
 # Helpers
@@ -227,15 +228,14 @@ class PropofolDoseRecommender:
 
     def __init__(
         self,
-        patient,
-        baseline_map: float,
+        patient: Patient,
         use_bsv: bool = False,
         mode: str = "auto",
         maintenance_rate_step: float | None = MAINTENANCE_RATE_STEP,
     ) -> None:
         self.patient = patient
         self.weight_kg = float(patient.weight)
-        self.baseline_map = float(baseline_map)
+        self.baseline_map = float(patient.base_map)
         self.use_bsv = use_bsv
         self.mode = mode.lower()
         self.maintenance_rate_step = maintenance_rate_step
@@ -420,43 +420,13 @@ class PropofolDoseRecommender:
         )
 
 
-# ============================================================
-# Reporting in terminal
-# ============================================================
-
-def print_summary(rec: RecommendationResult, baseline_map: float) -> None:
-    """Print a summary of the recommended regimen and its performance."""
-    map_min_allowed = max(MAP_ABS_MIN, MAP_REL_FRAC * baseline_map)
-
-    print("\n================ RECOMMENDED REGIMEN ================\n")
-    print(f"Mode: {rec.mode}")
-    print(f"Induction dose: {rec.bolus_mg:.0f} mg ({rec.bolus_mgkg:.3f} mg/kg)\n")
-
-    print("Minute-wise maintenance schedule (mg/kg/h):")
-    for i, r in enumerate(rec.infusion_rates_mgkgh):
-        txt = "pause" if np.isclose(r, 0.0, atol=1e-8) else f"{r:.2f}"
-        print(f"  minute {i:02d}-{i+1:02d}: {txt}")
-
-    print("\nPerformance:")
-    adequate_idx = np.where(rec.bis <= BIS_HIGH)[0]
-    if len(adequate_idx) > 0:
-        print(f"  time to BIS <= {BIS_HIGH}: {rec.time_min[adequate_idx[0]]:.2f} min")
-    else:
-        print(f"  time to BIS <= {BIS_HIGH}: not reached")
-
-    print(f"  Chosen threshold for MAP: {map_min_allowed:.1f} mmHg")
-    print(f"  Feasible BIS: {rec.feasible_bis}")
-    print(f"  Feasible MAP: {rec.feasible_map}")
-    print(f"  Rate changes: {rec.n_rate_changes} / {rec.max_rate_changes_allowed}")
-    print(f"  Best continuous objective: {rec.objective_value:.2f}")
-
 
 # ============================================================
 # User-facing function
 # ============================================================
 
 def recommend_propofol_regimen(
-    patient,
+    patient: Patient,
     use_bsv: bool = False,
     mode: str = "auto",
     maintenance_rate_step: float | None = MAINTENANCE_RATE_STEP,
@@ -480,7 +450,6 @@ def recommend_propofol_regimen(
     """
     recommender = PropofolDoseRecommender(
         patient=patient,
-        baseline_map=patient.base_map,
         use_bsv=use_bsv,
         mode=mode,
         maintenance_rate_step=maintenance_rate_step,
