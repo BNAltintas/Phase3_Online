@@ -19,8 +19,8 @@ from propofol.config import (
     TIME,
 )
 from propofol.haemo_pd import SuHaemoPD
-from propofol.propofol_pkpd import EleveldPD, EleveldPK
 from propofol.patient import EleveldPatient as Patient
+from propofol.propofol_pkpd import EleveldPD, EleveldPK
 
 # ============================================================
 # Helpers
