@@ -25,6 +25,9 @@ dependencies =[
   "scipy~=1.15",
 ]
 
+[project.scripts]
+propofol-dashboard = "propofol.app:main"
+
 [dependency-groups]
 dev = [
     "ipykernel>=6.29.2",
