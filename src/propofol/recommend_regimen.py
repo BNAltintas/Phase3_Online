@@ -1,0 +1,457 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Sequence
+
+import numpy as np
+from scipy.optimize import differential_evolution
+
+from propofol.config import (
+    BIS_HIGH,
+    BIS_LOW,
+    BIS_TARGET,
+    BOLUS_MGKG_BOUNDS,
+    INFUSION_MGKGH_BOUNDS,
+    MAINTENANCE_RATE_STEP,
+    MAP_ABS_MIN,
+    MAP_REL_FRAC,
+    N_INTERVALS,
+    TIME,
+)
+from propofol.haemo_pd import SuHaemoPD
+from propofol.patient import EleveldPatient as Patient
+from propofol.propofol_pkpd import EleveldPD, EleveldPK
+
+# ============================================================
+# Helpers
+# ============================================================
+
+def round_to_5mg(x_mg: float) -> float:
+    """Round bolus to nearest 5 mg."""
+    return float(5.0 * np.round(x_mg / 5.0))
+
+
+def round_rate_vector(rates: Sequence[float], step: float | None) -> np.ndarray:
+    """Round a vector of maintenance rates to the nearest step."""
+    rates = np.asarray(rates, dtype=float)
+    if step is None:
+        return rates.copy()
+    if step <= 0:
+        raise ValueError("step must be positive when provided")
+    return step * np.round(rates / step)
+
+
+def mode_to_max_changes(mode: str) -> int:
+    """Convert mode string to maximum number of allowed rate changes."""
+    mode = mode.lower()
+    if mode == "lazy":
+        return 1
+    if mode == "auto":
+        return 3
+    if mode == "accurate":
+        return 14
+    raise ValueError("mode must be one of: 'lazy', 'auto', 'accurate'")
+
+
+def count_rate_changes(rates: Sequence[float], tol: float = 1e-8) -> int:
+    """Count the number of rate changes in a sequence of rates."""
+    rates = np.asarray(rates, dtype=float)
+    return int(np.sum(np.abs(np.diff(rates)) > tol))
+
+
+def build_segment_lengths(weights: Sequence[float], n_minutes: int) -> np.ndarray:
+    """
+    Convert positive segment weights to integer segment lengths summing exactly to n_minutes.
+
+    Every segment gets at least 1 minute.
+    """
+    weights = np.asarray(weights, dtype=float)
+    if weights.ndim != 1:
+        raise ValueError("weights must be a 1D array")
+    if len(weights) == 0:
+        raise ValueError("weights must not be empty")
+
+    weights = np.clip(weights, 1e-6, None)
+    frac = weights / np.sum(weights)
+
+    n_segments = len(weights)
+    base_lengths = np.ones(n_segments, dtype=int)
+    remaining = n_minutes - n_segments
+
+    if remaining < 0:
+        raise ValueError("Too many segments for available minutes.")
+
+    target_extra = frac * remaining
+    extra_floor = np.floor(target_extra).astype(int)
+    lengths = base_lengths + extra_floor
+
+    leftover = remaining - np.sum(extra_floor)
+    if leftover > 0:
+        order = np.argsort(-(target_extra - extra_floor))
+        lengths[order[:leftover]] += 1
+
+    if np.sum(lengths) != n_minutes:
+        raise RuntimeError("Internal error: segment lengths do not sum to n_minutes.")
+
+    return lengths
+
+
+def decode_segment_schedule(
+    x_schedule: Sequence[float],
+    mode: str,
+    n_minutes: int = N_INTERVALS,
+    rate_step: float | None = MAINTENANCE_RATE_STEP,
+    apply_rounding: bool = False,
+) -> np.ndarray:
+    """
+    Convert optimizer parameters into a minute-wise maintenance schedule.
+
+    The schedule is represented as a fixed number of contiguous segments.
+    For a mode allowing K rate changes, the schedule has K + 1 segments.
+
+    x_schedule is split into:
+        [rate_1, ..., rate_S, weight_1, ..., weight_S]
+    where S = max_changes + 1.
+
+    Parameters
+    ----------
+    apply_rounding : bool
+        If True, round segment rates to the requested clinical step.
+        If False, keep them continuous for optimization.
+    """
+    mode = mode.lower()
+    max_changes = mode_to_max_changes(mode)
+    n_segments = max_changes + 1
+
+    x_schedule = np.asarray(x_schedule, dtype=float)
+    if len(x_schedule) != 2 * n_segments:
+        raise ValueError(
+            f"Expected {2 * n_segments} schedule variables for mode '{mode}', got {len(x_schedule)}"
+        )
+
+    raw_rates = x_schedule[:n_segments]
+    raw_weights = x_schedule[n_segments:]
+
+    segment_rates = (
+        round_rate_vector(raw_rates, step=rate_step)
+        if apply_rounding
+        else np.asarray(raw_rates, dtype=float).copy()
+    )
+
+    lengths = build_segment_lengths(raw_weights, n_minutes=n_minutes)
+    minute_rates = np.repeat(segment_rates, lengths)
+
+    if len(minute_rates) != n_minutes:
+        raise RuntimeError("Internal error: decoded schedule length mismatch.")
+
+    return minute_rates.astype(float)
+
+
+# ============================================================
+# Dosing object for SuHaemoPD.solve_ode()
+# ============================================================
+
+class PiecewisePropofolDosing:
+    """
+    Supplies propofol input rate dotA0(t) in mg/min.
+
+    - Bolus over first second
+    - Maintenance begins after first second
+    - Maintenance rate is piecewise constant over each minute
+    """
+
+    def __init__(
+        self,
+        bolus_mg: float,
+        infusion_rates_mgkgh: Sequence[float],
+        weight_kg: float,
+    ) -> None:
+        self.bolus_mg = float(bolus_mg)
+        self.infusion_rates_mgkgh = np.asarray(infusion_rates_mgkgh, dtype=float)
+        self.weight_kg = float(weight_kg)
+
+        self.tcrit = sorted(
+            set([0.0, 1.0 / 60.0] + [float(i) for i in range(1, len(self.infusion_rates_mgkgh)
+                                                             + 1)])
+        )
+
+    def dotA0(self, t: float) -> float:
+        """Return propofol input rate in mg/min at time t (in minutes)."""
+        if 0.0 <= t < (1.0 / 60.0):
+            return self.bolus_mg / (1.0 / 60.0)
+
+        idx = int(np.floor(t))
+        idx = max(0, min(idx, len(self.infusion_rates_mgkgh) - 1))
+        return self.infusion_rates_mgkgh[idx] * self.weight_kg / 60.0
+
+
+# ============================================================
+# Result container
+# ============================================================
+
+@dataclass
+class RecommendationResult:
+    """Container for recommended regimen and associated simulation results."""
+    bolus_mg: float
+    bolus_mgkg: float
+    infusion_rates_mgkgh: np.ndarray
+    mode: str
+
+    time_min: np.ndarray
+    cp: np.ndarray
+    ce: np.ndarray
+    bis: np.ndarray
+    map_mmhg: np.ndarray
+
+    objective_value: float
+    feasible_bis: bool
+    feasible_map: bool
+    n_rate_changes: int
+    max_rate_changes_allowed: int
+
+
+# ============================================================
+# Core recommender
+# ============================================================
+
+class PropofolDoseRecommender:
+    """
+    Recommends a propofol regimen by optimizing over bolus dose and piecewise
+    maintenance infusion rates with a hard limit on the number of rate changes.
+
+    Workflow
+    --------
+    1. Optimize in continuous space.
+    2. Round once at the end.
+    3. Simulate the rounded regimen once.
+    """
+
+    def __init__(
+        self,
+        patient: Patient,
+        use_bsv: bool = False,
+        mode: str = "auto",
+        maintenance_rate_step: float | None = MAINTENANCE_RATE_STEP,
+    ) -> None:
+        self.patient = patient
+        self.weight_kg = float(patient.weight)
+        self.baseline_map = float(patient.base_map)
+        self.use_bsv = use_bsv
+        self.mode = mode.lower()
+        self.maintenance_rate_step = maintenance_rate_step
+        self.max_changes = mode_to_max_changes(self.mode)
+
+        self.pk = EleveldPK(patient=patient, use_bsv=use_bsv)
+        self.pd = EleveldPD(patient=patient, use_bsv=use_bsv)
+
+        self.haemo = SuHaemoPD(
+            patient=patient,
+            pk_propofol=self.pk,
+            pd_propofol=self.pd,
+        )
+
+    def simulate(
+        self,
+        bolus_mgkg: float,
+        schedule_params: Sequence[float],
+        apply_rounding: bool = False,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, np.ndarray]:
+        """
+        Simulate regimen defined by:
+          - bolus (mg/kg)
+          - schedule_params decoded into a strict-change-limited schedule
+
+        Parameters
+        ----------
+        apply_rounding : bool
+            If False:
+                use continuous bolus and continuous maintenance rates.
+            If True:
+                round bolus to nearest 5 mg and maintenance rates to the configured step.
+        """
+        bolus_mg_raw = float(bolus_mgkg) * self.weight_kg
+        bolus_mg_used = round_to_5mg(bolus_mg_raw) if apply_rounding else bolus_mg_raw
+
+        minute_rates_used = decode_segment_schedule(
+            schedule_params,
+            mode=self.mode,
+            n_minutes=N_INTERVALS,
+            rate_step=self.maintenance_rate_step,
+            apply_rounding=apply_rounding,
+        )
+
+        dosing = PiecewisePropofolDosing(
+            bolus_mg=bolus_mg_used,
+            infusion_rates_mgkgh=minute_rates_used,
+            weight_kg=self.weight_kg,
+        )
+
+        A1, A2, A3, Ce, sv, hr, MAP_model, tde = self.haemo.solve_ode(
+            t=TIME,
+            y0=None,
+            dosing=dosing,
+        )
+
+        Cp = A1 / self.pk.V1
+        bis = self.pd.bis(Ce)
+
+        map0 = MAP_model[0]
+        if map0 <= 0:
+            raise ValueError("Initial haemodynamic MAP model output is non-positive.")
+        map_mmhg = self.baseline_map * (MAP_model / map0)
+
+        return TIME, Cp, Ce, bis, map_mmhg, bolus_mg_used, minute_rates_used
+
+    def objective(self, x: np.ndarray) -> float:
+        """Objective function for continuous optimization."""
+        bolus_mgkg = float(x[0])
+        schedule_params = np.asarray(x[1:], dtype=float)
+
+        t, cp, ce, bis, map_mmhg, bolus_mg, minute_rates_used = self.simulate(
+            bolus_mgkg=bolus_mgkg,
+            schedule_params=schedule_params,
+            apply_rounding=False,
+        )
+
+        # BIS penalty
+        bis_under = np.clip(BIS_LOW - bis, 0.0, None)
+        bis_over = np.clip(bis - BIS_HIGH, 0.0, None)
+        bis_target_dev = np.abs(bis - BIS_TARGET)
+
+        bis_penalty = (
+            1800.0 * np.sum(bis_over ** 2)
+            + 700.0 * np.sum(bis_under ** 2)
+            + 2.5 * np.sum(bis_target_dev ** 2)
+        )
+
+        # Time to adequate BIS penalty
+        adequate_idx = np.where(bis <= BIS_HIGH)[0]
+        if len(adequate_idx) == 0:
+            time_to_adequate_penalty = 25000.0
+        else:
+            time_to_adequate_penalty = 80.0 * t[adequate_idx[0]]
+
+        # MAP penalty
+        map_min_allowed = max(MAP_ABS_MIN, MAP_REL_FRAC * self.baseline_map)
+
+        map_violation = np.clip(map_min_allowed - map_mmhg, 0.0, None)
+        map_penalty = 140.0 * np.sum(map_violation ** 2)
+
+        severe_hypo = np.clip(55.0 - map_mmhg, 0.0, None)
+        map_penalty += 600.0 * np.sum(severe_hypo ** 2)
+
+        # Regularization
+        smoothness_penalty = 10.0 * np.sum(np.diff(minute_rates_used) ** 2)
+        rate_l1_penalty = 1.5 * np.sum(minute_rates_used)
+
+        total_maint_mg = np.sum(minute_rates_used * self.weight_kg / 60.0)
+        total_dose_penalty = 0.15 * (bolus_mg + total_maint_mg)
+
+        return float(
+            bis_penalty
+            + time_to_adequate_penalty
+            + map_penalty
+            + smoothness_penalty
+            + rate_l1_penalty
+            + total_dose_penalty
+        )
+
+    def optimize(self) -> RecommendationResult:
+        """
+        Optimize the regimen continuously, then round once and simulate once.
+        """
+        n_segments = self.max_changes + 1
+
+        bounds = [BOLUS_MGKG_BOUNDS]
+        bounds += [INFUSION_MGKGH_BOUNDS] * n_segments
+        bounds += [(0.1, 10.0)] * n_segments
+
+        result = differential_evolution(
+            self.objective,
+            bounds=bounds,
+            strategy="best1bin",
+            maxiter=20,
+            popsize=6,
+            tol=0.08,
+            polish=False,
+            init="sobol",
+            updating="immediate",
+            workers=1,
+            seed=42,
+        )
+
+        bolus_mgkg_opt = float(result.x[0])
+        schedule_params_opt = np.asarray(result.x[1:], dtype=float)
+
+        t, cp, ce, bis, map_mmhg, bolus_mg, minute_rates_used = self.simulate(
+            bolus_mgkg=bolus_mgkg_opt,
+            schedule_params=schedule_params_opt,
+            apply_rounding=True,
+        )
+
+        map_min_allowed = max(MAP_ABS_MIN, MAP_REL_FRAC * self.baseline_map)
+
+        feasible_bis = bool(np.all((bis >= BIS_LOW) & (bis <= BIS_HIGH)))
+        feasible_map = bool(np.all(map_mmhg >= map_min_allowed))
+
+        bolus_mgkg_effective = bolus_mg / self.weight_kg
+        n_changes = count_rate_changes(minute_rates_used)
+
+        if n_changes > self.max_changes:
+            raise RuntimeError(
+                f"Internal error: produced {n_changes} changes, exceeds allowed {self.max_changes}."
+            )
+
+        return RecommendationResult(
+            bolus_mg=bolus_mg,
+            bolus_mgkg=bolus_mgkg_effective,
+            infusion_rates_mgkgh=minute_rates_used,
+            mode=self.mode,
+            time_min=t,
+            cp=cp,
+            ce=ce,
+            bis=bis,
+            map_mmhg=map_mmhg,
+            objective_value=float(result.fun),
+            feasible_bis=feasible_bis,
+            feasible_map=feasible_map,
+            n_rate_changes=n_changes,
+            max_rate_changes_allowed=self.max_changes,
+        )
+
+
+
+# ============================================================
+# User-facing function
+# ============================================================
+
+def recommend_propofol_regimen(
+    patient: Patient,
+    use_bsv: bool = False,
+    mode: str = "auto",
+    maintenance_rate_step: float | None = MAINTENANCE_RATE_STEP,
+) -> RecommendationResult:
+    """
+    Parameters
+    ----------
+    patient :
+        Patient object compatible with EleveldPK / EleveldPD / SuHaemoPD.
+    use_bsv : bool
+        Whether to sample between-subject variability.
+    mode : str
+        "lazy", "auto", or "accurate".
+    maintenance_rate_step : float | None
+        Optional maintenance rate rounding step, e.g. 0.5 or 1.0 mg/kg/h.
+        Use None to keep the final rates continuous.
+
+    Returns
+    -------
+    RecommendationResult
+    """
+    recommender = PropofolDoseRecommender(
+        patient=patient,
+        use_bsv=use_bsv,
+        mode=mode,
+        maintenance_rate_step=maintenance_rate_step,
+    )
+    return recommender.optimize()

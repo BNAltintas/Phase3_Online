@@ -399,23 +399,20 @@ class EleveldPD():
             theta = self.Theta8
         return theta * (self.patient.weight / 70)**-0.25 * np.exp(self.eta2)
 
-    def gamma(self, x: float) -> float:
+    def gamma(self, x: float | np.ndarray) -> np.ndarray:
         """Return Hill coefficient as a function of effect-site concentration.
 
         Parameters
         ----------
-        x : float
+        x : float | np.ndarray
             Effect-site concentration.
 
         Returns
         -------
-        float
+        np.ndarray[float]
             Concentration-dependent Hill coefficient.
         """
-        if x <= self.Ce50:
-            return self.Theta4
-        elif x > self.Ce50:
-            return self.Theta9
+        return np.where(x <= self.Ce50, self.Theta4, self.Theta9)
 
     def bis(self, x: float) -> float:
         """Compute BIS prediction from effect-site concentration.
