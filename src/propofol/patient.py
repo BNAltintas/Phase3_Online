@@ -4,6 +4,54 @@
 class EleveldPatient:
     """Patient class corresponding to the Eleveld patient in the Eleveld PK/PD model."""
 
+    @staticmethod
+    def _derive_base_pp(base_pp, base_sap, base_dap):
+        """Derive baseline pulse pressure from direct input or SAP/DAP."""
+        if base_pp is not None:
+            return base_pp
+
+        if base_sap is not None and base_dap is not None:
+            if base_sap <= 0 or base_dap <= 0 or base_sap <= base_dap:
+                raise ValueError(
+                    "Invalid baseline pressures: expected base_sap > base_dap and both > 0."
+                )
+            return base_sap - base_dap
+
+        return None
+
+    @staticmethod
+    def _derive_base_map(base_map, base_sap, base_dap):
+        """Derive baseline MAP from direct input or SAP/DAP."""
+        if base_map is not None:
+            return base_map
+
+        if base_sap is not None and base_dap is not None:
+            return (base_sap + 2.0 * base_dap) / 3.0
+
+        return None
+
+    @staticmethod
+    def _derive_base_sv(base_sv, base_pp):
+        """Derive baseline stroke volume from direct input or pulse pressure."""
+        if base_sv is not None:
+            return base_sv
+
+        if base_pp is not None:
+            return base_pp * 1.5
+
+        return None
+
+    @staticmethod
+    def _derive_base_tpr(base_tpr, base_map, base_hr, base_sv):
+        """Derive baseline TPR from direct input or MAP, HR, and SV."""
+        if base_tpr is not None:
+            return base_tpr
+
+        if all(x is not None for x in [base_map, base_hr, base_sv]):
+            return base_map / (base_sv * base_hr)
+
+        return None
+
     def __init__(
         self,
         age: float,
@@ -92,41 +140,11 @@ class EleveldPatient:
         self.base_dap = base_dap
         self.base_hr = base_hr
 
-        # Derive PP and MAP from SAP/DAP if available
-        if base_pp is not None:
-            self.base_pp = base_pp  # Use directly supplied base_pp
-        elif base_pp is None and base_sap is not None and base_dap is not None:
-            if base_sap <= 0 or base_dap <= 0 or base_sap <= base_dap:
-                raise ValueError(
-                    "Invalid baseline pressures: expected base_sap > base_dap and both > 0."
-                )
-            self.base_pp = base_sap - base_dap
-        else:
-            self.base_pp = None
-
-        if base_map is not None:
-            self.base_map = base_map  # Use directly supplied base_map
-        elif base_map is None and base_sap is not None and base_dap is not None:
-            self.base_map = (base_sap + 2.0 * base_dap) / 3.0
-        else:
-            self.base_map = None
-
-        # Derived baseline stroke volume
-        if base_sv is not None:
-            self.base_sv = base_sv  # Use directly supplied base_sv
-        elif base_sv is None and self.base_pp is not None:
-            self.base_sv = self.base_pp * 1.5
-        else:
-            self.base_sv = None
-
-        # Derived baseline TPR
-        if base_tpr is not None:
-            self.base_tpr = base_tpr  # Use directly supplied base_tpr
-        elif base_tpr is None and all(x is not None for x in 
-                                           [self.base_map, self.base_hr, self.base_sv]):
-            self.base_tpr = self.base_map / (self.base_sv * self.base_hr)
-        else:
-            self.base_tpr = None
+        # Derive baseline haemodynamic quantities.
+        self.base_pp = self._derive_base_pp(base_pp, base_sap, base_dap)
+        self.base_map = self._derive_base_map(base_map, base_sap, base_dap)
+        self.base_sv = self._derive_base_sv(base_sv, self.base_pp)
+        self.base_tpr = self._derive_base_tpr(base_tpr, self.base_map, self.base_hr, self.base_sv)
 
     def __f_al_sallami(self, age, weight, bmi):
         """Fat free mass in kg from Al-Sallami.
