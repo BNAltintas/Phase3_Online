@@ -3,12 +3,11 @@ from functools import lru_cache
 
 import numpy as np
 
-from propofol.haemo_pd_Su2023 import SuHaemoPD
+from propofol.haemo_pd_su2023 import SuHaemoPD
 from propofol.patient import EleveldPatient as Patient
-from propofol.propofol_pkpd import EleveldPK as PropofolPK
 from propofol.propofol_pkpd import EleveldPD as PropofolPD
+from propofol.propofol_pkpd import EleveldPK as PropofolPK
 from propofol.remifentanil_pkpd import EleveldPK as RemifentanilPK
-
 
 # ============================================================
 # Settings
