@@ -1,7 +1,8 @@
 import logging
-from typing import Any, Optional
+from typing import Any, Callable, Optional, Sequence
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy import integrate
 
 from propofol.patient import EleveldPatient
@@ -10,46 +11,14 @@ from propofol.protocols import Patient
 logger = logging.getLogger(__name__)
 
 
-class SuHaemoPD2023:
+class SuHaemoPD():
     """Su haemodynamic interaction PD model for propofol + remifentanil.
     Source: DOI: 10.1016/j.bja.2023.04.043 
 
-    Based on the NONMEM model structure.
-
     Notes
     -----
-    State vector
-    ------------
-    X = (
-        A1, A2, A3,           # propofol PK compartment amounts
-        A4, A5, A6,           # remifentanil PK compartment amounts
-        sv_ast, hr_ast, tpr,  # haemodynamic turnover states
-        anx_sv, anx_hr        # transient anxiety states
-    )
-
-    Derived variables
-    -----------------
-    Cp_prop = A1 / V1_prop
-    Cp_remi = A4 / V1_remi
-
-    DSV = sv_ast + anx_sv
-    DHR = hr_ast + anx_hr
-
-    SV  = DSV * (1 - HR_SV * log(DHR / Abase_HR))
-    HR  = DHR
-    MAP = SV * HR * TPR
-
-    Random effects
-    --------------
-    ETA1 : base_SV
-    ETA2 : base_TPR
-    ETA3 : base_HR
-    ETA4 : C50_TPR_PROP
-    ETA5 : EMAX_TPR_REMI
-    ETA6 : SL_HR_REMI
-    ETA7 : SL_SV_REMI
+    - Based on the NONMEM model structure.
     """
-
     def __init__(
         self,
         patient: Patient,
@@ -58,6 +27,21 @@ class SuHaemoPD2023:
         pk_remifentanil: Optional[Any] = None,
         use_bsv: bool = False,
     ):
+        """Initialize the haemodynamic interaction PD model.
+
+        Parameters
+        ----------
+        patient : Patient
+            Patient descriptor used for covariates and baseline values.
+        pk_propofol : Any, optional
+            Propofol PK model instance providing compartment and rate parameters.
+        pd_propofol : Any, optional
+            Propofol PD model instance providing effect-site parameters.
+        pk_remifentanil : Any, optional
+            Remifentanil PK model instance providing compartment and rate parameters.
+        use_bsv : bool, optional
+            Flag indicating whether to use between-subject variability (default: False).
+        """
         self.patient = patient
         self.patient_ref = EleveldPatient(
             age=35,
@@ -75,16 +59,14 @@ class SuHaemoPD2023:
         self._set_params()
 
     def _set_params(self):
-        # ------------------------
-        # Fixed-effect THETAs
-        # ------------------------
+        # Parameters (from NONMEM file)
         self.Theta1 = 0.072     # kout
         self.Theta2 = 82.2      # base_SV
         self.Theta3 = 56.1      # base_HR
         self.Theta4 = 0.0163    # base_TPR
         self.Theta5 = 0.067     # k (anxiety decay)
-        self.Theta6 = 0.121     # ANXHR
-        self.Theta7 = 0.0899    # ANXSV
+        self.Theta6 = 0.121     # ltde_hr
+        self.Theta7 = 0.0899    # ltde_sv
         self.Theta8 = 0.44      # C50_SV_PROP
         self.Theta9 = 3.21      # C50_TPR_PROP
         self.Theta10 = -0.154   # EMAX_SV_PROP
@@ -149,49 +131,38 @@ class SuHaemoPD2023:
         self._update_pd()
 
     def _update_pd(self):
+        """Update PD parameters and derived values based on current etas and patient covariates."""
         # ------------------------
         # Baseline haemodynamics
         # ------------------------
         # baseline SV
-        if getattr(self.patient, "base_sv", None) is not None:
-            self.base_sv = float(self.patient.base_sv)
-        elif getattr(self.patient, "base_pp", None) is not None:
-            self.base_sv = 1.5 * float(self.patient.base_pp)
+        if self.patient.base_sv is not None:
+            self.base_sv = self.patient.base_sv * np.exp(self.eta1)
         else:
             self.base_sv = self.Theta2 * np.exp(self.eta1)
 
-         # baseline HR
-        if getattr(self.patient, "base_hr", None) is not None:
-            self.base_hr = float(self.patient.base_hr)
+        # baseline HR
+        if self.patient.base_hr is not None:
+            self.base_hr = self.patient.base_hr * np.exp(self.eta3)
         else:
             self.base_hr = self.Theta3 * np.exp(self.eta3)
-
-        # ------------------------
-        # Anxiety / feedback effects
-        # ------------------------
-        self.k = self.Theta5
-        self.ANXHR = self.Theta6
-        self.ANXSV = self.Theta7
-        self.FB = self.Theta18
-        self.HR_SV = self.Theta19
-
-        self.Abase_HR = self.base_hr * (1.0 + self.ANXHR)
-        self.Abase_SV = self.base_sv * (1.0 + self.ANXSV)
-
-        # baseline TPR / MAP
-        if getattr(self.patient, "base_tpr", None) is not None:
-            self.base_tpr = float(self.patient.base_tpr)
-            self.base_MAP = self.Abase_SV * self.Abase_HR * self.base_tpr
-        elif getattr(self.patient, "base_map", None) is not None:
-            self.base_MAP = float(self.patient.base_map)
-            self.base_tpr = self.base_MAP / (self.Abase_SV * self.Abase_HR)
+        
+        # baseline TPR
+        if self.patient.base_tpr is not None:
+            self.base_tpr = self.patient.base_tpr * np.exp(self.eta2)
         else:
             self.base_tpr = self.Theta4 * np.exp(self.eta2)
-            self.base_MAP = self.Abase_SV * self.Abase_HR * self.base_tpr
-
+        
         self.kin_sv = self.Theta1 * self.base_sv
         self.kin_hr = self.Theta1 * self.base_hr
         self.kin_tpr = self.Theta1 * self.base_tpr
+
+        # ------------------------
+        # Anxiety effects
+        # ------------------------
+        self.k = self.Theta5
+        self.ltde_hr = self.Theta6
+        self.ltde_sv = self.Theta7
 
         # ------------------------
         # Propofol effects
@@ -212,6 +183,12 @@ class SuHaemoPD2023:
         self.GAMR = self.Theta17
 
         # ------------------------
+        # Feedback effects
+        # ------------------------
+        self.FB = self.Theta18
+        self.HR_SV = self.Theta19
+
+        # ------------------------
         # Interaction effects
         # ------------------------
         self.INT_HR = self.Theta21
@@ -219,76 +196,118 @@ class SuHaemoPD2023:
         self.INT_TPR = self.Theta23
         self.INT_SV_PROP = self.Theta24
 
-    def sv(self, dsv, dhr):
-        ratio = np.asarray(dhr, dtype=float) / self.Abase_HR
-        return np.asarray(dsv, dtype=float) * (1.0 - self.HR_SV * np.log(ratio))
+    def sv(self, sv_ast: float, hr_ast: float, tde_sv: float, tde_hr: float) -> float:
+        """Calculate stroke volume (SV) based on the model's feedback mechanism."""
+        dsv = sv_ast + tde_sv
+        dhr = hr_ast + tde_hr
+        return dsv * (1.0 - self.HR_SV * np.log(dhr / self.base_hr))
 
-    def RMAP(self, dsv, dhr, tpr):
-        numerator = self.sv(dsv, dhr) * np.asarray(dhr, dtype=float) * np.asarray(tpr, dtype=float)
-        return numerator / self.base_MAP
+    def RMAP(self, sv_ast: float, hr_ast: float, tde_sv: float, tde_hr: float, tpr: float) -> float:
+        """Calculate the relative change of MAP to baseline MAP (RMAP) based on the model's feedback 
+        mechanism."""
+        dhr = hr_ast + tde_hr
+        amap = self.sv(sv_ast, hr_ast, tde_sv, tde_hr) * dhr * tpr
+        base_map = self.base_sv * self.base_hr * self.base_tpr
+        return amap / base_map
 
     def _f_sigmoid(self, x, y, a):
-        x = np.maximum(np.asarray(x, dtype=float), 0.0)
+        """Generalized sigmoid function for drug effects."""
         return np.float_power(x, a) / (np.float_power(y, a) + np.float_power(x, a))
 
-    # ------------------------
-    # Drug effect functions
-    # ------------------------
     def eff_sv_prop(self, cp_prop):
-        cp_prop = max(float(cp_prop), 0.0)
-        result = self.EMAX_SV_PROP * cp_prop / (cp_prop + self.C50_SV_PROP) if cp_prop > 0 else 0.0
+        """Compute effect of propofol on stroke volume (SV)."""
+        result = self.EMAX_SV_PROP * cp_prop / (cp_prop + self.C50_SV_PROP)
         return max(result, -0.999)
 
     def eff_tpr_prop(self, cp_prop, cp_remi):
-        cp_prop = max(float(cp_prop), 0.0)
-        cp_remi = max(float(cp_remi), 0.0)
-
-        result = (self.EMAX_TPR_PROP + self.INT_TPR * cp_remi / (self.C50_TPR_REMI + cp_remi)) * self._f_sigmoid(cp_prop, self.C50_TPR_PROP, self.GAMP) if cp_prop > 0 else 0.0
+        """Compute effect of propofol on total peripheral resistance (TPR)
+        including interaction with remifentanil."""
+        tpr_int = (self.EMAX_TPR_PROP + (self.INT_TPR * cp_remi) / (self.C50_TPR_REMI + cp_remi))
+        sigmoid = self._f_sigmoid(cp_prop, self.C50_TPR_PROP, self.GAMP)
+        result = tpr_int * sigmoid
         return max(float(result), -0.999)
 
     def eff_tpr_remi(self, cp_remi):
-        cp_remi = max(float(cp_remi), 0.0)
-        result = (
-            self.EMAX_TPR_REMI * self._f_sigmoid(cp_remi, self.C50_TPR_REMI, self.GAMR)
-            if cp_remi > 0 else 0.0
-        )
+        """Compute effect of remifentanil on total peripheral resistance (TPR)."""
+        result = self.EMAX_TPR_REMI * self._f_sigmoid(cp_remi, self.C50_TPR_REMI, self.GAMR)
         return min(float(result), 0.999)
 
     def eff_hr_remi(self, cp_prop, cp_remi):
-        cp_prop = max(float(cp_prop), 0.0)
-        cp_remi = max(float(cp_remi), 0.0)
-        result = (
-            self.SL_HR_REMI + self.INT_HR * cp_prop / (self.C50_INT_HR + cp_prop)
-        ) * cp_remi if cp_remi > 0 else 0.0
+        """Compute effect of remifentanil on heart rate (HR) including interaction with propofol."""
+        result = (self.SL_HR_REMI + (self.INT_HR * cp_prop) / (self.C50_INT_HR + cp_prop)) * cp_remi
         return min(float(result), 0.999)
 
     def eff_sv_remi(self, cp_prop, cp_remi):
-        cp_prop = max(float(cp_prop), 0.0)
-        cp_remi = max(float(cp_remi), 0.0)
-        result = (
-            self.SL_SV_REMI + self.INT_SV_PROP * cp_prop / (self.C50_SV_PROP + cp_prop)
-        ) * cp_remi if cp_remi > 0 else 0.0
+        """Compute effect of remifentanil on stroke volume (SV),
+        including interaction with propofol."""
+        result = (self.SL_SV_REMI + (self.INT_SV_PROP * cp_prop) / (self.C50_SV_PROP + cp_prop)
+                  ) * cp_remi
         return min(float(result), 0.999)
 
     def derivative(
         self,
-        X,
-        t,
-        V1_prop, k10_prop, k12_prop, k13_prop, k21_prop, k31_prop, dotA0_prop,
-        V1_remi, k10_remi, k12_remi, k13_remi, k21_remi, k31_remi, dotA0_remi,
-    ):
+        X: Sequence[float],
+        t: float,
+        V1_prop: float, k10_prop: float, k12_prop: float, k13_prop: float,
+        k21_prop: float, k31_prop: float, ke0_prop: float, dotA0_prop: Callable[[float], float],
+        k10_remi: float, k12_remi: float, k13_remi: float,
+        k21_remi: float, k31_remi: float, dotA0_remi: Callable[[float], float],
+    )-> NDArray[np.float64]:
+        """Derivatives for coupled propofol/ remifentanil PK and haemodynamic PD states for use 
+        in ode solver.
+        
+        Parameters
+        ----------
+        X : Sequence[float]
+            State vector ``[A1, A2, A3, A4, A5, A6, sv_ast, hr_ast, tpr, tde_sv, tde_hr]``
+        t : float
+            Time point in minutes.
+        V1_prop : float
+            Volume of central compartment for propofol.
+        k10_prop : float
+            Elimination rate constant for propofol from central compartment.
+        k12_prop : float
+            Distribution rate from central to peripheral compartment 2 for propofol.
+        k13_prop : float
+            Distribution rate from central to peripheral compartment 3 for propofol.
+        k21_prop : float
+            Redistribution rate from compartment 2 to central for propofol.
+        k31_prop : float
+            Redistribution rate from compartment 3 to central for propofol.
+        ke0_prop : float
+            Effect-site transfer rate constant for propofol.
+        dotA0_prop : Callable[[float], float]
+            External input function returning infusion/bolus rate at time ``t`` for propofol.
+        k10_remi : float
+            Elimination rate constant for remifentanil from central compartment.
+        k12_remi : float
+            Distribution rate from central to peripheral compartment 2 for remifentanil.
+        k13_remi : float
+            Distribution rate from central to peripheral compartment 3 for remifentanil.
+        k21_remi : float
+            Redistribution rate from compartment 2 to central for remifentanil.
+        k31_remi : float
+            Redistribution rate from compartment 3 to central for remifentanil.
+        dotA0_remi : Callable[[float], float]
+            External input function returning infusion/bolus rate at time ``t`` for remifentanil.
+
+        Returns
+        -------
+        numpy.ndarray
+            Derivatives of all state variables in the same order as ``X``.
+        """
         (
-            A1, A2, A3,
-            A4, A5, A6,
-            sv_ast, hr_ast, tpr,
-            anx_sv, anx_hr,
+            A1, A2, A3, Ce_prop, # propofol PKPD states
+            A4, A5, A6, # remifentanil PK states
+            sv_ast, hr_ast, tpr, # haemodynamic states
+            tde_sv, tde_hr, # time-dependent deviation states
         ) = X
 
         # ------------------------
         # PK
         # ------------------------
-        cp_prop = A1 / V1_prop
-        cp_remi = A4 / V1_remi
+        cp_prop = A1 / self.pk_propofol.V1
+        cp_remi = A4 / self.pk_remifentanil.V1
 
         dotA1 = (
             - (k10_prop + k12_prop + k13_prop) * A1
@@ -298,6 +317,7 @@ class SuHaemoPD2023:
         )
         dotA2 = k12_prop * A1 - k21_prop * A2
         dotA3 = k13_prop * A1 - k31_prop * A3
+        dotCe_prop = ke0_prop * (A1 / V1_prop - Ce_prop)
 
         dotA4 = (
             - (k10_remi + k12_remi + k13_remi) * A4
@@ -309,21 +329,16 @@ class SuHaemoPD2023:
         dotA6 = k13_remi * A4 - k31_remi * A6
 
         # ------------------------
+        # Guard HR and SV from going into extreme values
+        # ------------------------
+        hr_ast = max(hr_ast, 1)
+        sv_ast = max(sv_ast, 1)
+
+        # ------------------------
         # Derived haemodynamics
         # ------------------------
 
-        dsv = sv_ast + anx_sv
-        dhr = hr_ast + anx_hr
-        rmap = self.RMAP(dsv, dhr, tpr)
-
-        # ------------------------
-        # Drug effects
-        # ------------------------
-        sv_prop = self.eff_sv_prop(cp_prop)
-        tpr_prop = self.eff_tpr_prop(cp_prop, cp_remi)
-        tpr_remi = self.eff_tpr_remi(cp_remi)
-        hr_remi = self.eff_hr_remi(cp_prop, cp_remi)
-        sv_remi = self.eff_sv_remi(cp_prop, cp_remi)
+        rmap = self.RMAP(sv_ast, hr_ast, tde_sv, tde_hr, tpr)
 
         # ------------------------
         # Haemodynamic ODEs
@@ -331,91 +346,126 @@ class SuHaemoPD2023:
         dot_sv_ast = (
             self.kin_sv
             * np.float_power(rmap, -self.FB)
-            * (1.0 + sv_prop)
-            - sv_ast * self.Theta1 * (1.0 - sv_remi)
+            * (1.0 + self.eff_sv_prop(cp_prop))
+            - sv_ast * self.Theta1 * (1.0 - self.eff_sv_remi(cp_prop, cp_remi))
         )
 
         dot_hr_ast = (
             self.kin_hr
             * np.float_power(rmap, -self.FB)
-            - hr_ast * self.Theta1 * (1.0 - hr_remi)
+            - hr_ast * self.Theta1 * (1.0 - self.eff_hr_remi(cp_prop, cp_remi))
         )
 
         dot_tpr = (
             self.kin_tpr
             * np.float_power(rmap, -self.FB)
-            * (1.0 + tpr_prop)
-            - tpr * self.Theta1 * (1.0 - tpr_remi)
+            * (1.0 + self.eff_tpr_prop(cp_prop, cp_remi))
+            - tpr * self.Theta1 * (1.0 - self.eff_tpr_remi(cp_remi))
         )
 
-        dot_anx_sv = -self.k * anx_sv
-        dot_anx_hr = -self.k * anx_hr
+        dot_tde_sv = -self.k * tde_sv
+        dot_tde_hr = -self.k * tde_hr
 
         return np.array([
-            dotA1, dotA2, dotA3,
+            dotA1, dotA2, dotA3, dotCe_prop,
             dotA4, dotA5, dotA6,
             dot_sv_ast, dot_hr_ast, dot_tpr,
-            dot_anx_sv, dot_anx_hr,
+            dot_tde_sv, dot_tde_hr,
         ], dtype=float)
 
     def solve_ode(
         self,
-        t=np.linspace(0, 15, 15 * 60 + 1),
-        X0=None,
-        dosing_prop=None,
-        dosing_remi=None,
-    ):
+        t: Optional[NDArray[np.float64]] = None,
+        y0: Optional[Sequence[float]] = None,
+        dosing_prop: Optional[Any] = None,
+        dosing_remi: Optional[Any] = None,
+    ) -> tuple[
+        NDArray[np.float64],
+        NDArray[np.float64],
+        NDArray[np.float64],
+        NDArray[np.float64],
+        NDArray[np.float64],
+        NDArray[np.float64],
+        NDArray[np.float64],
+        NDArray[np.float64],
+        NDArray[np.float64],
+        NDArray[np.float64],
+        NDArray[np.float64],
+        NDArray[np.float64],
+        NDArray[np.float64],
+        NDArray[np.float64],
+        ]:
+        """Solve the coupled PK/PD ODEs for propofol and remifentanil with interactions.
+
+        Parameters
+        ----------
+        t : numpy.ndarray, optional
+            Time grid in minutes. If ``None``, defaults to 15 minutes at 1-second steps.
+        y0 : Sequence[float], optional
+            Initial state vector.
+        dosing_prop : Any, optional
+            Dosing object for propofol exposing ``dotA0`` and ``tcrit`` attributes.
+        dosing_remi : Any, optional
+            Dosing object for remifentanil exposing ``dotA0`` and ``tcrit`` attributes.
+
+        Returns
+        -------
+        tuple of numpy.ndarray
+            (A1, A2, A3, Ce_prop, A4, A5, A6, sv_ast, hr_ast, tpr, tde_sv, tde_hr, sv, MAP)
+        """
         if self.pk_propofol is None:
             raise ValueError("pk_propofol must be provided.")
         if self.pk_remifentanil is None:
             raise ValueError("pk_remifentanil must be provided.")
-
+        
+        if t is None:
+            t = np.linspace(0, 15, 15*60+1)  # 15 minutes with 1s steps
         # ------------------------
         # Dosing inputs
         # ------------------------
         if dosing_prop is None:
-            dotA0_prop = lambda x: 0.0
+            def dotA0_prop(x):
+                return 0
+            logging.debug("dotA0_prop set to 0")
             tcrit_prop = None
-            logger.debug("dotA0_prop set to 0")
         else:
             dotA0_prop = dosing_prop.dotA0
-            tcrit_prop = getattr(dosing_prop, "tcrit", None)
+            tcrit_prop = dosing_prop.tcrit
 
         if dosing_remi is None:
-            dotA0_remi = lambda x: 0.0
+            def dotA0_remi(x):
+                return 0
+            logging.debug("dotA0_remi set to 0")
             tcrit_remi = None
-            logger.debug("dotA0_remi set to 0")
         else:
             dotA0_remi = dosing_remi.dotA0
-            tcrit_remi = getattr(dosing_remi, "tcrit", None)
+            tcrit_remi = dosing_remi.tcrit
 
-        if tcrit_prop is None and tcrit_remi is None:
-            tcrit = None
-        else:
-            crit_list = []
-            if tcrit_prop is not None:
-                crit_list.extend(np.atleast_1d(tcrit_prop).tolist())
-            if tcrit_remi is not None:
-                crit_list.extend(np.atleast_1d(tcrit_remi).tolist())
-            tcrit = np.array(sorted(set(crit_list)), dtype=float)
+        # Combine critical times from both dosing regimens
+        tcrit = []
+        if tcrit_prop is not None:
+            tcrit.extend(tcrit_prop if isinstance(tcrit_prop, (list, np.ndarray)) else [tcrit_prop])
+        if tcrit_remi is not None:
+            tcrit.extend(tcrit_remi if isinstance(tcrit_remi, (list, np.ndarray)) else [tcrit_remi])
+        tcrit = sorted(set(tcrit)) if tcrit else None
 
         # ------------------------
         # Initial conditions
         # ------------------------
-        if X0 is None:
-            X0 = [
-                0.0, 0.0, 0.0,                  # propofol PK
+        if y0 is None:
+            y0 = [
+                0.0, 0.0, 0.0, 0.0,             # propofol PK/PD
                 0.0, 0.0, 0.0,                  # remifentanil PK
                 self.base_sv,                   # sv_ast
                 self.base_hr,                   # hr_ast
                 self.base_tpr,                  # tpr
-                self.base_sv * self.ANXSV,      # anx_sv
-                self.base_hr * self.ANXHR,      # anx_hr
+                self.base_sv * self.ltde_sv,      # tde_sv
+                self.base_hr * self.ltde_hr,      # tde_hr
             ]
 
         res = integrate.odeint(
             self.derivative,
-            X0,
+            y0,
             t,
             args=(
                 self.pk_propofol.V1,
@@ -424,8 +474,8 @@ class SuHaemoPD2023:
                 self.pk_propofol.k13,
                 self.pk_propofol.k21,
                 self.pk_propofol.k31,
+                self.pd_propofol.ke0,
                 dotA0_prop,
-                self.pk_remifentanil.V1,
                 self.pk_remifentanil.k10,
                 self.pk_remifentanil.k12,
                 self.pk_remifentanil.k13,
@@ -437,44 +487,14 @@ class SuHaemoPD2023:
         )
 
         (
-            A1, A2, A3,
+            A1, A2, A3, Ce,
             A4, A5, A6,
             sv_ast, hr_ast, tpr,
-            anx_sv, anx_hr,
+            tde_sv, tde_hr,
         ) = res.T
 
-        cp_prop = A1 / self.pk_propofol.V1
-        cp_remi = A4 / self.pk_remifentanil.V1
+        hr = hr_ast + tde_hr
+        sv = self.sv(sv_ast, hr_ast, tde_sv, tde_hr)
+        MAP = sv * hr * tpr
 
-        dsv = sv_ast + anx_sv
-        dhr = hr_ast + anx_hr
-
-        sv = self.sv(dsv, dhr)
-        hr = dhr
-        MAP = sv * tpr * hr
-        RMAP = MAP / self.base_MAP
-
-        sv_prop = np.array([self.eff_sv_prop(cp) for cp in cp_prop], dtype=float)
-        tpr_prop = np.array(
-            [self.eff_tpr_prop(cp, cr) for cp, cr in zip(cp_prop, cp_remi)],
-            dtype=float,
-        )
-        tpr_remi = np.array([self.eff_tpr_remi(cr) for cr in cp_remi], dtype=float)
-        hr_remi = np.array(
-            [self.eff_hr_remi(cp, cr) for cp, cr in zip(cp_prop, cp_remi)],
-            dtype=float,
-        )
-        sv_remi = np.array(
-            [self.eff_sv_remi(cp, cr) for cp, cr in zip(cp_prop, cp_remi)],
-            dtype=float,
-        )
-
-        return (
-            A1, A2, A3,                # propofol PK states
-            A4, A5, A6,                # remifentanil PK states
-            cp_prop, cp_remi,          # plasma concentrations
-            sv, hr, MAP, tpr, RMAP,    # haemodynamics
-            anx_sv, anx_hr,            # anxiety states
-            sv_prop, tpr_prop,         # propofol effects
-            sv_remi, hr_remi, tpr_remi # remifentanil effects
-        )
+        return A1, A2, A3, Ce, A4, A5, A6, sv_ast, hr_ast, tpr, tde_sv, tde_hr, sv, MAP
