@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 class SuHaemoPD():
     """Su haemodynamic interaction PD model for propofol + remifentanil.
-    Source: DOI: 10.1016/j.bja.2023.04.043 
+    Source: DOI: 10.1016/j.bja.2023.04.043
 
     Notes
     -----
@@ -146,13 +146,13 @@ class SuHaemoPD():
             self.base_hr = self.patient.base_hr * np.exp(self.eta3)
         else:
             self.base_hr = self.Theta3 * np.exp(self.eta3)
-        
+
         # baseline TPR
         if self.patient.base_tpr is not None:
             self.base_tpr = self.patient.base_tpr * np.exp(self.eta2)
         else:
             self.base_tpr = self.Theta4 * np.exp(self.eta2)
-        
+
         self.kin_sv = self.Theta1 * self.base_sv
         self.kin_hr = self.Theta1 * self.base_hr
         self.kin_tpr = self.Theta1 * self.base_tpr
@@ -203,8 +203,8 @@ class SuHaemoPD():
         return dsv * (1.0 - self.HR_SV * np.log(dhr / self.base_hr))
 
     def RMAP(self, sv_ast: float, hr_ast: float, tde_sv: float, tde_hr: float, tpr: float) -> float:
-        """Calculate the relative change of MAP to baseline MAP (RMAP) based on the model's feedback 
-        mechanism."""
+        """Calculate the relative change of MAP to baseline MAP (RMAP) based on the model's
+        feedback mechanism."""
         dhr = hr_ast + tde_hr
         amap = self.sv(sv_ast, hr_ast, tde_sv, tde_hr) * dhr * tpr
         base_map = self.base_sv * self.base_hr * self.base_tpr
@@ -253,9 +253,9 @@ class SuHaemoPD():
         k10_remi: float, k12_remi: float, k13_remi: float,
         k21_remi: float, k31_remi: float, dotA0_remi: Callable[[float], float],
     )-> NDArray[np.float64]:
-        """Derivatives for coupled propofol/ remifentanil PK and haemodynamic PD states for use 
+        """Derivatives for coupled propofol/ remifentanil PK and haemodynamic PD states for use
         in ode solver.
-        
+
         Parameters
         ----------
         X : Sequence[float]
@@ -373,6 +373,46 @@ class SuHaemoPD():
             dot_tde_sv, dot_tde_hr,
         ], dtype=float)
 
+    @staticmethod
+    def _resolve_dosing(
+        dosing: Optional[Any],
+        default_label: str,
+    ) -> tuple[Callable[[float], float], Optional[Any]]:
+        """Return input-rate function and critical times for a dosing object."""
+        if dosing is None:
+            def dot_a0(_: float) -> float:
+                return 0.0
+
+            logger.debug("%s set to 0", default_label)
+            return dot_a0, None
+
+        return dosing.dotA0, dosing.tcrit
+
+    @staticmethod
+    def _merge_tcrit(
+        tcrit_prop: Optional[Any],
+        tcrit_remi: Optional[Any],
+    ) -> Optional[list[Any]]:
+        """Merge and deduplicate critical ODE times from two dosing schedules."""
+        tcrit = []
+        if tcrit_prop is not None:
+            tcrit.extend(tcrit_prop if isinstance(tcrit_prop, (list, np.ndarray)) else [tcrit_prop])
+        if tcrit_remi is not None:
+            tcrit.extend(tcrit_remi if isinstance(tcrit_remi, (list, np.ndarray)) else [tcrit_remi])
+        return sorted(set(tcrit)) if tcrit else None
+
+    def _default_initial_state(self) -> list[float]:
+        """Build the default initial state vector for the coupled PK/PD model."""
+        return [
+            0.0, 0.0, 0.0, 0.0,            # propofol PK/PD
+            0.0, 0.0, 0.0,                 # remifentanil PK
+            self.base_sv,                  # sv_ast
+            self.base_hr,                  # hr_ast
+            self.base_tpr,                 # tpr
+            self.base_sv * self.ltde_sv,   # tde_sv
+            self.base_hr * self.ltde_hr,   # tde_hr
+        ]
+
     def solve_ode(
         self,
         t: Optional[NDArray[np.float64]] = None,
@@ -417,51 +457,19 @@ class SuHaemoPD():
             raise ValueError("pk_propofol must be provided.")
         if self.pk_remifentanil is None:
             raise ValueError("pk_remifentanil must be provided.")
-        
+
         if t is None:
             t = np.linspace(0, 15, 15*60+1)  # 15 minutes with 1s steps
-        # ------------------------
-        # Dosing inputs
-        # ------------------------
-        if dosing_prop is None:
-            def dotA0_prop(x):
-                return 0
-            logging.debug("dotA0_prop set to 0")
-            tcrit_prop = None
-        else:
-            dotA0_prop = dosing_prop.dotA0
-            tcrit_prop = dosing_prop.tcrit
 
-        if dosing_remi is None:
-            def dotA0_remi(x):
-                return 0
-            logging.debug("dotA0_remi set to 0")
-            tcrit_remi = None
-        else:
-            dotA0_remi = dosing_remi.dotA0
-            tcrit_remi = dosing_remi.tcrit
-
-        # Combine critical times from both dosing regimens
-        tcrit = []
-        if tcrit_prop is not None:
-            tcrit.extend(tcrit_prop if isinstance(tcrit_prop, (list, np.ndarray)) else [tcrit_prop])
-        if tcrit_remi is not None:
-            tcrit.extend(tcrit_remi if isinstance(tcrit_remi, (list, np.ndarray)) else [tcrit_remi])
-        tcrit = sorted(set(tcrit)) if tcrit else None
+        dotA0_prop, tcrit_prop = self._resolve_dosing(dosing_prop, "dotA0_prop")
+        dotA0_remi, tcrit_remi = self._resolve_dosing(dosing_remi, "dotA0_remi")
+        tcrit = self._merge_tcrit(tcrit_prop, tcrit_remi)
 
         # ------------------------
         # Initial conditions
         # ------------------------
         if y0 is None:
-            y0 = [
-                0.0, 0.0, 0.0, 0.0,             # propofol PK/PD
-                0.0, 0.0, 0.0,                  # remifentanil PK
-                self.base_sv,                   # sv_ast
-                self.base_hr,                   # hr_ast
-                self.base_tpr,                  # tpr
-                self.base_sv * self.ltde_sv,      # tde_sv
-                self.base_hr * self.ltde_hr,      # tde_hr
-            ]
+            y0 = self._default_initial_state()
 
         res = integrate.odeint(
             self.derivative,
