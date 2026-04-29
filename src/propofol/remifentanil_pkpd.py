@@ -73,22 +73,22 @@ class EleveldPK:
         """Recompute PK parameters from patient characteristics and etas."""
         self.V1 = (
             self.Theta1
-            * self.SIZE()
+            * self.size()
             * self._f_ageing(self.Theta8, self.patient.age, self.patient_ref.age)
             * np.exp(self.eta1)
         )  # L
 
         self.V2 = (
             self.Theta2
-            * self.SIZE()
+            * self.size()
             * self._f_ageing(self.Theta9, self.patient.age, self.patient_ref.age)
-            * self.KSEX()
+            * self.ksex()
             * np.exp(self.eta2)
         )  # L
 
         self.V3 = (
             self.Theta3
-            * self.SIZE()
+            * self.size()
             * self._f_ageing(self.Theta10, self.patient.age, self.patient_ref.age)
             * np.exp(self.Theta12 * (self.patient.weight - self.patient_ref.weight))
             * np.exp(self.eta3)
@@ -96,9 +96,9 @@ class EleveldPK:
 
         self.CL = (
             self.Theta4
-            * self.SIZE() ** 0.75
-            * (self.KMAT(self.patient.weight) / self.KMAT(self.patient_ref.weight))
-            * self.KSEX()
+            * self.size() ** 0.75
+            * (self.kmat(self.patient.weight) / self.kmat(self.patient_ref.weight))
+            * self.ksex()
             * self._f_ageing(self.Theta9, self.patient.age, self.patient_ref.age)
             * np.exp(self.eta4)
         )  # L/min
@@ -107,7 +107,7 @@ class EleveldPK:
             self.Theta5
             * np.float_power(self.V2 / self.Theta2, 0.75)
             * self._f_ageing(self.Theta8, self.patient.age, self.patient_ref.age)
-            * self.KSEX()
+            * self.ksex()
             * np.exp(self.eta5)
         )  # L/min
 
@@ -176,7 +176,7 @@ class EleveldPK:
         """Compute sigmoidal scaling function."""
         return x**lmbda / (x**lmbda + e50**lmbda)
 
-    def SIZE(self) -> float:
+    def size(self) -> float:
         """Compute body-size scaling using Al-Sallami fat-free mass."""
         return (
             self.f_al_sallami(self.patient.age, self.patient.weight, self.patient.bmi)
@@ -187,7 +187,7 @@ class EleveldPK:
             )
         )
 
-    def KMAT(self, weight: float) -> float:
+    def kmat(self, weight: float) -> float:
         """Compute maturation factor for clearance."""
         return self.f_sigmoid(weight, self.Theta7, 2.0)
 
@@ -207,7 +207,7 @@ class EleveldPK:
             )
         raise ValueError(f"Unknown sex: {self.patient.sex}")
 
-    def KSEX(self) -> float:
+    def ksex(self) -> float:
         """Compute sex effect modifier."""
         if self.patient.sex == "male":
             return 1.0
