@@ -71,9 +71,9 @@ ignore-names = [
     # Allow capitals similar to use in pkpd literature
     # As PEP 20 says, "Readability counts" (also pep8 "know when to be inconsistent")
     "MAP*", "RMAP",  # Allow the use of MAP (mean arterial pressure) as there is a build-in map function
-    "A0", "A1", "A2", "A3",
+    "A0", "A1", "A2", "A3", "A4", "A5", "A6",
     "Cp*", "Ce*",
-    "V1", "V2", "V3",
+    "V1", "V2", "V3", "V1_prop",
     "E50",
     "*dotA*", "*dotC*",
 ]
