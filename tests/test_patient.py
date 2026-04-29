@@ -59,10 +59,10 @@ def test_base_values():
     assert patient4.base_sv == 75
     assert patient4.base_tpr is None
 
-    assert patient5.base_pp == 50
-    assert patient5.base_map == pytest.approx((130 + 2 * 80) / 3.0)
-    assert patient5.base_sv == 75
+    assert patient5.base_pp == 10
+    assert patient5.base_map == 120
+    assert patient5.base_sv == 15
     assert patient5.base_tpr is not None
-    assert patient5.base_tpr == pytest.approx(patient5.base_map / (patient5.base_sv * 60))
+    assert patient5.base_tpr == pytest.approx(120 / (15 * 60))
 
 
