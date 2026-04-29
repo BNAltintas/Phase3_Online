@@ -18,6 +18,8 @@ class EleveldPatient:
         base_pp: float = None,
         base_hr: float = None,
         base_map: float = None,
+        base_sv: float = None,
+        base_tpr: float = None,
     ) -> None:
         """
         Initialize patient parameters for PK/PD modelling.
@@ -91,25 +93,37 @@ class EleveldPatient:
         self.base_hr = base_hr
 
         # Derive PP and MAP from SAP/DAP if available
-        if base_sap is not None and base_dap is not None:
+        if base_pp is not None:
+            self.base_pp = base_pp  # Use directly supplied base_pp
+        elif base_pp is None and base_sap is not None and base_dap is not None:
             if base_sap <= 0 or base_dap <= 0 or base_sap <= base_dap:
                 raise ValueError(
                     "Invalid baseline pressures: expected base_sap > base_dap and both > 0."
                 )
             self.base_pp = base_sap - base_dap
+        else:
+            self.base_pp = None
+
+        if base_map is not None:
+            self.base_map = base_map  # Use directly supplied base_map
+        elif base_map is None and base_sap is not None and base_dap is not None:
             self.base_map = (base_sap + 2.0 * base_dap) / 3.0
         else:
-            self.base_pp = base_pp
-            self.base_map = base_map
+            self.base_map = None
 
         # Derived baseline stroke volume
-        if self.base_pp is not None:
+        if base_sv is not None:
+            self.base_sv = base_sv  # Use directly supplied base_sv
+        elif base_sv is None and self.base_pp is not None:
             self.base_sv = self.base_pp * 1.5
         else:
             self.base_sv = None
 
         # Derived baseline TPR
-        if all(x is not None for x in [self.base_map, self.base_hr, self.base_sv]):
+        if base_tpr is not None:
+            self.base_tpr = base_tpr  # Use directly supplied base_tpr
+        elif base_tpr is None and all(x is not None for x in 
+                                           [self.base_map, self.base_hr, self.base_sv]):
             self.base_tpr = self.base_map / (self.base_sv * self.base_hr)
         else:
             self.base_tpr = None
