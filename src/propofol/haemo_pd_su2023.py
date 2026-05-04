@@ -164,6 +164,10 @@ class SuHaemoPD():
         self.ltde_hr = self.Theta6
         self.ltde_sv = self.Theta7
 
+        self.anxsv = self.base_sv * (1.0 + self.ltde_sv)
+        self.anxhr = self.base_hr * (1.0 + self.ltde_hr)
+        self.base_map = self.anxsv * self.anxhr * self.base_tpr
+
         # ------------------------
         # Propofol effects
         # ------------------------
@@ -200,15 +204,14 @@ class SuHaemoPD():
         """Calculate stroke volume (SV) based on the model's feedback mechanism."""
         dsv = sv_ast + tde_sv
         dhr = hr_ast + tde_hr
-        return dsv * (1.0 - self.HR_SV * np.log(dhr / self.base_hr))
+        return dsv * (1.0 - self.HR_SV * np.log(dhr / self.anxhr))
 
     def RMAP(self, sv_ast: float, hr_ast: float, tde_sv: float, tde_hr: float, tpr: float) -> float:
         """Calculate the relative change of MAP to baseline MAP (RMAP) based on the model's
         feedback mechanism."""
         dhr = hr_ast + tde_hr
         amap = self.sv(sv_ast, hr_ast, tde_sv, tde_hr) * dhr * tpr
-        base_map = self.base_sv * self.base_hr * self.base_tpr
-        return amap / base_map
+        return amap / self.base_map
 
     def _f_sigmoid(self, x, y, a):
         """Generalized sigmoid function for drug effects."""
