@@ -166,7 +166,7 @@ class SuHaemoPD():
 
         self.anxsv = self.base_sv * (1.0 + self.ltde_sv)
         self.anxhr = self.base_hr * (1.0 + self.ltde_hr)
-        self.base_map = self.anxsv * self.anxhr * self.base_tpr
+        self.base_map = self.base_sv * self.base_hr * self.base_tpr
 
         # ------------------------
         # Propofol effects
@@ -200,17 +200,14 @@ class SuHaemoPD():
         self.INT_TPR = self.Theta23
         self.INT_SV_PROP = self.Theta24
 
-    def sv(self, sv_ast: float, hr_ast: float, tde_sv: float, tde_hr: float) -> float:
+    def sv(self, sv_ast: float, hr_ast: float) -> float:
         """Calculate stroke volume (SV) based on the model's feedback mechanism."""
-        dsv = sv_ast + tde_sv
-        dhr = hr_ast + tde_hr
-        return dsv * (1.0 - self.HR_SV * np.log(dhr / self.anxhr))
+        return sv_ast * (1.0 - self.HR_SV * np.log(hr_ast / self.base_hr))
 
-    def RMAP(self, sv_ast: float, hr_ast: float, tde_sv: float, tde_hr: float, tpr: float) -> float:
+    def RMAP(self, sv_ast: float, hr_ast: float, tpr: float) -> float:
         """Calculate the relative change of MAP to baseline MAP (RMAP) based on the model's
         feedback mechanism."""
-        dhr = hr_ast + tde_hr
-        amap = self.sv(sv_ast, hr_ast, tde_sv, tde_hr) * dhr * tpr
+        amap = self.sv(sv_ast, hr_ast) * hr_ast * tpr
         return amap / self.base_map
 
     def _f_sigmoid(self, x, y, a):
@@ -262,7 +259,8 @@ class SuHaemoPD():
         Parameters
         ----------
         X : Sequence[float]
-            State vector ``[A1, A2, A3, A4, A5, A6, sv_ast, hr_ast, tpr, tde_sv, tde_hr]``
+            State vector ``[A1, A2, A3, Ce_prop, A4, A5, A6, sv_ast, hr_ast, tpr, tde_decay]``
+            where ``tde_decay`` mirrors NONMEM A(10): starts at 1, decays to 0 at rate k.
         t : float
             Time point in minutes.
         V1_prop : float
@@ -303,7 +301,7 @@ class SuHaemoPD():
             A1, A2, A3, Ce_prop, # propofol PKPD states
             A4, A5, A6, # remifentanil PK states
             sv_ast, hr_ast, tpr, # haemodynamic states
-            tde_sv, tde_hr, # time-dependent deviation states
+            tde_decay, # time-dependent effect decay factor (1→0, mirrors NONMEM A(10))
         ) = X
 
         # ------------------------
@@ -341,7 +339,7 @@ class SuHaemoPD():
         # Derived haemodynamics
         # ------------------------
 
-        rmap = self.RMAP(sv_ast, hr_ast, tde_sv, tde_hr, tpr)
+        rmap = self.RMAP(sv_ast, hr_ast, tpr)
 
         # ------------------------
         # Haemodynamic ODEs
@@ -350,12 +348,14 @@ class SuHaemoPD():
             self.kin_sv
             * np.float_power(rmap, -self.FB)
             * (1.0 + self.eff_sv_prop(cp_prop))
+            * np.exp(tde_decay * self.ltde_sv)   # NONMEM: EXP(A(10)*TDE_SV)
             - sv_ast * self.Theta1 * (1.0 - self.eff_sv_remi(cp_prop, cp_remi))
         )
 
         dot_hr_ast = (
             self.kin_hr
             * np.float_power(rmap, -self.FB)
+            * np.exp(tde_decay * self.ltde_hr)   # NONMEM: EXP(A(10)*TDE_HR)
             - hr_ast * self.Theta1 * (1.0 - self.eff_hr_remi(cp_prop, cp_remi))
         )
 
@@ -366,14 +366,13 @@ class SuHaemoPD():
             - tpr * self.Theta1 * (1.0 - self.eff_tpr_remi(cp_remi))
         )
 
-        dot_tde_sv = -self.k * tde_sv
-        dot_tde_hr = -self.k * tde_hr
+        dot_tde_decay = -self.k * tde_decay   # NONMEM: DADT(10) = -k*A(10)
 
         return np.array([
             dotA1, dotA2, dotA3, dotCe_prop,
             dotA4, dotA5, dotA6,
             dot_sv_ast, dot_hr_ast, dot_tpr,
-            dot_tde_sv, dot_tde_hr,
+            dot_tde_decay,
         ], dtype=float)
 
     @staticmethod
@@ -407,13 +406,12 @@ class SuHaemoPD():
     def _default_initial_state(self) -> list[float]:
         """Build the default initial state vector for the coupled PK/PD model."""
         return [
-            0.0, 0.0, 0.0, 0.0,            # propofol PK/PD
-            0.0, 0.0, 0.0,                 # remifentanil PK
-            self.base_sv,                  # sv_ast
-            self.base_hr,                  # hr_ast
-            self.base_tpr,                 # tpr
-            self.base_sv * self.ltde_sv,   # tde_sv
-            self.base_hr * self.ltde_hr,   # tde_hr
+            0.0, 0.0, 0.0, 0.0,                        # propofol PK/PD
+            0.0, 0.0, 0.0,                              # remifentanil PK
+            self.base_sv * np.exp(self.ltde_sv),        # sv_ast — starts elevated (NONMEM A_0(7))
+            self.base_hr * np.exp(self.ltde_hr),        # hr_ast — starts elevated (NONMEM A_0(8))
+            self.base_tpr,                              # tpr
+            1.0,                                        # tde_decay (NONMEM A(10), decays 1 → 0)
         ]
 
     def solve_ode(
@@ -501,11 +499,12 @@ class SuHaemoPD():
             A1, A2, A3, Ce,
             A4, A5, A6,
             sv_ast, hr_ast, tpr,
-            tde_sv, tde_hr,
+            tde_decay,
         ) = res.T
 
-        hr = hr_ast + tde_hr
-        sv = self.sv(sv_ast, hr_ast, tde_sv, tde_hr)
+        hr = hr_ast   # hr_ast already includes the TDE effect (starts elevated, decays)
+        sv = self.sv(sv_ast, hr_ast)
         MAP = sv * hr * tpr
 
-        return A1, A2, A3, Ce, A4, A5, A6, sv_ast, hr_ast, tpr, tde_sv, tde_hr, sv, MAP
+        # Return tde_decay in position 10; zeros in position 11 (was tde_hr) for compatibility
+        return A1, A2, A3, Ce, A4, A5, A6, sv_ast, hr_ast, tpr, tde_decay, np.zeros_like(tde_decay), sv, MAP
