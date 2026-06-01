@@ -434,7 +434,6 @@ class SuHaemoPD():
         NDArray[np.float64],
         NDArray[np.float64],
         NDArray[np.float64],
-        NDArray[np.float64],
         ]:
         """Solve the coupled PK/PD ODEs for propofol and remifentanil with interactions.
 
@@ -452,7 +451,7 @@ class SuHaemoPD():
         Returns
         -------
         tuple of numpy.ndarray
-            (A1, A2, A3, Ce_prop, A4, A5, A6, sv_ast, hr_ast, tpr, tde_sv, tde_hr, sv, MAP)
+            (A1, A2, A3, Ce_prop, A4, A5, A6, sv_ast, hr_ast, tpr, tde_decay, sv, MAP)
         """
         if self.pk_propofol is None:
             raise ValueError("pk_propofol must be provided.")
@@ -506,5 +505,4 @@ class SuHaemoPD():
         sv = self.sv(sv_ast, hr_ast)
         MAP = sv * hr * tpr
 
-        # Return tde_decay in position 10; zeros in position 11 (was tde_hr) for compatibility
-        return A1, A2, A3, Ce, A4, A5, A6, sv_ast, hr_ast, tpr, tde_decay, np.zeros_like(tde_decay), sv, MAP
+        return A1, A2, A3, Ce, A4, A5, A6, sv_ast, hr_ast, tpr, tde_decay, sv, MAP
