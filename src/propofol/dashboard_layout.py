@@ -2,44 +2,76 @@ from __future__ import annotations
 
 from dash import dcc, html
 
-from propofol.config import (
-    BIS_HIGH,
-    BIS_LOW,
-    MAP_ABS_MIN,
-    MAP_REL_FRAC,
-    SIM_MIN,
+from propofol.recommend_regimen2023 import (
+    CONFIDENCE_N_SIMULATIONS,
+    DEFAULT_PROPOFOL_CONCENTRATION_MG_ML,
+    DEFAULT_REMI_CONCENTRATION_MCG_ML,
+    MAP_ABS_MIN_TARGET,
+    MAP_REL_FRAC_TARGET,
+    TARGET_ASSESSMENT_START_MIN,
+    TARGET_BIS_HIGH,
+    TARGET_BIS_LOW,
 )
 
 
-def input_block(label: str, component, width: str = "220px"):
-    """Create a labeled input block with consistent styling.
+CARD_STYLE = {
+    "padding": "18px",
+    "border": "1px solid #ddd",
+    "borderRadius": "12px",
+    "marginBottom": "20px",
+    "backgroundColor": "white",
+}
 
-    Parameters
-    ----------
-    label : str
-        The label text displayed above the input component.
-    component
-        The Dash component (e.g., dcc.Input) to display.
-    width : str, optional
-        CSS width of the block, by default "220px".
+INPUT_STYLE = {
+    "width": "100%",
+    "padding": "9px 10px",
+    "border": "1px solid #ccc",
+    "borderRadius": "8px",
+    "fontSize": "14px",
+    "boxSizing": "border-box",
+}
 
-    Returns
-    -------
-    html.Div
-        A styled container with the label and component.
-    """
+DROPDOWN_STYLE = {
+    "width": "100%",
+    "fontSize": "14px",
+}
+
+DEFAULT_BUTTON_STYLE = {
+    "padding": "10px 16px",
+    "border": "1px solid #bbb",
+    "backgroundColor": "#f7f7f7",
+    "cursor": "pointer",
+    "marginRight": "8px",
+    "borderRadius": "8px",
+    "fontWeight": "600",
+}
+
+NOTE_STYLE = {
+    "fontSize": "13px",
+    "color": "#666",
+    "lineHeight": "1.35",
+    "marginTop": "6px",
+}
+
+
+def input_block(label: str, component, width: str = "220px", note: str | None = None):
+    children = [
+        html.Label(
+            label,
+            style={
+                "fontWeight": "600",
+                "marginBottom": "6px",
+                "display": "block",
+            },
+        ),
+        component,
+    ]
+
+    if note:
+        children.append(html.Div(note, style=NOTE_STYLE))
+
     return html.Div(
-        [
-            html.Label(
-                label,
-                style={
-                    "fontWeight": "600",
-                    "marginBottom": "6px",
-                    "display": "block",
-                },
-            ),
-            component,
-        ],
+        children,
         style={
             "width": width,
             "display": "inline-block",
@@ -51,22 +83,6 @@ def input_block(label: str, component, width: str = "220px"):
 
 
 def value_display_block(label: str, value_id: str, width: str = "220px"):
-    """Create a labeled read-only value display block.
-
-    Parameters
-    ----------
-    label : str
-        The label text displayed above the value.
-    value_id : str
-        The Dash component ID where the value will be updated.
-    width : str, optional
-        CSS width of the block, by default "220px".
-
-    Returns
-    -------
-    html.Div
-        A styled container with the label and a value display area.
-    """
     return html.Div(
         [
             html.Label(
@@ -100,36 +116,14 @@ def value_display_block(label: str, value_id: str, width: str = "220px"):
 
 
 def segmented_buttons(label: str, button_ids_and_labels: list[tuple[str, str]]):
-    """Create a group of segmented buttons with a label.
-
-    Parameters
-    ----------
-    label : str
-        The label text displayed above the button group.
-    button_ids_and_labels : list[tuple[str, str]]
-        List of (button_id, button_label) tuples defining the buttons.
-
-    Returns
-    -------
-    html.Div
-        A styled container with the label and segmented button group.
-    """
     buttons = [
         html.Button(
             text,
-            id=btn_id,
+            id=button_id,
             n_clicks=0,
-            style={
-                "padding": "10px 16px",
-                "border": "1px solid #bbb",
-                "backgroundColor": "#f7f7f7",
-                "cursor": "pointer",
-                "marginRight": "8px",
-                "borderRadius": "8px",
-                "fontWeight": "600",
-            },
+            style=DEFAULT_BUTTON_STYLE,
         )
-        for btn_id, text in button_ids_and_labels
+        for button_id, text in button_ids_and_labels
     ]
 
     return html.Div(
@@ -148,27 +142,83 @@ def segmented_buttons(label: str, button_ids_and_labels: list[tuple[str, str]]):
     )
 
 
-def build_layout():
-    """Build the main dashboard layout structure.
+def concentration_dropdown(
+    label: str,
+    dropdown_id: str,
+    custom_input_id: str,
+    options: list[dict],
+    value,
+    unit: str,
+):
+    return html.Div(
+        [
+            input_block(
+                label,
+                dcc.Dropdown(
+                    id=dropdown_id,
+                    options=options,
+                    value=value,
+                    clearable=False,
+                    style=DROPDOWN_STYLE,
+                ),
+                width="280px",
+            ),
+            input_block(
+                f"Custom {unit}",
+                dcc.Input(
+                    id=custom_input_id,
+                    type="number",
+                    value=None,
+                    min=0,
+                    step=0.1,
+                    placeholder="Only used if custom",
+                    style=INPUT_STYLE,
+                ),
+                width="220px",
+            ),
+        ],
+        style={"display": "block"},
+    )
 
-    Returns
-    -------
-    html.Div
-        The complete dashboard layout with patient inputs, options, and output sections.
-    """
+
+def graph_card(title: str, graph_id: str, note: str | None = None):
+    children = [
+        html.H4(title, style={"marginTop": 0, "marginBottom": "8px"}),
+    ]
+
+    if note:
+        children.append(html.Div(note, style=NOTE_STYLE | {"marginBottom": "8px"}))
+
+    children.append(dcc.Graph(id=graph_id))
+
+    return html.Div(children, style=CARD_STYLE)
+
+
+def build_layout():
     return html.Div(
         [
             dcc.Store(id="sex-store", data="male"),
-            dcc.Store(id="opiates-store", data=False),
-            dcc.Store(id="mode-store", data="auto"),
 
-            html.H2("Propofol Induction & Initial Maintenance Recommended Dose"),
+            html.H2(
+                "Su2023 Propofol ± Opiate Dose Recommendation",
+                style={"marginBottom": "8px"},
+            ),
 
             html.Div(
-                f"Predicts a recommended bolus and minute-wise maintenance schedule for {SIM_MIN} "
-                f"minutes, constraining BIS between {BIS_LOW} and {BIS_HIGH}, and MAP above "
-                f"{MAP_ABS_MIN} mmHg or {int(MAP_REL_FRAC * 100)}% of baseline.",
-                style={"marginBottom": "20px"},
+                (
+                    f"From {TARGET_ASSESSMENT_START_MIN:g} min onward, the deterministic target is "
+                    f"BIS {TARGET_BIS_LOW:.0f}–{TARGET_BIS_HIGH:.0f} and MAP ≥ "
+                    f"max({MAP_ABS_MIN_TARGET:.0f} mmHg, {int(MAP_REL_FRAC_TARGET * 100)}% of baseline). "
+                    f"Confidence is automatically based on {CONFIDENCE_N_SIMULATIONS} BSV simulations. "
+                    f"Final pump rates are rounded automatically to whole mL/h. Boluses are rounded "
+                    f"automatically to 5-unit steps."
+                ),
+                style={
+                    "marginBottom": "20px",
+                    "fontSize": "15px",
+                    "lineHeight": "1.45",
+                    "color": "#333",
+                },
             ),
 
             html.Div(
@@ -179,30 +229,69 @@ def build_layout():
                         [
                             input_block(
                                 "Age (years)",
-                                dcc.Input(id="age", type="number", value=35, min=18, step=1),
+                                dcc.Input(
+                                    id="age",
+                                    type="number",
+                                    value=35,
+                                    min=18,
+                                    step=1,
+                                    style=INPUT_STYLE,
+                                ),
                             ),
                             input_block(
                                 "Height (cm)",
-                                dcc.Input(id="height", type="number", value=170, min=100, step=1),
+                                dcc.Input(
+                                    id="height",
+                                    type="number",
+                                    value=170,
+                                    min=100,
+                                    step=1,
+                                    style=INPUT_STYLE,
+                                ),
                             ),
                             input_block(
                                 "Weight (kg)",
-                                dcc.Input(id="weight", type="number", value=70, min=20, step=0.1),
+                                dcc.Input(
+                                    id="weight",
+                                    type="number",
+                                    value=70,
+                                    min=20,
+                                    step=0.1,
+                                    style=INPUT_STYLE,
+                                ),
                             ),
                             input_block(
                                 "Baseline SAP (mmHg)",
-                                dcc.Input(id="baseline_sap", type="number", value=120, min=1,
-                                          step=0.1),
+                                dcc.Input(
+                                    id="baseline_sap",
+                                    type="number",
+                                    value=120,
+                                    min=1,
+                                    step=0.1,
+                                    style=INPUT_STYLE,
+                                ),
                             ),
                             input_block(
                                 "Baseline DAP (mmHg)",
-                                dcc.Input(id="baseline_dap", type="number", value=70, min=1,
-                                          step=0.1),
+                                dcc.Input(
+                                    id="baseline_dap",
+                                    type="number",
+                                    value=70,
+                                    min=1,
+                                    step=0.1,
+                                    style=INPUT_STYLE,
+                                ),
                             ),
                             input_block(
                                 "Baseline HR (bpm)",
-                                dcc.Input(id="baseline_hr", type="number", value=70, min=1,
-                                          step=0.1),
+                                dcc.Input(
+                                    id="baseline_hr",
+                                    type="number",
+                                    value=70,
+                                    min=1,
+                                    step=0.1,
+                                    style=INPUT_STYLE,
+                                ),
                             ),
                         ]
                     ),
@@ -211,15 +300,10 @@ def build_layout():
                         [
                             value_display_block("Derived baseline MAP (mmHg)", "derived-map"),
                             value_display_block("Derived baseline PP (mmHg)", "derived-pp"),
-                        ],
+                        ]
                     ),
                 ],
-                style={
-                    "padding": "18px",
-                    "border": "1px solid #ddd",
-                    "borderRadius": "12px",
-                    "marginBottom": "20px",
-                },
+                style=CARD_STYLE,
             ),
 
             html.Div(
@@ -234,41 +318,71 @@ def build_layout():
                         ],
                     ),
 
-                    segmented_buttons(
-                        "Opiates",
-                        [
-                            ("opiates-no-btn", "No"),
-                            ("opiates-yes-btn", "Yes"),
-                        ],
-                    ),
-
-                    segmented_buttons(
-                        "Mode",
-                        [
-                            ("mode-lazy-btn", "Lazy"),
-                            ("mode-auto-btn", "Auto"),
-                            ("mode-accurate-btn", "Accurate"),
-                        ],
-                    ),
-
                     input_block(
-                        "Maintenance rate rounding step (mg/kg/h, optional)",
-                        dcc.Input(
-                            id="maintenance_rate_step",
-                            type="number",
-                            value=None,
-                            step=0.1,
-                            placeholder="e.g. 0.5",
+                        "Select opiate",
+                        dcc.Dropdown(
+                            id="opiate-dropdown",
+                            options=[
+                                {"label": "No opiate / propofol only", "value": "none"},
+                                {"label": "Remifentanil", "value": "remifentanil"},
+                                {
+                                    "label": "Sufentanil (upcoming)",
+                                    "value": "sufentanil",
+                                    "disabled": True,
+                                },
+                                {
+                                    "label": "Fentanyl (upcoming)",
+                                    "value": "fentanyl",
+                                    "disabled": True,
+                                },
+                            ],
+                            value="none",
+                            clearable=False,
+                            placeholder="Select opiate",
+                            style=DROPDOWN_STYLE,
                         ),
-                        width="280px",
+                        width="320px",
                     ),
                 ],
-                style={
-                    "padding": "18px",
-                    "border": "1px solid #ddd",
-                    "borderRadius": "12px",
-                    "marginBottom": "20px",
-                },
+                style=CARD_STYLE,
+            ),
+
+            html.Div(
+                [
+                    html.H4("Concentrations"),
+
+                    concentration_dropdown(
+                        label="Propofol concentration (mg/mL)",
+                        dropdown_id="propofol-concentration-dropdown",
+                        custom_input_id="propofol-concentration-custom",
+                        options=[
+                            {"label": "10 mg/mL", "value": "10"},
+                            {"label": "20 mg/mL", "value": "20"},
+                            {"label": "Custom", "value": "custom"},
+                        ],
+                        value=str(int(DEFAULT_PROPOFOL_CONCENTRATION_MG_ML)),
+                        unit="mg/mL",
+                    ),
+
+                    concentration_dropdown(
+                        label="Remifentanil concentration (µg/mL)",
+                        dropdown_id="remifentanil-concentration-dropdown",
+                        custom_input_id="remifentanil-concentration-custom",
+                        options=[
+                            {"label": "5 µg/mL", "value": "5"},
+                            {"label": "10 µg/mL", "value": "10"},
+                            {"label": "20 µg/mL", "value": "20"},
+                            {"label": "25 µg/mL", "value": "25"},
+                            {"label": "40 µg/mL", "value": "40"},
+                            {"label": "50 µg/mL", "value": "50"},
+                            {"label": "100 µg/mL", "value": "100"},
+                            {"label": "Custom", "value": "custom"},
+                        ],
+                        value=str(int(DEFAULT_REMI_CONCENTRATION_MCG_ML)),
+                        unit="µg/mL",
+                    ),
+                ],
+                style=CARD_STYLE,
             ),
 
             html.Button(
@@ -288,48 +402,66 @@ def build_layout():
                 },
             ),
 
-            html.Div(
-                id="summary-output",
-                style={
-                    "whiteSpace": "pre-wrap",
-                    "padding": "18px",
-                    "border": "1px solid #ddd",
-                    "borderRadius": "12px",
-                    "marginBottom": "20px",
-                    "backgroundColor": "#fafafa",
-                },
-            ),
-
-            html.Div(
-                [
-                    dcc.Graph(id="pk-graph"),
-                ],
-                style={"marginBottom": "12px"},
-            ),
-
-            html.Div(
-                [
+            dcc.Loading(
+                id="recommendation-loading",
+                type="default",
+                children=[
                     html.Div(
-                        dcc.Graph(id="bis-graph"),
+                        id="summary-output",
                         style={
-                            "flex": "1 1 500px",
-                            "minWidth": "320px",
+                            "whiteSpace": "pre-wrap",
+                            "padding": "18px",
+                            "border": "1px solid #ddd",
+                            "borderRadius": "12px",
+                            "marginBottom": "20px",
+                            "backgroundColor": "#fafafa",
+                            "minHeight": "80px",
                         },
                     ),
+
+                    graph_card(
+                        "Induction-dose rationale",
+                        "dose-rationale-graph",
+                    ),
+
                     html.Div(
-                        dcc.Graph(id="map-graph"),
+                        [
+                            html.Div(
+                                graph_card("Propofol PK", "propofol-pk-graph"),
+                                style={"flex": "1 1 500px", "minWidth": "320px"},
+                            ),
+                            html.Div(
+                                graph_card("Remifentanil PK", "remifentanil-pk-graph"),
+                                style={"flex": "1 1 500px", "minWidth": "320px"},
+                            ),
+                        ],
                         style={
-                            "flex": "1 1 500px",
-                            "minWidth": "320px",
+                            "display": "flex",
+                            "flexWrap": "wrap",
+                            "gap": "12px",
+                            "alignItems": "stretch",
+                        },
+                    ),
+
+                    html.Div(
+                        [
+                            html.Div(
+                                graph_card("BIS", "bis-graph"),
+                                style={"flex": "1 1 500px", "minWidth": "320px"},
+                            ),
+                            html.Div(
+                                graph_card("MAP", "map-graph"),
+                                style={"flex": "1 1 500px", "minWidth": "320px"},
+                            ),
+                        ],
+                        style={
+                            "display": "flex",
+                            "flexWrap": "wrap",
+                            "gap": "12px",
+                            "alignItems": "stretch",
                         },
                     ),
                 ],
-                style={
-                    "display": "flex",
-                    "flexWrap": "wrap",
-                    "gap": "12px",
-                    "alignItems": "stretch",
-                },
             ),
         ],
         style={
@@ -337,5 +469,6 @@ def build_layout():
             "margin": "0 auto",
             "padding": "24px",
             "fontFamily": "Arial, sans-serif",
+            "backgroundColor": "#ffffff",
         },
     )
