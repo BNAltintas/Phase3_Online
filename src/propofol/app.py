@@ -15,8 +15,7 @@ from propofol.recommend_regimen2023 import (
     TARGET_BIS_LOW,
     Su2023PropofolRemifentanilRecommender,
     compress_minute_schedule,
-    recommend_su2023_regimen,
-)
+    recommend_su2023_regimen)
 
 
 # ============================================================
@@ -33,6 +32,9 @@ app.layout = build_layout()
 # ============================================================
 
 def _button_styles(selected: str, current: str) -> dict:
+    """
+    Return a style dict for a button, highlighting it if it is the selected value.
+    """
     if selected == current:
         return {
             "padding": "10px 16px",
@@ -58,14 +60,23 @@ def _button_styles(selected: str, current: str) -> dict:
 
 
 def compute_map(sap: float, dap: float) -> float:
+    """
+    Compute the mean arterial pressure (MAP) given systolic and diastolic pressures.
+    """
     return (sap + 2.0 * dap) / 3.0
 
 
 def compute_pp(sap: float, dap: float) -> float:
+    """
+    Compute the pulse pressure (PP) given systolic and diastolic pressures.
+    """
     return sap - dap
 
 
 def parse_concentration(selection, custom_value, name: str) -> float:
+    """
+    Parse a concentration value from a selection or custom input.
+    """
     if selection == "custom":
         if custom_value is None or custom_value == "":
             raise ValueError(f"Please provide a custom {name} concentration.")
@@ -80,12 +91,18 @@ def parse_concentration(selection, custom_value, name: str) -> float:
 
 
 def make_empty_figure(title: str | None = None):
+    """
+    Create an empty Plotly figure with an optional title.
+    """
     fig = go.Figure()
     fig.update_layout(template="plotly_white", title=title or None)
     return fig
 
 
 def _safe_array(x) -> np.ndarray:
+    """
+    Convert input to a NumPy array of floats.
+    """
     return np.asarray(x, dtype=float)
 
 
@@ -94,6 +111,9 @@ def _safe_array(x) -> np.ndarray:
 # ============================================================
 
 def format_propofol_schedule(rates_ml_h, rates_mcgkgmin) -> list[str]:
+    """
+    Format the propofol schedule for display.
+    """
     ml_rows = compress_minute_schedule(rates_ml_h)
     mcg_rows = compress_minute_schedule(rates_mcgkgmin)
 
@@ -111,6 +131,9 @@ def format_propofol_schedule(rates_ml_h, rates_mcgkgmin) -> list[str]:
 
 
 def format_remifentanil_schedule(rates_ml_h, rates_ngkgmin) -> list[str]:
+    """
+    Format the remifentanil schedule for display.
+    """
     ml_rows = compress_minute_schedule(rates_ml_h)
     ng_rows = compress_minute_schedule(rates_ngkgmin)
 
@@ -128,6 +151,9 @@ def format_remifentanil_schedule(rates_ml_h, rates_ngkgmin) -> list[str]:
 
 
 def make_summary(rec):
+    """
+    Create a summary of the propofol and remifentanil regimen.
+    """
     lines = [
         f"Propofol induction dose: {rec.propofol_bolus_mg:.0f} mg "
         f"({rec.propofol_bolus_mgkg:.3f} mg/kg)",
@@ -137,8 +163,8 @@ def make_summary(rec):
     lines.extend(
         f"  {line}"
         for line in format_propofol_schedule(
-            rec.propofol_infusion_rates_ml_h,
-            rec.propofol_infusion_rates_mcgkgmin,
+            rec.propofol_inf_rates_ml_h,
+            rec.propofol_inf_rates_mcgkgmin,
         )
     )
 
@@ -151,8 +177,8 @@ def make_summary(rec):
         lines.extend(
             f"  {line}"
             for line in format_remifentanil_schedule(
-                rec.remifentanil_infusion_rates_ml_h,
-                rec.remifentanil_infusion_rates_ngkgmin,
+                rec.remifentanil_inf_rates_ml_h,
+                rec.remifentanil_inf_rates_ngkgmin,
             )
         )
 
@@ -175,6 +201,9 @@ def make_summary(rec):
 # ============================================================
 
 def _add_band(fig: go.Figure, x, y_low, y_high, name: str):
+    """
+    Add a shaded band to a Plotly figure.
+    """
     x = _safe_array(x)
     y_low = _safe_array(y_low)
     y_high = _safe_array(y_high)
@@ -194,6 +223,9 @@ def _add_band(fig: go.Figure, x, y_low, y_high, name: str):
 
 
 def _add_line(fig: go.Figure, x, y, name: str):
+    """
+    Add a line to a Plotly figure.
+    """
     fig.add_trace(
         go.Scatter(
             x=x,
@@ -205,6 +237,9 @@ def _add_line(fig: go.Figure, x, y, name: str):
 
 
 def make_propofol_pk_figure(rec):
+    """
+    Create a Plotly figure for propofol pharmacokinetics (PK).
+    """
     fig = go.Figure()
     c = rec.confidence
 
@@ -226,6 +261,9 @@ def make_propofol_pk_figure(rec):
 
 
 def make_remifentanil_pk_figure(rec):
+    """
+    Create a Plotly figure for remifentanil pharmacokinetics (PK).
+    """
     if not rec.remifentanil_selected:
         return make_empty_figure("Remifentanil PK")
 
@@ -250,6 +288,9 @@ def make_remifentanil_pk_figure(rec):
 
 
 def make_bis_figure(rec):
+    """
+    Create a Plotly figure for BIS (Bispectral Index).
+    """
     fig = go.Figure()
     c = rec.confidence
 
@@ -272,6 +313,9 @@ def make_bis_figure(rec):
 
 
 def make_map_figure(rec):
+    """
+    Create a Plotly figure for mean arterial pressure (MAP).
+    """
     fig = go.Figure()
     c = rec.confidence
 
@@ -302,7 +346,7 @@ def _dose_axis_limits_mgkg(selected_dose_mgkg: float) -> tuple[float, float]:
     """
     Show only the clinically relevant local window around the recommended dose:
         selected dose - 1.5 to selected dose + 1.5 mg/kg,
-    clipped to 0.3-5.0 mg/kg.
+    clipped to max 0.3-5.0 mg/kg.
     """
     selected_dose_mgkg = float(selected_dose_mgkg)
     x_min = max(0.30, selected_dose_mgkg - 1.50)
@@ -321,7 +365,7 @@ def _clinical_propofol_dose_grid_mgkg(
     """
     Build a dose grid only around the selected dose.
 
-    The axis range is selected dose ±1.5 mg/kg, clipped to 0.3-5.0 mg/kg.
+    The axis range is selected dose ±1.5 mg/kg, clipped to max 0.3-5.0 mg/kg.
     A 0.10 mg/kg grid keeps the graph reasonably smooth without making the
     dashboard too slow.
     """
@@ -336,22 +380,34 @@ def _clinical_propofol_dose_grid_mgkg(
 
 
 def _finite_min(values, default: float) -> float:
+    """
+    Compute the minimum of finite values, returning a default if none are finite.
+    """
     arr = np.asarray(values, dtype=float)
     arr = arr[np.isfinite(arr)]
     return float(np.min(arr)) if len(arr) else float(default)
 
 
 def _finite_max(values, default: float) -> float:
+    """
+    Compute the maximum of finite values, returning a default if none are finite.
+    """
     arr = np.asarray(values, dtype=float)
     arr = arr[np.isfinite(arr)]
     return float(np.max(arr)) if len(arr) else float(default)
 
 
 def _round_axis_lower(x: float, step: float = 5.0) -> float:
+    """
+    Round a value down to the nearest multiple of the step.
+    """
     return float(step * np.floor(float(x) / step))
 
 
 def _round_axis_upper(x: float, step: float = 5.0) -> float:
+    """
+    Round a value up to the nearest multiple of the step.
+    """
     return float(step * np.ceil(float(x) / step))
 
 
@@ -563,26 +619,26 @@ def make_induction_dose_rationale_figure(
         regimen = DecodedRegimen(
             propofol_bolus_mg=float(dose_mgkg * patient.weight),
             propofol_bolus_mgkg=float(dose_mgkg),
-            propofol_rates_mgkgh=np.asarray(rec.propofol_infusion_rates_mgkgh, dtype=float).copy(),
-            propofol_rates_ml_h=np.asarray(rec.propofol_infusion_rates_ml_h, dtype=float).copy(),
-            propofol_rates_mcgkgmin=np.asarray(rec.propofol_infusion_rates_mcgkgmin, dtype=float).copy(),
+            propofol_rates_mgkgh=np.asarray(rec.propofol_inf_rates_mgkgh, dtype=float).copy(),
+            propofol_rates_ml_h=np.asarray(rec.propofol_inf_rates_ml_h, dtype=float).copy(),
+            propofol_rates_mcgkgmin=np.asarray(rec.propofol_inf_rates_mcgkgmin, dtype=float).copy(),
             remifentanil_selected=bool(rec.remifentanil_selected),
             remifentanil_bolus_mcg=float(rec.remifentanil_bolus_mcg),
             remifentanil_bolus_mcgkg=float(rec.remifentanil_bolus_mcgkg),
             remifentanil_rates_mcgkgmin=(
                 None
-                if rec.remifentanil_infusion_rates_mcgkgmin is None
-                else np.asarray(rec.remifentanil_infusion_rates_mcgkgmin, dtype=float).copy()
+                if rec.remifentanil_inf_rates_mcgkgmin is None
+                else np.asarray(rec.remifentanil_inf_rates_mcgkgmin, dtype=float).copy()
             ),
             remifentanil_rates_ml_h=(
                 None
-                if rec.remifentanil_infusion_rates_ml_h is None
-                else np.asarray(rec.remifentanil_infusion_rates_ml_h, dtype=float).copy()
+                if rec.remifentanil_inf_rates_ml_h is None
+                else np.asarray(rec.remifentanil_inf_rates_ml_h, dtype=float).copy()
             ),
             remifentanil_rates_ngkgmin=(
                 None
-                if rec.remifentanil_infusion_rates_ngkgmin is None
-                else np.asarray(rec.remifentanil_infusion_rates_ngkgmin, dtype=float).copy()
+                if rec.remifentanil_inf_rates_ngkgmin is None
+                else np.asarray(rec.remifentanil_inf_rates_ngkgmin, dtype=float).copy()
             ),
         )
 
@@ -829,6 +885,9 @@ def make_induction_dose_rationale_figure(
     State("sex-store", "data"),
 )
 def update_sex(male_clicks, female_clicks, current_value):
+    """
+    Update the selected sex based on button clicks.
+    """
     triggered = ctx.triggered_id
     value = current_value or "male"
 
@@ -855,6 +914,10 @@ def update_sex(male_clicks, female_clicks, current_value):
     Input("baseline_dap", "value"),
 )
 def update_derived_pressures(baseline_sap, baseline_dap):
+    """
+    Update the derived mean arterial pressure (MAP) and pulse pressure (PP)
+    based on the baseline systolic and diastolic arterial pressures.
+    """
     if baseline_sap is None or baseline_dap is None:
         return "-", "-"
 
@@ -915,6 +978,9 @@ def run_model(
     remifentanil_concentration_selection,
     remifentanil_concentration_custom,
 ):
+    """
+    Run the pharmacokinetic model and generate recommendations based on user inputs.
+    """
     try:
         age = float(age)
         height = float(height)

@@ -55,6 +55,9 @@ NOTE_STYLE = {
 
 
 def input_block(label: str, component, width: str = "220px", note: str | None = None):
+    """
+    Create a labeled input block with an optional note.
+    """
     children = [
         html.Label(
             label,
@@ -83,6 +86,9 @@ def input_block(label: str, component, width: str = "220px", note: str | None = 
 
 
 def value_display_block(label: str, value_id: str, width: str = "220px"):
+    """
+    Create a labeled value display block.
+    """
     return html.Div(
         [
             html.Label(
@@ -116,6 +122,9 @@ def value_display_block(label: str, value_id: str, width: str = "220px"):
 
 
 def segmented_buttons(label: str, button_ids_and_labels: list[tuple[str, str]]):
+    """
+    Create a segmented button group with a label.
+    """
     buttons = [
         html.Button(
             text,
@@ -150,6 +159,9 @@ def concentration_dropdown(
     value,
     unit: str,
 ):
+    """
+    Create a concentration dropdown with a custom input option.
+    """
     return html.Div(
         [
             input_block(
@@ -182,6 +194,9 @@ def concentration_dropdown(
 
 
 def graph_card(title: str, graph_id: str, note: str | None = None):
+    """
+    Create a graph card with an optional note.
+    """
     children = [
         html.H4(title, style={"marginTop": 0, "marginBottom": "8px"}),
     ]
@@ -195,30 +210,16 @@ def graph_card(title: str, graph_id: str, note: str | None = None):
 
 
 def build_layout():
+    """
+    Build the main layout of the dashboard.
+    """
     return html.Div(
         [
             dcc.Store(id="sex-store", data="male"),
 
             html.H2(
-                "Su2023 Propofol ± Opiate Dose Recommendation",
+                "Propofol ± Opiate Dose Recommendation",
                 style={"marginBottom": "8px"},
-            ),
-
-            html.Div(
-                (
-                    f"From {TARGET_ASSESSMENT_START_MIN:g} min onward, the deterministic target is "
-                    f"BIS {TARGET_BIS_LOW:.0f}–{TARGET_BIS_HIGH:.0f} and MAP ≥ "
-                    f"max({MAP_ABS_MIN_TARGET:.0f} mmHg, {int(MAP_REL_FRAC_TARGET * 100)}% of baseline). "
-                    f"Confidence is automatically based on {CONFIDENCE_N_SIMULATIONS} BSV simulations. "
-                    f"Final pump rates are rounded automatically to whole mL/h. Boluses are rounded "
-                    f"automatically to 5-unit steps."
-                ),
-                style={
-                    "marginBottom": "20px",
-                    "fontSize": "15px",
-                    "lineHeight": "1.45",
-                    "color": "#333",
-                },
             ),
 
             html.Div(

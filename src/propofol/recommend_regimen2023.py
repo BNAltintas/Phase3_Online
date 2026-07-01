@@ -90,12 +90,14 @@ def assessment_mask(t: Sequence[float]) -> np.ndarray:
 
 
 def round_to_step(x: float, step: float) -> float:
+    """Round a value to the nearest multiple of a given step."""
     if step <= 0:
         raise ValueError("step must be positive")
     return float(step * np.round(float(x) / step))
 
 
 def round_array_to_step(x: Sequence[float], step: float) -> np.ndarray:
+    """Round an array of values to the nearest multiple of a given step."""
     arr = np.asarray(x, dtype=float)
     if step <= 0:
         raise ValueError("step must be positive")
@@ -115,6 +117,7 @@ def mode_to_n_starts(mode: str) -> int:
 
 
 def count_rate_changes(rates: Optional[Sequence[float]], tol: float = 1e-8) -> int:
+    """Count the number of rate changes in a sequence of rates."""
     if rates is None:
         return 0
     rates = np.asarray(rates, dtype=float)
@@ -134,6 +137,7 @@ def validate_concentrations(
     propofol_concentration_mg_ml: float,
     remifentanil_concentration_mcg_ml: float,
 ) -> tuple[float, float]:
+    """Validate and return propofol and remifentanil concentrations."""
     prop = float(propofol_concentration_mg_ml)
     remi = float(remifentanil_concentration_mcg_ml)
 
@@ -154,6 +158,7 @@ def prop_mgkgh_to_ml_h(
     weight_kg: float,
     concentration_mg_ml: float,
 ) -> np.ndarray:
+    """Convert propofol infusion rates from mg/kg/h to mL/h."""
     rate_mgkg_h = np.asarray(rate_mgkg_h, dtype=float)
     return rate_mgkg_h * float(weight_kg) / float(concentration_mg_ml)
 
@@ -163,11 +168,13 @@ def prop_ml_h_to_mgkgh(
     weight_kg: float,
     concentration_mg_ml: float,
 ) -> np.ndarray:
+    """Convert propofol infusion rates from mL/h to mg/kg/h."""
     rate_ml_h = np.asarray(rate_ml_h, dtype=float)
     return rate_ml_h * float(concentration_mg_ml) / float(weight_kg)
 
 
 def prop_mgkgh_to_mcgkgmin(rate_mgkg_h: Sequence[float]) -> np.ndarray:
+    """Convert propofol infusion rates from mg/kg/h to mcg/kg/min."""
     rate_mgkg_h = np.asarray(rate_mgkg_h, dtype=float)
     return rate_mgkg_h * 1000.0 / 60.0
 
@@ -177,6 +184,7 @@ def remi_mcgkgmin_to_ml_h(
     weight_kg: float,
     concentration_mcg_ml: float,
 ) -> np.ndarray:
+    """Convert remifentanil infusion rates from mcg/kg/min to mL/h."""
     rate_mcgkg_min = np.asarray(rate_mcgkg_min, dtype=float)
     return rate_mcgkg_min * float(weight_kg) * 60.0 / float(concentration_mcg_ml)
 
@@ -186,11 +194,13 @@ def remi_ml_h_to_mcgkgmin(
     weight_kg: float,
     concentration_mcg_ml: float,
 ) -> np.ndarray:
+    """Convert remifentanil infusion rates from mL/h to mcg/kg/min."""
     rate_ml_h = np.asarray(rate_ml_h, dtype=float)
     return rate_ml_h * float(concentration_mcg_ml) / (float(weight_kg) * 60.0)
 
 
 def remi_mcgkgmin_to_ngkgmin(rate_mcgkg_min: Sequence[float]) -> np.ndarray:
+    """Convert remifentanil infusion rates from mcg/kg/min to ng/kg/min."""
     rate_mcgkg_min = np.asarray(rate_mcgkg_min, dtype=float)
     return rate_mcgkg_min * 1000.0
 
@@ -271,6 +281,15 @@ class PiecewiseWeightScaledDosing:
         self.tcrit = sorted(set(critical_times))
 
     def _maintenance_amount_per_min(self, rate: float) -> float:
+        """
+        Convert a maintenance infusion rate to the amount per minute.
+
+        Args:
+            rate: The infusion rate in the specified rate_unit.
+
+        Returns:
+            The amount of drug administered per minute.
+        """
         if self.rate_unit == "mgkg_h":
             return float(rate) * self.weight_kg / 60.0
         if self.rate_unit == "mcgkg_min":
@@ -278,6 +297,15 @@ class PiecewiseWeightScaledDosing:
         raise RuntimeError("Unsupported rate_unit")
 
     def dotA0(self, t: float) -> float:
+        """
+        Compute the drug input rate at a given time.
+
+        Args:
+            t: Time in minutes.
+
+        Returns:
+            The drug input rate in amount/min.
+        """
         t = float(t)
 
         if self.bolus_amount > 0 and 0.0 <= t < self.bolus_duration_min:
@@ -349,16 +377,16 @@ class ConfidenceResult:
 class RecommendationResult:
     propofol_bolus_mg: float
     propofol_bolus_mgkg: float
-    propofol_infusion_rates_mgkgh: np.ndarray
-    propofol_infusion_rates_ml_h: np.ndarray
-    propofol_infusion_rates_mcgkgmin: np.ndarray
+    propofol_inf_rates_mgkgh: np.ndarray
+    propofol_inf_rates_ml_h: np.ndarray
+    propofol_inf_rates_mcgkgmin: np.ndarray
 
     remifentanil_selected: bool
     remifentanil_bolus_mcg: float
     remifentanil_bolus_mcgkg: float
-    remifentanil_infusion_rates_mcgkgmin: Optional[np.ndarray]
-    remifentanil_infusion_rates_ml_h: Optional[np.ndarray]
-    remifentanil_infusion_rates_ngkgmin: Optional[np.ndarray]
+    remifentanil_inf_rates_mcgkgmin: Optional[np.ndarray]
+    remifentanil_inf_rates_ml_h: Optional[np.ndarray]
+    remifentanil_inf_rates_ngkgmin: Optional[np.ndarray]
 
     propofol_concentration_mg_ml: float
     remifentanil_concentration_mcg_ml: float
@@ -417,6 +445,7 @@ def extract_su2023_output(
     map_output_index: int = SU2023_MAP_OUTPUT_INDEX,
     remi_a1_output_index: int = SU2023_REMI_A1_OUTPUT_INDEX,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, Optional[np.ndarray]]:
+    """Extract propofol a1, ce, MAP, and remifentanil a1 from Su2023 solve_ode output."""
     if len(out) < 4:
         raise ValueError("Su2023 solve_ode output has fewer than 4 elements.")
 
@@ -469,6 +498,7 @@ def trajectory_target_flags(
 
 
 def percentile_band(values: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Compute the 5th, 50th, and 95th percentiles of a list of arrays."""
     if len(values) == 0:
         nan = np.full_like(TIME, np.nan, dtype=float)
         return nan, nan, nan
@@ -526,6 +556,9 @@ class Su2023PropofolRemifentanilRecommender:
         self.haemo = self._instantiate_haemo()
 
     def _instantiate_haemo(self) -> SuHaemoPD:
+        """
+        Instantiate the SuHaemoPD model with the appropriate parameters.
+        """
         try:
             return SuHaemoPD(
                 patient=self.patient,
@@ -556,6 +589,9 @@ class Su2023PropofolRemifentanilRecommender:
         return 5 + (4 if self.use_remifentanil else 0)
 
     def build_bounds(self) -> list[tuple[float, float]]:
+        """
+        Build the bounds for the optimization parameters.
+        """
         bounds: list[tuple[float, float]] = [
             BOLUS_MGKG_BOUNDS,
             (0.0, MAX_INITIAL_PAUSE_MIN),
@@ -575,12 +611,18 @@ class Su2023PropofolRemifentanilRecommender:
         return bounds
 
     def build_scipy_bounds(self) -> Bounds:
+        """
+        Build a scipy.optimize.Bounds object for the optimization parameters.
+        """
         bounds = self.build_bounds()
         lower = np.asarray([b[0] for b in bounds], dtype=float)
         upper = np.asarray([b[1] for b in bounds], dtype=float)
         return Bounds(lower, upper)
 
     def clip_x_to_bounds(self, x: Sequence[float]) -> np.ndarray:
+        """
+        Clip the optimization parameters to their respective bounds.
+        """
         x = np.asarray(x, dtype=float)
         bounds = self.build_bounds()
         lower = np.asarray([b[0] for b in bounds], dtype=float)
@@ -591,6 +633,9 @@ class Su2023PropofolRemifentanilRecommender:
         self,
         x: Sequence[float],
     ) -> tuple[float, float, float, float, float, Optional[tuple[float, float, float, float]]]:
+        """
+        Split the optimization parameter vector into individual components.
+        """
         x = self.clip_x_to_bounds(x)
 
         prop_bolus_mgkg = float(x[0])
@@ -618,6 +663,9 @@ class Su2023PropofolRemifentanilRecommender:
         )
 
     def decode_regimen(self, x: Sequence[float], apply_final_rounding: bool) -> DecodedRegimen:
+        """
+        Decode the optimization parameter vector into a human-readable regimen.
+        """
         (
             prop_bolus_mgkg,
             prop_pause_min,
@@ -719,6 +767,9 @@ class Su2023PropofolRemifentanilRecommender:
         self,
         regimen: DecodedRegimen,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, Optional[np.ndarray], np.ndarray, np.ndarray]:
+        """
+        Simulate the PK/PD and MAP response for a given regimen.
+        """
         dosing_prop = PiecewiseWeightScaledDosing(
             bolus_amount=regimen.propofol_bolus_mg,
             infusion_rates=regimen.propofol_rates_mgkgh,
@@ -778,6 +829,9 @@ class Su2023PropofolRemifentanilRecommender:
         x: Sequence[float],
         apply_final_rounding: bool,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, Optional[np.ndarray], np.ndarray, np.ndarray, DecodedRegimen]:
+        """
+        Simulate the PK/PD and MAP response for a given optimization parameter vector.
+        """
         regimen = self.decode_regimen(x, apply_final_rounding=apply_final_rounding)
         t, cp_prop, ce_prop, cp_remi, bis, map_mmhg = self.simulate_regimen(regimen)
         return t, cp_prop, ce_prop, cp_remi, bis, map_mmhg, regimen
@@ -943,6 +997,9 @@ class Su2023PropofolRemifentanilRecommender:
         )
 
     def objective(self, x: np.ndarray) -> float:
+        """
+        Compute the objective function value for a given optimization parameter vector.
+        """
         x = self.clip_x_to_bounds(x)
         # Round the cache key lightly. This avoids repeated ODE solves for nearly
         # identical Powell evaluations without changing the practical optimum.
@@ -964,6 +1021,10 @@ class Su2023PropofolRemifentanilRecommender:
         return float(value)
 
     def rounded_objective(self, x: np.ndarray) -> float:
+        """
+        Compute the objective function value for a given optimization parameter vector,
+        after applying final rounding to the regimen.
+        """
         try:
             t, _, _, _, bis, map_mmhg, regimen = self.simulate_x(
                 x,
@@ -1009,6 +1070,10 @@ class Su2023PropofolRemifentanilRecommender:
         return out
 
     def optimize_once(self, x0: np.ndarray) -> tuple[float, np.ndarray]:
+        """
+        Run a single Powell optimization starting from x0 and return the rounded objective value
+        and the corresponding parameter vector.
+        """
         result = minimize(
             self.objective,
             x0=self.clip_x_to_bounds(x0),
@@ -1069,15 +1134,15 @@ class Su2023PropofolRemifentanilRecommender:
         return RecommendationResult(
             propofol_bolus_mg=regimen.propofol_bolus_mg,
             propofol_bolus_mgkg=regimen.propofol_bolus_mgkg,
-            propofol_infusion_rates_mgkgh=regimen.propofol_rates_mgkgh,
-            propofol_infusion_rates_ml_h=regimen.propofol_rates_ml_h,
-            propofol_infusion_rates_mcgkgmin=regimen.propofol_rates_mcgkgmin,
+            propofol_inf_rates_mgkgh=regimen.propofol_rates_mgkgh,
+            propofol_inf_rates_ml_h=regimen.propofol_rates_ml_h,
+            propofol_inf_rates_mcgkgmin=regimen.propofol_rates_mcgkgmin,
             remifentanil_selected=regimen.remifentanil_selected,
             remifentanil_bolus_mcg=regimen.remifentanil_bolus_mcg,
             remifentanil_bolus_mcgkg=regimen.remifentanil_bolus_mcgkg,
-            remifentanil_infusion_rates_mcgkgmin=regimen.remifentanil_rates_mcgkgmin,
-            remifentanil_infusion_rates_ml_h=regimen.remifentanil_rates_ml_h,
-            remifentanil_infusion_rates_ngkgmin=regimen.remifentanil_rates_ngkgmin,
+            remifentanil_inf_rates_mcgkgmin=regimen.remifentanil_rates_mcgkgmin,
+            remifentanil_inf_rates_ml_h=regimen.remifentanil_rates_ml_h,
+            remifentanil_inf_rates_ngkgmin=regimen.remifentanil_rates_ngkgmin,
             propofol_concentration_mg_ml=self.propofol_concentration_mg_ml,
             remifentanil_concentration_mcg_ml=self.remifentanil_concentration_mcg_ml,
             time_min=t,
@@ -1117,6 +1182,9 @@ def simulate_regimen_once(
     remi_a1_output_index: int,
     seed: Optional[int] = None,
 ):
+    """
+    Simulate a single regimen with optional BSV and return the PK/PD and MAP outputs.
+    """
     if seed is not None:
         np.random.seed(int(seed))
 
@@ -1145,6 +1213,9 @@ def simulate_confidence(
     remi_a1_output_index: int = SU2023_REMI_A1_OUTPUT_INDEX,
     base_seed: int = 10_000,
 ) -> ConfidenceResult:
+    """
+    Simulate multiple regimens to estimate the confidence in meeting the target BIS and MAP values.
+    """
     bis_values: list[np.ndarray] = []
     map_values: list[np.ndarray] = []
     cp_prop_values: list[np.ndarray] = []
