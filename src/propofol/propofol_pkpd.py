@@ -134,13 +134,13 @@ class EleveldPK():
 
         # variances (from the NONMEM code)
         omega2 = np.array([
-            3.725310e-01,
-            3.192030e-01,
-            3.563620e-01,
-            7.022160e-02,
-            1.199800e-01,
-            4.360060e-02,
-            2.142470e-01
+            3.725310e-01**2,
+            3.192030e-01**2,
+            3.563620e-01**2,
+            7.022160e-02**2,
+            1.199800e-01**2,
+            4.360060e-02**2,
+            2.142470e-01**2
         ])
 
         n_samples = 1
@@ -359,9 +359,9 @@ class EleveldPD():
         """
         # Variances from the NONMEM code
         omega2 = np.array([
-            5.841270e-02,
-            4.924930e-01,
-            5.287310e-02
+            5.841270e-02**2,
+            4.924930e-01**2,
+            5.287310e-02**2
         ])
 
         n_samples = 1  # note: scipy.integrate cannot do multiple realizations at once.
