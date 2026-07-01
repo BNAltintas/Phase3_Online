@@ -9,14 +9,14 @@ from plotly.subplots import make_subplots
 from propofol.dashboard_layout import build_layout
 from propofol.patient import EleveldPatient as Patient
 from propofol.recommend_regimen2023 import (
-    DecodedRegimen,
     TARGET_ASSESSMENT_START_MIN,
     TARGET_BIS_HIGH,
     TARGET_BIS_LOW,
+    DecodedRegimen,
     Su2023PropofolRemifentanilRecommender,
     compress_minute_schedule,
-    recommend_su2023_regimen)
-
+    recommend_su2023_regimen,
+)
 
 # ============================================================
 # App setup
@@ -121,7 +121,7 @@ def format_propofol_schedule(rates_ml_h, rates_mcgkgmin) -> list[str]:
         return ["No maintenance"]
 
     lines = []
-    for ml_row, mcg_row in zip(ml_rows, mcg_rows):
+    for ml_row, mcg_row in zip(ml_rows, mcg_rows, strict=False):
         lines.append(
             f"{ml_row['start_min']:.0f}–{ml_row['end_min']:.0f} min: "
             f"{ml_row['rate']:.0f} mL/h ({mcg_row['rate']:.0f} µg/kg/min)"
@@ -141,7 +141,7 @@ def format_remifentanil_schedule(rates_ml_h, rates_ngkgmin) -> list[str]:
         return ["No maintenance"]
 
     lines = []
-    for ml_row, ng_row in zip(ml_rows, ng_rows):
+    for ml_row, ng_row in zip(ml_rows, ng_rows, strict=False):
         lines.append(
             f"{ml_row['start_min']:.0f}–{ml_row['end_min']:.0f} min: "
             f"{ml_row['rate']:.0f} mL/h ({ng_row['rate']:.0f} ng/kg/min)"
@@ -352,21 +352,18 @@ def _dose_axis_limits_mgkg(selected_dose_mgkg: float) -> tuple[float, float]:
     x_min = max(0.30, selected_dose_mgkg - 1.50)
     x_max = min(5.00, selected_dose_mgkg + 1.50)
 
-    # Avoid a collapsed axis in unusual edge cases.
     if x_max <= x_min:
         x_min, x_max = 0.30, 5.00
 
     return float(x_min), float(x_max)
 
 
-def _clinical_propofol_dose_grid_mgkg(
-    selected_bolus_mgkg: float,
-) -> np.ndarray:
+def _clinical_propofol_dose_grid_mgkg(selected_bolus_mgkg: float) -> np.ndarray:
     """
-    Build a dose grid only around the selected dose.
+    Build a local propofol induction-dose grid around the selected dose.
 
-    The axis range is selected dose ±1.5 mg/kg, clipped to max 0.3-5.0 mg/kg.
-    A 0.10 mg/kg grid keeps the graph reasonably smooth without making the
+    The displayed axis is selected dose ±1.5 mg/kg, clipped to 0.3-5.0 mg/kg.
+    A 0.10 mg/kg spacing gives a smooth rationale curve without making the
     dashboard too slow.
     """
     x_min, x_max = _dose_axis_limits_mgkg(selected_bolus_mgkg)
@@ -381,7 +378,7 @@ def _clinical_propofol_dose_grid_mgkg(
 
 def _finite_min(values, default: float) -> float:
     """
-    Compute the minimum of finite values, returning a default if none are finite.
+    Compute the minimum of finite values, returning a default if no finite values exist.
     """
     arr = np.asarray(values, dtype=float)
     arr = arr[np.isfinite(arr)]
@@ -390,194 +387,96 @@ def _finite_min(values, default: float) -> float:
 
 def _finite_max(values, default: float) -> float:
     """
-    Compute the maximum of finite values, returning a default if none are finite.
+    Compute the maximum of finite values, returning a default if no finite values exist.
     """
     arr = np.asarray(values, dtype=float)
     arr = arr[np.isfinite(arr)]
     return float(np.max(arr)) if len(arr) else float(default)
 
 
-def _round_axis_lower(x: float, step: float = 5.0) -> float:
+def _strict_prediction_axis_range(
+    values: np.ndarray,
+    lower_floor: float | None = None,
+    upper_ceiling: float | None = None,
+    default_min: float = 0.0,
+    default_max: float = 1.0,
+    min_span: float = 1.0,
+) -> tuple[float, float]:
     """
-    Round a value down to the nearest multiple of the step.
+    Axis limits are defined by the lowest and highest finite predicted values.
+
+    Optional constraints:
+        lower_floor: axis minimum cannot go below this value.
+        upper_ceiling: axis maximum cannot go above this value.
+
+    A small fallback span is only applied if all predicted values are equal or
+    invalid, because Plotly cannot display a zero-height axis.
     """
-    return float(step * np.floor(float(x) / step))
+    arr = np.asarray(values, dtype=float)
+    arr = arr[np.isfinite(arr)]
+
+    if len(arr) == 0:
+        axis_min = float(default_min)
+        axis_max = float(default_max)
+    else:
+        axis_min = float(np.min(arr))
+        axis_max = float(np.max(arr))
+
+    if lower_floor is not None:
+        axis_min = max(float(lower_floor), axis_min)
+
+    if upper_ceiling is not None:
+        axis_max = min(float(upper_ceiling), axis_max)
+
+    if not np.isfinite(axis_min) or not np.isfinite(axis_max):
+        axis_min = float(default_min)
+        axis_max = float(default_max)
+
+    if axis_max <= axis_min:
+        center = 0.5 * (axis_min + axis_max)
+        half_span = 0.5 * float(min_span)
+        axis_min = center - half_span
+        axis_max = center + half_span
+
+        if lower_floor is not None:
+            axis_min = max(float(lower_floor), axis_min)
+
+        if upper_ceiling is not None:
+            axis_max = min(float(upper_ceiling), axis_max)
+
+        if axis_max <= axis_min:
+            axis_max = axis_min + float(min_span)
+
+    return float(axis_min), float(axis_max)
 
 
-def _round_axis_upper(x: float, step: float = 5.0) -> float:
+def _target_rect_y_limits(
+    band_low: float,
+    band_high: float,
+    axis_min: float,
+    axis_max: float,
+) -> tuple[float, float] | None:
     """
-    Round a value up to the nearest multiple of the step.
+    Clip a target band to the visible axis range.
+
+    Returns None if the target band is completely outside the current visible
+    axis range.
     """
-    return float(step * np.ceil(float(x) / step))
+    y0 = max(float(band_low), float(axis_min))
+    y1 = min(float(band_high), float(axis_max))
 
+    if y1 <= y0:
+        return None
 
-def _axis_ranges_crossing_selected(
-    selected_map: float,
-    selected_bis: float,
-    map_values: np.ndarray,
-    bis_values: np.ndarray,
-    map_target_low: float,
-    map_target_high: float,
-) -> tuple[float, float, float, float]:
-    """
-    Compute dynamic MAP and BIS axis ranges that make the MAP and BIS selected
-    dose points visually cross.
-
-    Returned values:
-        map_axis_min, map_axis_max, bis_axis_bottom, bis_axis_top
-
-    Constraints:
-        - MAP axis is not allowed below 0.
-        - BIS axis is reversed and not allowed below 0 or above 100.
-        - Both axes include their displayed data and target bands when feasible.
-    """
-    selected_map = float(selected_map)
-    selected_bis = float(selected_bis)
-
-    map_values = np.asarray(map_values, dtype=float)
-    bis_values = np.asarray(bis_values, dtype=float)
-
-    # Required visible ranges.
-    map_low_req = max(
-        0.0,
-        min(
-            _finite_min(map_values, default=selected_map),
-            map_target_low,
-            selected_map,
-        ) - 5.0,
-    )
-    map_high_req = max(
-        _finite_max(map_values, default=selected_map),
-        map_target_high,
-        selected_map,
-    ) + 5.0
-
-    bis_low_req = max(
-        0.0,
-        min(
-            _finite_min(bis_values, default=selected_bis),
-            TARGET_BIS_LOW,
-            selected_bis,
-        ) - 5.0,
-    )
-    bis_high_req = min(
-        100.0,
-        max(
-            _finite_max(bis_values, default=selected_bis),
-            TARGET_BIS_HIGH,
-            selected_bis,
-        ) + 5.0,
-    )
-
-    if (
-        not np.isfinite(selected_map)
-        or not np.isfinite(selected_bis)
-        or selected_map < 0
-        or selected_bis < 0
-        or selected_bis > 100
-    ):
-        map_axis_min = max(0.0, _round_axis_lower(map_low_req, step=5.0))
-        map_axis_max = _round_axis_upper(max(map_high_req, map_axis_min + 10.0), step=5.0)
-        return map_axis_min, map_axis_max, 100.0, 0.0
-
-    # Search over possible vertical crossing fractions. Fraction is measured
-    # from the bottom of the plot area. The same fraction is used for the
-    # selected MAP and selected BIS points, so the curves cross at the selected
-    # dose.
-    best = None
-
-    for f in np.linspace(0.10, 0.90, 161):
-        f = float(f)
-
-        # BIS axis is reversed:
-        #   bottom = selected_bis + f * span
-        #   top    = selected_bis - (1 - f) * span
-        # Need: bottom >= bis_high_req, top <= bis_low_req,
-        # while bottom <= 100 and top >= 0.
-        bis_span_min = max(
-            10.0,
-            (bis_high_req - selected_bis) / max(f, 1e-6),
-            (selected_bis - bis_low_req) / max(1.0 - f, 1e-6),
-        )
-        bis_span_max = min(
-            (100.0 - selected_bis) / max(f, 1e-6),
-            selected_bis / max(1.0 - f, 1e-6),
-        )
-
-        if bis_span_min > bis_span_max:
-            continue
-
-        # MAP axis:
-        #   min = selected_map - f * span
-        #   max = selected_map + (1 - f) * span
-        # Need: min <= map_low_req, max >= map_high_req, min >= 0.
-        map_span_min = max(
-            10.0,
-            (selected_map - map_low_req) / max(f, 1e-6),
-            (map_high_req - selected_map) / max(1.0 - f, 1e-6),
-        )
-        map_span_max = selected_map / max(f, 1e-6) if selected_map >= 0 else -np.inf
-
-        if map_span_min > map_span_max:
-            continue
-
-        # Use the smallest feasible spans for a zoomed-in graph.
-        bis_span = min(bis_span_max, bis_span_min * 1.02)
-        map_span = min(map_span_max, map_span_min * 1.02)
-
-        bis_bottom = selected_bis + f * bis_span
-        bis_top = selected_bis - (1.0 - f) * bis_span
-        map_min = selected_map - f * map_span
-        map_max = selected_map + (1.0 - f) * map_span
-
-        # Round axes outward while respecting constraints.
-        bis_bottom = min(100.0, _round_axis_upper(bis_bottom, step=5.0))
-        bis_top = max(0.0, _round_axis_lower(bis_top, step=5.0))
-        map_min = max(0.0, _round_axis_lower(map_min, step=5.0))
-        map_max = _round_axis_upper(map_max, step=5.0)
-
-        if map_max <= map_min or bis_bottom <= bis_top:
-            continue
-
-        # Recalculate actual crossing fractions after rounding.
-        map_f = (selected_map - map_min) / (map_max - map_min)
-        bis_f = (bis_bottom - selected_bis) / (bis_bottom - bis_top)
-        crossing_error = abs(map_f - bis_f)
-
-        # Prefer exact crossing, then tighter zoom, then less extreme placement.
-        score = (
-            10_000.0 * crossing_error
-            + 0.01 * (map_max - map_min)
-            + 0.05 * (bis_bottom - bis_top)
-            + abs(f - 0.50)
-        )
-
-        if best is None or score < best[0]:
-            best = (score, map_min, map_max, bis_bottom, bis_top)
-
-    if best is not None:
-        _, map_min, map_max, bis_bottom, bis_top = best
-        return float(map_min), float(map_max), float(bis_bottom), float(bis_top)
-
-    # Fallback: zoom both axes independently, respecting constraints. This path
-    # should be rare, but prevents crashes for extreme model outputs.
-    map_axis_min = max(0.0, _round_axis_lower(map_low_req, step=5.0))
-    map_axis_max = _round_axis_upper(max(map_high_req, map_axis_min + 10.0), step=5.0)
-
-    bis_axis_bottom = min(100.0, _round_axis_upper(bis_high_req, step=5.0))
-    bis_axis_top = max(0.0, _round_axis_lower(bis_low_req, step=5.0))
-    if bis_axis_bottom <= bis_axis_top:
-        bis_axis_bottom, bis_axis_top = 100.0, 0.0
-
-    return float(map_axis_min), float(map_axis_max), float(bis_axis_bottom), float(bis_axis_top)
+    return y0, y1
 
 
 def make_induction_dose_rationale_figure(
     patient: Patient,
     rec,
     opiate: str,
-    propofol_concentration_mg_ml: float,
-    remifentanil_concentration_mcg_ml: float,
+    propofol_conc_mg_ml: float,
+    remifentanil_conc_mcg_ml: float,
 ):
     """
     Vary only the propofol induction bolus while keeping the recommended
@@ -591,10 +490,16 @@ def make_induction_dose_rationale_figure(
         minimal MAP after target start.
 
     Right y-axis:
-        minimal BIS after target start, reversed and constrained to 0-100.
+        maximal BIS after target start, reversed.
 
-    The y-axes are dynamically zoomed so the MAP and BIS lines cross at the
-    recommended induction dose.
+    BIS interpretation:
+        The plotted blue curve is maximal BIS after target start, because
+        adequate hypnotic depth is primarily an upper-bound problem:
+            max BIS after target start <= 60.
+
+        Minimal BIS is still computed internally to check the lower BIS safety
+        boundary:
+            min BIS after target start >= 40.
     """
     selected_dose_mgkg = float(rec.propofol_bolus_mgkg)
     baseline_map = float(patient.base_map)
@@ -608,12 +513,13 @@ def make_induction_dose_rationale_figure(
         patient=patient,
         use_remifentanil=(opiate == "remifentanil"),
         use_bsv=False,
-        propofol_concentration_mg_ml=propofol_concentration_mg_ml,
-        remifentanil_concentration_mcg_ml=remifentanil_concentration_mcg_ml,
+        propofol_conc_mg_ml=propofol_conc_mg_ml,
+        remifentanil_conc_mcg_ml=remifentanil_conc_mcg_ml,
     )
 
     min_maps = []
     min_bis_values = []
+    max_bis_values = []
 
     for dose_mgkg in dose_grid_mgkg:
         regimen = DecodedRegimen(
@@ -649,95 +555,165 @@ def make_induction_dose_rationale_figure(
             if not np.any(mask):
                 min_maps.append(np.nan)
                 min_bis_values.append(np.nan)
+                max_bis_values.append(np.nan)
                 continue
 
-            min_maps.append(float(np.nanmin(np.asarray(map_mmhg, dtype=float)[mask])))
-            min_bis_values.append(float(np.nanmin(np.asarray(bis, dtype=float)[mask])))
+            bis_after_target = np.asarray(bis, dtype=float)[mask]
+            map_after_target = np.asarray(map_mmhg, dtype=float)[mask]
+
+            min_maps.append(float(np.nanmin(map_after_target)))
+            min_bis_values.append(float(np.nanmin(bis_after_target)))
+            max_bis_values.append(float(np.nanmax(bis_after_target)))
 
         except Exception:
             min_maps.append(np.nan)
             min_bis_values.append(np.nan)
+            max_bis_values.append(np.nan)
 
     min_maps = np.asarray(min_maps, dtype=float)
     min_bis_values = np.asarray(min_bis_values, dtype=float)
+    max_bis_values = np.asarray(max_bis_values, dtype=float)
 
     selected_idx = int(np.argmin(np.abs(dose_grid_mgkg - selected_dose_mgkg)))
     selected_min_map = float(min_maps[selected_idx])
     selected_min_bis = float(min_bis_values[selected_idx])
+    selected_max_bis = float(max_bis_values[selected_idx])
 
-    (
-        map_axis_min,
-        map_axis_max,
-        bis_axis_bottom,
-        bis_axis_top,
-    ) = _axis_ranges_crossing_selected(
-        selected_map=selected_min_map,
-        selected_bis=selected_min_bis,
-        map_values=min_maps,
-        bis_values=min_bis_values,
-        map_target_low=map_target,
-        map_target_high=map_target_upper,
+    map_axis_min, map_axis_max = _strict_prediction_axis_range(
+        min_maps,
+        lower_floor=0.0,
+        upper_ceiling=None,
+        default_min=0.0,
+        default_max=max(1.0, map_target_upper),
+        min_span=1.0,
+    )
+
+    max_bis_axis_min, max_bis_axis_max = _strict_prediction_axis_range(
+        max_bis_values,
+        lower_floor=0.0,
+        upper_ceiling=100.0,
+        default_min=0.0,
+        default_max=100.0,
+        min_span=1.0,
     )
 
     fig = make_subplots(specs=[[{"secondary_y": True}]])
 
-    # MAP target band: lower target to 20% above baseline.
-    fig.add_shape(
-        type="rect",
-        xref="paper",
-        x0=0,
-        x1=1,
-        yref="y",
-        y0=map_target,
-        y1=map_target_upper,
-        fillcolor="rgba(220, 0, 0, 0.10)",
-        line=dict(width=0),
-        layer="below",
+    # MAP target band: lower target to 20% above baseline, clipped to visible axis.
+    map_band = _target_rect_y_limits(
+        band_low=map_target,
+        band_high=map_target_upper,
+        axis_min=map_axis_min,
+        axis_max=map_axis_max,
     )
-
-    # BIS target band.
-    fig.add_shape(
-        type="rect",
-        xref="paper",
-        x0=0,
-        x1=1,
-        yref="y2",
-        y0=TARGET_BIS_LOW,
-        y1=TARGET_BIS_HIGH,
-        fillcolor="rgba(0, 85, 220, 0.10)",
-        line=dict(width=0),
-        layer="below",
-    )
-
-    # Warning background below MAP target.
-    if map_axis_min < map_target:
+    if map_band is not None:
         fig.add_shape(
             type="rect",
             xref="paper",
             x0=0,
             x1=1,
             yref="y",
-            y0=map_axis_min,
-            y1=map_target,
-            fillcolor="rgba(220, 0, 0, 0.035)",
+            y0=map_band[0],
+            y1=map_band[1],
+            fillcolor="rgba(220, 0, 0, 0.10)",
             line=dict(width=0),
             layer="below",
         )
 
-    # Warning background for BIS >60 on the reversed right axis.
-    if bis_axis_bottom > TARGET_BIS_HIGH:
+    # BIS target band for the plotted maximal BIS curve.
+    # Since the blue line is max BIS, the clinically relevant upper boundary is 60.
+    # The lower boundary 40 is still shown as context, but excessive depth is
+    # checked using min_bis_values in both_targets_ok.
+    bis_band = _target_rect_y_limits(
+        band_low=TARGET_BIS_LOW,
+        band_high=TARGET_BIS_HIGH,
+        axis_min=max_bis_axis_min,
+        axis_max=max_bis_axis_max,
+    )
+    if bis_band is not None:
         fig.add_shape(
             type="rect",
             xref="paper",
             x0=0,
             x1=1,
             yref="y2",
-            y0=TARGET_BIS_HIGH,
-            y1=bis_axis_bottom,
-            fillcolor="rgba(0, 85, 220, 0.035)",
+            y0=bis_band[0],
+            y1=bis_band[1],
+            fillcolor="rgba(0, 85, 220, 0.10)",
             line=dict(width=0),
             layer="below",
         )
+
+    # Green band and dotted limits where both MAP and BIS targets are met.
+    #
+    # MAP target:
+    #   minimal MAP between lower MAP target and 20% above baseline.
+    #
+    # BIS target:
+    #   maximal BIS <= 60, to ensure adequate hypnosis.
+    #   minimal BIS >= 40, to avoid excessive hypnotic depth.
+    #
+    # Use yref="paper" so the green range remains visible regardless of y-axis zoom.
+    both_targets_ok = (
+        np.isfinite(min_maps)
+        & np.isfinite(min_bis_values)
+        & np.isfinite(max_bis_values)
+        & (min_maps >= map_target)
+        & (min_maps <= map_target_upper)
+        & (min_bis_values >= TARGET_BIS_LOW)
+        & (max_bis_values <= TARGET_BIS_HIGH)
+    )
+
+    if np.any(both_targets_ok):
+        ok_doses = dose_grid_mgkg[both_targets_ok]
+        ok_start = float(np.min(ok_doses))
+        ok_end = float(np.max(ok_doses))
+
+        # Shaded dose range where both targets are met.
+        # If only a single tested dose meets both targets, draw a very narrow band
+        # around that dose so the range remains visible.
+        if ok_end > ok_start:
+            band_x0 = ok_start
+            band_x1 = ok_end
+        else:
+            local_step = (
+                float(np.nanmedian(np.diff(dose_grid_mgkg)))
+                if len(dose_grid_mgkg) > 1
+                else 0.05
+            )
+            band_half_width = max(0.025, 0.5 * local_step)
+            band_x0 = max(x_axis_min, ok_start - band_half_width)
+            band_x1 = min(x_axis_max, ok_end + band_half_width)
+
+        fig.add_shape(
+            type="rect",
+            xref="x",
+            yref="paper",
+            x0=band_x0,
+            x1=band_x1,
+            y0=0,
+            y1=1,
+            fillcolor="rgba(0, 150, 0, 0.10)",
+            line=dict(width=0),
+            layer="below",
+        )
+
+        # Lower and upper target-dose limits.
+        for x_value, label, x_anchor in [
+            (ok_start, f"{ok_start:.2f}", "right"),
+            (ok_end, f"{ok_end:.2f}", "left"),
+        ]:
+            fig.add_annotation(
+                x=x_value,
+                y=1.01,
+                xref="x",
+                yref="paper",
+                text=f"<b>{label}</b>",
+                showarrow=False,
+                xanchor=x_anchor,
+                yanchor="bottom",
+                font=dict(color="green", size=13),
+            )
 
     fig.add_trace(
         go.Scatter(
@@ -755,53 +731,20 @@ def make_induction_dose_rationale_figure(
     fig.add_trace(
         go.Scatter(
             x=dose_grid_mgkg,
-            y=min_bis_values,
+            y=max_bis_values,
+            customdata=np.stack([min_bis_values], axis=-1),
             mode="lines+markers",
             line=dict(color="blue", width=3),
             marker=dict(color="blue", size=6),
             showlegend=False,
-            hovertemplate="Dose %{x:.3f} mg/kg<br>Minimal BIS %{y:.1f}<extra></extra>",
+            hovertemplate=(
+                "Dose %{x:.3f} mg/kg<br>"
+                "Maximal BIS %{y:.1f}<br>"
+                "Minimal BIS %{customdata[0]:.1f}<extra></extra>"
+            ),
         ),
         secondary_y=True,
     )
-
-    # Range of doses where both minimal MAP and minimal BIS are within target.
-    both_targets_ok = (
-        np.isfinite(min_maps)
-        & np.isfinite(min_bis_values)
-        & (min_maps >= map_target)
-        & (min_maps <= map_target_upper)
-        & (min_bis_values >= TARGET_BIS_LOW)
-        & (min_bis_values <= TARGET_BIS_HIGH)
-    )
-
-    if np.any(both_targets_ok):
-        ok_doses = dose_grid_mgkg[both_targets_ok]
-        ok_start = float(np.min(ok_doses))
-        ok_end = float(np.max(ok_doses))
-
-        fig.add_vline(
-            x=ok_start,
-            line_dash="dot",
-            line_color="green",
-            annotation_text=f"{ok_start:.2f}",
-            annotation_position="top left",
-        )
-        fig.add_vline(
-            x=ok_end,
-            line_dash="dot",
-            line_color="green",
-            annotation_text=f"{ok_end:.2f}",
-            annotation_position="top right",
-        )
-        if ok_end > ok_start:
-            fig.add_vrect(
-                x0=ok_start,
-                x1=ok_end,
-                fillcolor="rgba(0, 150, 0, 0.05)",
-                line_width=0,
-                layer="below",
-            )
 
     fig.add_trace(
         go.Scatter(
@@ -822,31 +765,49 @@ def make_induction_dose_rationale_figure(
     fig.add_trace(
         go.Scatter(
             x=[selected_dose_mgkg],
-            y=[selected_min_bis],
+            y=[selected_max_bis],
+            customdata=[[selected_min_bis]],
             mode="markers",
             marker=dict(color="blue", size=14, symbol="diamond"),
             showlegend=False,
             hovertemplate=(
                 "Selected dose %{x:.3f} mg/kg<br>"
-                "Minimal BIS %{y:.1f}<br>"
+                "Maximal BIS %{y:.1f}<br>"
+                "Minimal BIS %{customdata[0]:.1f}<br>"
                 f"BIS target {TARGET_BIS_LOW:.0f}-{TARGET_BIS_HIGH:.0f}<extra></extra>"
             ),
         ),
         secondary_y=True,
     )
 
-    fig.add_vline(
+    # Selected recommended induction dose, shown in bold black.
+    fig.add_shape(
+        type="line",
+        xref="x",
+        yref="paper",
+        x0=selected_dose_mgkg,
+        x1=selected_dose_mgkg,
+        y0=0,
+        y1=1,
+        line=dict(color="black", width=3, dash="dash"),
+        layer="above",
+    )
+    fig.add_annotation(
         x=selected_dose_mgkg,
-        line_dash="dash",
-        line_color="black",
-        annotation_text=f"Selected {selected_dose_mgkg:.3f} mg/kg",
-        annotation_position="top",
+        y=1.07,
+        xref="x",
+        yref="paper",
+        text=f"<b>Selected {selected_dose_mgkg:.3f} mg/kg</b>",
+        showarrow=False,
+        yanchor="bottom",
+        font=dict(color="black", size=13),
     )
 
     fig.update_layout(
         title="Induction-dose rationale",
         template="plotly_white",
         showlegend=False,
+        margin=dict(t=95),
         xaxis=dict(
             title=dict(text="Propofol induction dose (mg/kg)", font=dict(color="green")),
             tickfont=dict(color="green"),
@@ -860,10 +821,10 @@ def make_induction_dose_rationale_figure(
             range=[map_axis_min, map_axis_max],
         ),
         yaxis2=dict(
-            title=dict(text="Minimal BIS", font=dict(color="blue")),
+            title=dict(text="Maximal BIS", font=dict(color="blue")),
             tickfont=dict(color="blue"),
             color="blue",
-            range=[bis_axis_bottom, bis_axis_top],
+            range=[max_bis_axis_max, max_bis_axis_min],
             overlaying="y",
             side="right",
         ),
@@ -1032,8 +993,8 @@ def run_model(
         rec = recommend_su2023_regimen(
             patient=patient,
             opiate=opiate,
-            propofol_concentration_mg_ml=propofol_concentration,
-            remifentanil_concentration_mcg_ml=remifentanil_concentration,
+            propofol_conc_mg_ml=propofol_concentration,
+            remifentanil_conc_mcg_ml=remifentanil_concentration,
         )
 
         return (
@@ -1042,8 +1003,8 @@ def run_model(
                 patient=patient,
                 rec=rec,
                 opiate=opiate,
-                propofol_concentration_mg_ml=propofol_concentration,
-                remifentanil_concentration_mcg_ml=remifentanil_concentration,
+                propofol_conc_mg_ml=propofol_concentration,
+                remifentanil_conc_mcg_ml=remifentanil_concentration,
             ),
             make_propofol_pk_figure(rec),
             make_remifentanil_pk_figure(rec),
@@ -1067,6 +1028,9 @@ def run_model(
 
 
 def main() -> None:
+    """
+    Main entry point for running the Dash application.
+    """
     app.run(debug=False)
 
 

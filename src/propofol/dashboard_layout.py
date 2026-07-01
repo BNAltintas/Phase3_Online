@@ -3,16 +3,9 @@ from __future__ import annotations
 from dash import dcc, html
 
 from propofol.recommend_regimen2023 import (
-    CONFIDENCE_N_SIMULATIONS,
-    DEFAULT_PROPOFOL_CONCENTRATION_MG_ML,
-    DEFAULT_REMI_CONCENTRATION_MCG_ML,
-    MAP_ABS_MIN_TARGET,
-    MAP_REL_FRAC_TARGET,
-    TARGET_ASSESSMENT_START_MIN,
-    TARGET_BIS_HIGH,
-    TARGET_BIS_LOW,
+    DEFAULT_PROPOFOL_CONC_MG_ML,
+    DEFAULT_REMI_CONC_MCG_ML,
 )
-
 
 CARD_STYLE = {
     "padding": "18px",
@@ -361,7 +354,7 @@ def build_layout():
                             {"label": "20 mg/mL", "value": "20"},
                             {"label": "Custom", "value": "custom"},
                         ],
-                        value=str(int(DEFAULT_PROPOFOL_CONCENTRATION_MG_ML)),
+                        value=str(int(DEFAULT_PROPOFOL_CONC_MG_ML)),
                         unit="mg/mL",
                     ),
 
@@ -379,7 +372,7 @@ def build_layout():
                             {"label": "100 µg/mL", "value": "100"},
                             {"label": "Custom", "value": "custom"},
                         ],
-                        value=str(int(DEFAULT_REMI_CONCENTRATION_MCG_ML)),
+                        value=str(int(DEFAULT_REMI_CONC_MCG_ML)),
                         unit="µg/mL",
                     ),
                 ],

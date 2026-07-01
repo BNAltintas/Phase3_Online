@@ -13,9 +13,9 @@ from propofol.config import (
 )
 from propofol.haemo_pd_su2023 import SuHaemoPD
 from propofol.patient import EleveldPatient as Patient
-from propofol.propofol_pkpd import EleveldPD, EleveldPK as PropofolPK
+from propofol.propofol_pkpd import EleveldPD
+from propofol.propofol_pkpd import EleveldPK as PropofolPK
 from propofol.remifentanil_pkpd import EleveldPK as RemifentanilPK
-
 
 # ============================================================
 # Fixed recommendation settings
@@ -60,8 +60,8 @@ PROPOFOL_BOLUS_STEP_MG = 5.0
 PUMP_RATE_STEP_ML_H = 1.0
 
 # Default concentrations. The app can override these.
-DEFAULT_PROPOFOL_CONCENTRATION_MG_ML = 10.0
-DEFAULT_REMI_CONCENTRATION_MCG_ML = 50.0
+DEFAULT_PROPOFOL_CONC_MG_ML = 10.0
+DEFAULT_REMI_CONC_MCG_ML = 50.0
 
 # Remifentanil is maintenance-only in this version.
 REMI_INFUSION_MCGKGMIN_BOUNDS = (0.0, 0.50)
@@ -129,22 +129,22 @@ def count_rate_changes(rates: Optional[Sequence[float]], tol: float = 1e-8) -> i
 def set_patient_opiates(patient: Patient, opiates: bool) -> Patient:
     """Copy the patient and set the opiates flag before constructing PK/PD objects."""
     patient_copy = deepcopy(patient)
-    setattr(patient_copy, "opiates", bool(opiates))
+    patient_copy.opiates = bool(opiates)
     return patient_copy
 
 
 def validate_concentrations(
-    propofol_concentration_mg_ml: float,
-    remifentanil_concentration_mcg_ml: float,
+    propofol_conc_mg_ml: float,
+    remifentanil_conc_mcg_ml: float,
 ) -> tuple[float, float]:
     """Validate and return propofol and remifentanil concentrations."""
-    prop = float(propofol_concentration_mg_ml)
-    remi = float(remifentanil_concentration_mcg_ml)
+    prop = float(propofol_conc_mg_ml)
+    remi = float(remifentanil_conc_mcg_ml)
 
     if not np.isfinite(prop) or prop <= 0:
-        raise ValueError("propofol_concentration_mg_ml must be positive.")
+        raise ValueError("propofol_conc_mg_ml must be positive.")
     if not np.isfinite(remi) or remi <= 0:
-        raise ValueError("remifentanil_concentration_mcg_ml must be positive.")
+        raise ValueError("remifentanil_conc_mcg_ml must be positive.")
 
     return prop, remi
 
@@ -156,21 +156,21 @@ def validate_concentrations(
 def prop_mgkgh_to_ml_h(
     rate_mgkg_h: Sequence[float],
     weight_kg: float,
-    concentration_mg_ml: float,
+    conc_mg_ml: float,
 ) -> np.ndarray:
     """Convert propofol infusion rates from mg/kg/h to mL/h."""
     rate_mgkg_h = np.asarray(rate_mgkg_h, dtype=float)
-    return rate_mgkg_h * float(weight_kg) / float(concentration_mg_ml)
+    return rate_mgkg_h * float(weight_kg) / float(conc_mg_ml)
 
 
 def prop_ml_h_to_mgkgh(
     rate_ml_h: Sequence[float],
     weight_kg: float,
-    concentration_mg_ml: float,
+    conc_mg_ml: float,
 ) -> np.ndarray:
     """Convert propofol infusion rates from mL/h to mg/kg/h."""
     rate_ml_h = np.asarray(rate_ml_h, dtype=float)
-    return rate_ml_h * float(concentration_mg_ml) / float(weight_kg)
+    return rate_ml_h * float(conc_mg_ml) / float(weight_kg)
 
 
 def prop_mgkgh_to_mcgkgmin(rate_mgkg_h: Sequence[float]) -> np.ndarray:
@@ -182,21 +182,21 @@ def prop_mgkgh_to_mcgkgmin(rate_mgkg_h: Sequence[float]) -> np.ndarray:
 def remi_mcgkgmin_to_ml_h(
     rate_mcgkg_min: Sequence[float],
     weight_kg: float,
-    concentration_mcg_ml: float,
+    conc_mcg_ml: float,
 ) -> np.ndarray:
     """Convert remifentanil infusion rates from mcg/kg/min to mL/h."""
     rate_mcgkg_min = np.asarray(rate_mcgkg_min, dtype=float)
-    return rate_mcgkg_min * float(weight_kg) * 60.0 / float(concentration_mcg_ml)
+    return rate_mcgkg_min * float(weight_kg) * 60.0 / float(conc_mcg_ml)
 
 
 def remi_ml_h_to_mcgkgmin(
     rate_ml_h: Sequence[float],
     weight_kg: float,
-    concentration_mcg_ml: float,
+    conc_mcg_ml: float,
 ) -> np.ndarray:
     """Convert remifentanil infusion rates from mL/h to mcg/kg/min."""
     rate_ml_h = np.asarray(rate_ml_h, dtype=float)
-    return rate_ml_h * float(concentration_mcg_ml) / (float(weight_kg) * 60.0)
+    return rate_ml_h * float(conc_mcg_ml) / (float(weight_kg) * 60.0)
 
 
 def remi_mcgkgmin_to_ngkgmin(rate_mcgkg_min: Sequence[float]) -> np.ndarray:
@@ -319,6 +319,15 @@ class PiecewiseWeightScaledDosing:
         return self._maintenance_amount_per_min(float(self.infusion_rates[idx]))
 
     def __call__(self, t: float) -> float:
+        """
+        Compute the drug input rate at a given time.
+
+        Args:
+            t: Time in minutes.
+
+        Returns:
+            The drug input rate in amount/min.
+        """
         return self.dotA0(t)
 
 
@@ -328,6 +337,16 @@ class PiecewiseWeightScaledDosing:
 
 @dataclass
 class DecodedRegimen:
+    """
+    Decoded regimen containing detailed information about the drug administration.
+
+    Attributes:
+        propofol_bolus_mg: The propofol bolus amount in mg.
+        propofol_bolus_mgkg: The propofol bolus amount in mg/kg.
+        propofol_rates_mgkgh: The propofol infusion rates in mg/kg/h.
+        propofol_rates_ml_h: The propofol infusion rates in ml/h.
+        propofol_rates_mcgkgmin: The propofol infusion rates in mcg/kg/min.
+    """
     propofol_bolus_mg: float
     propofol_bolus_mgkg: float
     propofol_rates_mgkgh: np.ndarray
@@ -344,6 +363,16 @@ class DecodedRegimen:
 
 @dataclass
 class ConfidenceResult:
+    """
+    Confidence result containing detailed information about the simulation outcomes.
+
+    Attributes:
+        n_simulations: The total number of simulations run.
+        n_completed: The number of simulations that completed successfully.
+        n_failed: The number of simulations that failed.
+        n_target_met: The number of simulations that met the target criteria.
+        confidence_percent: The confidence percentage based on the simulation outcomes.
+    """
     n_simulations: int
     n_completed: int
     n_failed: int
@@ -375,6 +404,19 @@ class ConfidenceResult:
 
 @dataclass
 class RecommendationResult:
+    """
+    Recommendation result containing detailed information about the recommended regimen.
+
+    Attributes:
+        propofol_bolus_mg: The propofol bolus amount in mg.
+        propofol_bolus_mgkg: The propofol bolus amount in mg/kg.
+        propofol_inf_rates_mgkgh: The propofol infusion rates in mg/kg/h.
+        propofol_inf_rates_ml_h: The propofol infusion rates in ml/h.
+        propofol_inf_rates_mcgkgmin: The propofol infusion rates in mcg/kg/min.
+        remifentanil_selected: Whether remifentanil is selected.
+        remifentanil_bolus_mcg: The remifentanil bolus amount in mcg.
+        remifentanil_bolus_mcgkg: The remifentanil bolus amount in mcg/kg.
+    """
     propofol_bolus_mg: float
     propofol_bolus_mgkg: float
     propofol_inf_rates_mgkgh: np.ndarray
@@ -388,8 +430,8 @@ class RecommendationResult:
     remifentanil_inf_rates_ml_h: Optional[np.ndarray]
     remifentanil_inf_rates_ngkgmin: Optional[np.ndarray]
 
-    propofol_concentration_mg_ml: float
-    remifentanil_concentration_mcg_ml: float
+    propofol_conc_mg_ml: float
+    remifentanil_conc_mcg_ml: float
 
     time_min: np.ndarray
     cp_propofol: np.ndarray
@@ -524,8 +566,8 @@ class Su2023PropofolRemifentanilRecommender:
         use_remifentanil: bool = False,
         use_bsv: bool = False,
         mode: str = OPTIMIZATION_MODE,
-        propofol_concentration_mg_ml: float = DEFAULT_PROPOFOL_CONCENTRATION_MG_ML,
-        remifentanil_concentration_mcg_ml: float = DEFAULT_REMI_CONCENTRATION_MCG_ML,
+        propofol_conc_mg_ml: float = DEFAULT_PROPOFOL_CONC_MG_ML,
+        remifentanil_conc_mcg_ml: float = DEFAULT_REMI_CONC_MCG_ML,
         map_output_index: int = SU2023_MAP_OUTPUT_INDEX,
         remi_a1_output_index: int = SU2023_REMI_A1_OUTPUT_INDEX,
         seed: int = OPTIMIZATION_BASE_SEED,
@@ -534,9 +576,9 @@ class Su2023PropofolRemifentanilRecommender:
         self.use_bsv = bool(use_bsv)
         self.mode = str(mode or OPTIMIZATION_MODE).lower()
         self.n_starts = mode_to_n_starts(self.mode)
-        self.propofol_concentration_mg_ml, self.remifentanil_concentration_mcg_ml = validate_concentrations(
-            propofol_concentration_mg_ml,
-            remifentanil_concentration_mcg_ml,
+        self.propofol_conc_mg_ml, self.remifentanil_conc_mcg_ml = validate_concentrations(
+            propofol_conc_mg_ml,
+            remifentanil_conc_mcg_ml,
         )
         self.map_output_index = int(map_output_index)
         self.remi_a1_output_index = int(remi_a1_output_index)
@@ -584,6 +626,7 @@ class Su2023PropofolRemifentanilRecommender:
 
     @property
     def n_parameters(self) -> int:
+        """Return the number of optimization parameters for the active model."""
         # Propofol: bolus, pause, switch, rate1, rate2.
         # Remifentanil, if selected: pause, switch, rate1, rate2.
         return 5 + (4 if self.use_remifentanil else 0)
@@ -694,7 +737,7 @@ class Su2023PropofolRemifentanilRecommender:
         prop_rates_ml_h_raw = prop_mgkgh_to_ml_h(
             prop_rates_mgkgh_raw,
             self.weight_kg,
-            self.propofol_concentration_mg_ml,
+            self.propofol_conc_mg_ml,
         )
         prop_rates_ml_h = (
             round_array_to_step(prop_rates_ml_h_raw, PUMP_RATE_STEP_ML_H)
@@ -705,7 +748,7 @@ class Su2023PropofolRemifentanilRecommender:
         prop_rates_mgkgh = prop_ml_h_to_mgkgh(
             prop_rates_ml_h,
             self.weight_kg,
-            self.propofol_concentration_mg_ml,
+            self.propofol_conc_mg_ml,
         )
         prop_rates_mcgkgmin = prop_mgkgh_to_mcgkgmin(prop_rates_mgkgh)
 
@@ -734,7 +777,7 @@ class Su2023PropofolRemifentanilRecommender:
         remi_rates_ml_h_raw = remi_mcgkgmin_to_ml_h(
             remi_rates_mcgkgmin_raw,
             self.weight_kg,
-            self.remifentanil_concentration_mcg_ml,
+            self.remifentanil_conc_mcg_ml,
         )
         remi_rates_ml_h = (
             round_array_to_step(remi_rates_ml_h_raw, PUMP_RATE_STEP_ML_H)
@@ -745,7 +788,7 @@ class Su2023PropofolRemifentanilRecommender:
         remi_rates_mcgkgmin = remi_ml_h_to_mcgkgmin(
             remi_rates_ml_h,
             self.weight_kg,
-            self.remifentanil_concentration_mcg_ml,
+            self.remifentanil_conc_mcg_ml,
         )
         remi_rates_ngkgmin = remi_mcgkgmin_to_ngkgmin(remi_rates_mcgkgmin)
 
@@ -828,7 +871,8 @@ class Su2023PropofolRemifentanilRecommender:
         self,
         x: Sequence[float],
         apply_final_rounding: bool,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, Optional[np.ndarray], np.ndarray, np.ndarray, DecodedRegimen]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, Optional[np.ndarray], np.ndarray, np.ndarray,
+               DecodedRegimen]:
         """
         Simulate the PK/PD and MAP response for a given optimization parameter vector.
         """
@@ -836,7 +880,7 @@ class Su2023PropofolRemifentanilRecommender:
         t, cp_prop, ce_prop, cp_remi, bis, map_mmhg = self.simulate_regimen(regimen)
         return t, cp_prop, ce_prop, cp_remi, bis, map_mmhg, regimen
 
-    def trajectory_penalty(
+    def trajectory_penalty(  # noqa: C901
         self,
         t: np.ndarray,
         bis: np.ndarray,
@@ -1055,7 +1099,7 @@ class Su2023PropofolRemifentanilRecommender:
                 [0.5, 10.0, 0.12, 0.12],
                 [0.0, 5.0, 0.20, 0.10],
             ]
-            starts = [p + r for p, r in zip(starts, remi_starts)]
+            starts = [p + r for p, r in zip(starts, remi_starts, strict=False)]
 
         rng = np.random.default_rng(self.seed)
         out = []
@@ -1080,8 +1124,16 @@ class Su2023PropofolRemifentanilRecommender:
             method="Powell",
             bounds=self.build_scipy_bounds(),
             options={
-                "maxiter": POWELL_MAXITER_WITH_REMI if self.use_remifentanil else POWELL_MAXITER_PROPOFOL_ONLY,
-                "maxfev": POWELL_MAXFEV_WITH_REMI if self.use_remifentanil else POWELL_MAXFEV_PROPOFOL_ONLY,
+                "maxiter": (
+                    POWELL_MAXITER_WITH_REMI
+                    if self.use_remifentanil
+                    else POWELL_MAXITER_PROPOFOL_ONLY
+                ),
+                "maxfev": (
+                    POWELL_MAXFEV_WITH_REMI
+                    if self.use_remifentanil
+                    else POWELL_MAXFEV_PROPOFOL_ONLY
+                ),
                 "xtol": 0.035,
                 "ftol": 0.035,
                 "disp": False,
@@ -1124,8 +1176,8 @@ class Su2023PropofolRemifentanilRecommender:
             patient=self.patient,
             regimen=regimen,
             use_remifentanil=self.use_remifentanil,
-            propofol_concentration_mg_ml=self.propofol_concentration_mg_ml,
-            remifentanil_concentration_mcg_ml=self.remifentanil_concentration_mcg_ml,
+            propofol_conc_mg_ml=self.propofol_conc_mg_ml,
+            remifentanil_conc_mcg_ml=self.remifentanil_conc_mcg_ml,
             map_output_index=self.map_output_index,
             remi_a1_output_index=self.remi_a1_output_index,
             base_seed=self.seed + 10_000,
@@ -1143,8 +1195,8 @@ class Su2023PropofolRemifentanilRecommender:
             remifentanil_inf_rates_mcgkgmin=regimen.remifentanil_rates_mcgkgmin,
             remifentanil_inf_rates_ml_h=regimen.remifentanil_rates_ml_h,
             remifentanil_inf_rates_ngkgmin=regimen.remifentanil_rates_ngkgmin,
-            propofol_concentration_mg_ml=self.propofol_concentration_mg_ml,
-            remifentanil_concentration_mcg_ml=self.remifentanil_concentration_mcg_ml,
+            propofol_conc_mg_ml=self.propofol_conc_mg_ml,
+            remifentanil_conc_mcg_ml=self.remifentanil_conc_mcg_ml,
             time_min=t,
             cp_propofol=cp_prop,
             ce_propofol=ce_prop,
@@ -1176,8 +1228,8 @@ def simulate_regimen_once(
     regimen: DecodedRegimen,
     use_remifentanil: bool,
     use_bsv: bool,
-    propofol_concentration_mg_ml: float,
-    remifentanil_concentration_mcg_ml: float,
+    propofol_conc_mg_ml: float,
+    remifentanil_conc_mcg_ml: float,
     map_output_index: int,
     remi_a1_output_index: int,
     seed: Optional[int] = None,
@@ -1193,8 +1245,8 @@ def simulate_regimen_once(
         use_remifentanil=use_remifentanil,
         use_bsv=use_bsv,
         mode=OPTIMIZATION_MODE,
-        propofol_concentration_mg_ml=propofol_concentration_mg_ml,
-        remifentanil_concentration_mcg_ml=remifentanil_concentration_mcg_ml,
+        propofol_conc_mg_ml=propofol_conc_mg_ml,
+        remifentanil_conc_mcg_ml=remifentanil_conc_mcg_ml,
         map_output_index=map_output_index,
         remi_a1_output_index=remi_a1_output_index,
         seed=seed or OPTIMIZATION_BASE_SEED,
@@ -1207,8 +1259,8 @@ def simulate_confidence(
     patient: Patient,
     regimen: DecodedRegimen,
     use_remifentanil: bool,
-    propofol_concentration_mg_ml: float,
-    remifentanil_concentration_mcg_ml: float,
+    propofol_conc_mg_ml: float,
+    remifentanil_conc_mcg_ml: float,
     map_output_index: int = SU2023_MAP_OUTPUT_INDEX,
     remi_a1_output_index: int = SU2023_REMI_A1_OUTPUT_INDEX,
     base_seed: int = 10_000,
@@ -1232,8 +1284,8 @@ def simulate_confidence(
                 regimen=regimen,
                 use_remifentanil=use_remifentanil,
                 use_bsv=True,
-                propofol_concentration_mg_ml=propofol_concentration_mg_ml,
-                remifentanil_concentration_mcg_ml=remifentanil_concentration_mcg_ml,
+                propofol_conc_mg_ml=propofol_conc_mg_ml,
+                remifentanil_conc_mcg_ml=remifentanil_conc_mcg_ml,
                 map_output_index=map_output_index,
                 remi_a1_output_index=remi_a1_output_index,
                 seed=base_seed + i,
@@ -1304,8 +1356,8 @@ def recommend_su2023_regimen(
     patient: Patient,
     opiate: str = "none",
     use_remifentanil: Optional[bool] = None,
-    propofol_concentration_mg_ml: float = DEFAULT_PROPOFOL_CONCENTRATION_MG_ML,
-    remifentanil_concentration_mcg_ml: float = DEFAULT_REMI_CONCENTRATION_MCG_ML,
+    propofol_conc_mg_ml: float = DEFAULT_PROPOFOL_CONC_MG_ML,
+    remifentanil_conc_mcg_ml: float = DEFAULT_REMI_CONC_MCG_ML,
     mode: str = OPTIMIZATION_MODE,
     seed: int = OPTIMIZATION_BASE_SEED,
 ) -> RecommendationResult:
@@ -1336,8 +1388,8 @@ def recommend_su2023_regimen(
         use_remifentanil=bool(use_remifentanil),
         use_bsv=False,
         mode=mode,
-        propofol_concentration_mg_ml=propofol_concentration_mg_ml,
-        remifentanil_concentration_mcg_ml=remifentanil_concentration_mcg_ml,
+        propofol_conc_mg_ml=propofol_conc_mg_ml,
+        remifentanil_conc_mcg_ml=remifentanil_conc_mcg_ml,
         seed=seed,
     )
 
