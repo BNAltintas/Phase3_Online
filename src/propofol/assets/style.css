@@ -1,0 +1,471 @@
+/* Styling for the Input Parameters / Model Settings column.
+   Scoped to the new .card/.param-table/.field-* components so it does not
+   affect the existing Recommendation/graph sections, which keep their
+   inline styles for now. */
+
+:root {
+  --navy-900: #14205c;
+  --navy-700: #1c2f7a;
+  --navy-600: #24398f;
+  --blue-accent: #2f6fed;
+  --bg-page: #f5f6fa;
+  --bg-card: #ffffff;
+  --border-color: #e2e5ec;
+  --text-primary: #1f2330;
+  --text-secondary: #6b7280;
+  --text-on-navy: #ffffff;
+}
+
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type=number] {
+  -moz-appearance: textfield;
+}
+
+/* ---------- Cards ---------- */
+
+.card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 14px 14px 10px;
+  margin-bottom: 14px;
+  font-family: "Segoe UI", Arial, sans-serif;
+  color: var(--text-primary);
+}
+
+.card-subheading {
+  font-weight: 700;
+  font-size: 13px;
+  margin: 0 0 6px 0;
+  color: var(--text-primary);
+}
+
+.field-block {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 10px;
+}
+
+.field-block:last-child {
+  margin-bottom: 0;
+}
+
+.field-label {
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 3px;
+}
+
+.field-input {
+  padding: 5px 7px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.value-display {
+  padding: 5px 7px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--bg-page);
+  min-height: 15px;
+  font-size: 12px;
+}
+
+/* ---------- Derived values (unboxed rows) ---------- */
+
+.derived-values {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 4px;
+}
+
+.derived-value-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.derived-label {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.derived-value {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.info-icon {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: help;
+}
+
+/* ---------- Toggle pills (Sex) ---------- */
+
+.toggle-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.toggle-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--bg-card);
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.toggle-btn--active {
+  background-color: var(--navy-700);
+  border-color: var(--navy-700);
+  color: var(--text-on-navy);
+}
+
+/* ---------- Parameter table (click-to-edit) ---------- */
+
+.param-table {
+  display: grid;
+  grid-template-columns: auto 62px 54px 70px;
+  column-gap: 6px;
+  row-gap: 5px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.param-table-header {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.param-label {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.param-source {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.param-source--manual {
+  color: #c2680f;
+}
+
+.param-date {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.param-value-toggle {
+  display: flex;
+}
+
+.value-badge-wrapper {
+  cursor: pointer;
+}
+
+.value-badge {
+  width: 100%;
+  padding: 3px 4px;
+  border: 1.5px solid #a9c2f5;
+  border-radius: 6px;
+  background-color: #eef3ff;
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 12px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.edit-popover {
+  display: none;
+  grid-column: 1 / -1;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px;
+  box-shadow: 0 4px 14px rgba(20, 32, 92, 0.12);
+}
+
+.edit-popover--open {
+  display: block;
+}
+
+.edit-popover .field-input {
+  margin-bottom: 4px;
+}
+
+.field-input--warning {
+  border-color: #c2680f;
+}
+
+.field-input--error {
+  border-color: #d9362e;
+}
+
+.field-message {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  margin-bottom: 7px;
+}
+
+.field-message:empty {
+  display: none;
+  margin-bottom: 0;
+}
+
+.field-message--warning {
+  color: #c2680f;
+}
+
+.field-message--error {
+  color: #d9362e;
+}
+
+.popover-actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 7px;
+}
+
+.popover-btn {
+  flex: 1 1 auto;
+  padding: 6px 10px;
+  border-radius: 7px;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.popover-btn--save {
+  background-color: #1f9254;
+  border-color: #1f9254;
+  color: #fff;
+}
+
+.popover-btn--save:disabled {
+  background-color: #9ca3af;
+  border-color: #9ca3af;
+  cursor: not-allowed;
+}
+
+.popover-btn--cancel {
+  background-color: #fff;
+  border-color: #e6483f;
+  color: #e6483f;
+}
+
+.popover-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.popover-restore {
+  background: none;
+  border: none;
+  color: var(--blue-accent);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.popover-restore--hidden {
+  display: none;
+}
+
+/* ---------- Page shell (sidebar + main content) ---------- */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg-page);
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+  align-items: stretch;
+}
+
+.sidebar {
+  width: 190px;
+  flex: 0 0 190px;
+  background-color: var(--bg-card);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 12px;
+}
+
+.sidebar-brand {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--navy-900);
+  margin-bottom: 18px;
+  padding-left: 4px;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sidebar-nav-item {
+  padding: 8px 10px;
+  border-radius: 7px;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.sidebar-nav-item--active {
+  background-color: #eaf0fe;
+  color: var(--navy-900);
+}
+
+.sidebar-nav-item--disabled {
+  color: #b5b9c5;
+}
+
+.main-content {
+  flex: 1 1 auto;
+  padding: 18px 26px 26px;
+  max-width: 1700px;
+  min-width: 0;
+}
+
+.page-title {
+  margin: 0 0 14px 0;
+  font-size: 19px;
+  color: var(--text-primary);
+}
+
+.section-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--navy-900);
+  text-transform: uppercase;
+  margin: 0 0 6px 2px;
+}
+
+/* ---------- Three-column dashboard grid ---------- */
+
+.content-grid {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.input-column {
+  flex: 1 1 300px;
+  max-width: 340px;
+  min-width: 270px;
+}
+
+.recommendation-column {
+  flex: 2 1 380px;
+  min-width: 300px;
+}
+
+.explanation-column {
+  flex: 2 1 380px;
+  min-width: 300px;
+}
+
+/* Wraps the recommendation/explanation row + predictions section (everything
+   `run_model` updates). Explicit flex-basis + min-width: 0 keeps this
+   column's width stable and independent of its children's content-driven
+   intrinsic size, so it doesn't reflow once Plotly paints the graphs. */
+.output-column {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.predictions-section {
+  margin-top: 4px;
+}
+
+.predictions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 14px;
+}
+
+/* ---------- Graph cards ---------- */
+/* A fixed (not min-) height + flex column means the card occupies its
+   final size on the very first paint, before Plotly's async chunk paints
+   the figure - so nothing grows/jumps once the graph renders. A fixed
+   height (rather than height: 100%) also keeps this stable for the lone
+   explanation graph, which isn't in a stretching grid row like the
+   predictions cards are. */
+
+.graph-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  height: 340px;
+}
+
+.graph-card--tall {
+  height: 480px;
+}
+
+.graph-card-title {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  flex: 0 0 auto;
+}
+
+.graph-card-note {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.35;
+  margin-bottom: 8px;
+  flex: 0 0 auto;
+}
+
+.graph-card-plot {
+  flex: 1 1 auto;
+  min-height: 260px;
+}

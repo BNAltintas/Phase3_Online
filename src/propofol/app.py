@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import datetime
+
 import dash
 import numpy as np
 import plotly.graph_objects as go
-from dash import Input, Output, State, ctx, html
+from dash import Input, Output, State, ctx, html, no_update
 from plotly.subplots import make_subplots
 
-from propofol.dashboard_layout import build_layout
+from propofol.dashboard_layout import (
+    EHR_RECORD_DATE,
+    EHR_RECORD_TIME,
+    build_layout,
+    timestamp_display,
+)
 from propofol.patient import EleveldPatient as Patient
 from propofol.recommend_regimen2023 import (
     TARGET_ASSESSMENT_START_MIN,
@@ -31,32 +38,13 @@ app.layout = build_layout()
 # Small helpers
 # ============================================================
 
-def _button_styles(selected: str, current: str) -> dict:
+def _button_class(selected: str, current: str) -> str:
     """
-    Return a style dict for a button, highlighting it if it is the selected value.
+    Return the toggle-pill className for a button, marking it active if selected.
     """
     if selected == current:
-        return {
-            "padding": "10px 16px",
-            "border": "1px solid #1f77b4",
-            "backgroundColor": "#1f77b4",
-            "color": "white",
-            "cursor": "pointer",
-            "marginRight": "8px",
-            "borderRadius": "8px",
-            "fontWeight": "600",
-        }
-
-    return {
-        "padding": "10px 16px",
-        "border": "1px solid #bbb",
-        "backgroundColor": "#f7f7f7",
-        "color": "black",
-        "cursor": "pointer",
-        "marginRight": "8px",
-        "borderRadius": "8px",
-        "fontWeight": "600",
-    }
+        return "toggle-btn toggle-btn--active"
+    return "toggle-btn"
 
 
 def compute_map(sap: float, dap: float) -> float:
@@ -250,11 +238,11 @@ def make_propofol_pk_figure(rec):
     _add_line(fig, rec.time_min, rec.ce_propofol, "Ce deterministic")
 
     fig.update_layout(
-        title="Propofol PK",
         xaxis_title="Time (min)",
         yaxis_title="Propofol concentration (mcg/mL)",
         template="plotly_white",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        margin=dict(t=60),
     )
 
     return fig
@@ -277,11 +265,11 @@ def make_remifentanil_pk_figure(rec):
         _add_line(fig, rec.time_min, rec.cp_remifentanil, "Cp deterministic")
 
     fig.update_layout(
-        title="Remifentanil PK",
         xaxis_title="Time (min)",
         yaxis_title="Remifentanil concentration (ng/mL)",
         template="plotly_white",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        margin=dict(t=60),
     )
 
     return fig
@@ -839,8 +827,8 @@ def make_induction_dose_rationale_figure(
 
 @app.callback(
     Output("sex-store", "data"),
-    Output("sex-male-btn", "style"),
-    Output("sex-female-btn", "style"),
+    Output("sex-male-btn", "className"),
+    Output("sex-female-btn", "className"),
     Input("sex-male-btn", "n_clicks"),
     Input("sex-female-btn", "n_clicks"),
     State("sex-store", "data"),
@@ -859,8 +847,8 @@ def update_sex(male_clicks, female_clicks, current_value):
 
     return (
         value,
-        _button_styles(value, "male"),
-        _button_styles(value, "female"),
+        _button_class(value, "male"),
+        _button_class(value, "female"),
     )
 
 
@@ -896,6 +884,266 @@ def update_derived_pressures(baseline_sap, baseline_dap):
 
     except Exception:
         return "-", "-"
+
+
+# ============================================================
+# Click-to-edit popover callbacks for patient-parameter fields (age, height,
+# weight, baseline SAP/DAP/HR). Each field keeps its existing id/value prop -
+# the popover only ever writes back into that same id, so `run_model`'s
+# `State(field_id, "value")` reads are unaffected.
+# ============================================================
+
+EDITABLE_FIELDS = [
+    ("age", 35, "EHR"),
+    ("height", 170, "EHR"),
+    ("weight", 70, "EHR"),
+    ("baseline_sap", 120, "Monitor"),
+    ("baseline_dap", 70, "Monitor"),
+    ("baseline_hr", 70, "Monitor"),
+]
+
+# Validation bounds shown in the edit popover. Hard limits block Save;
+# typical-range (warn) limits only show a warning and still allow Save.
+# These are presentation/UX rules only - they do not feed into run_model.
+FIELD_RULES = {
+    "age": dict(hard_min=0, hard_max=120, warn_min=None, warn_max=100, label="Age", unit="years"),
+    "height": dict(
+        hard_min=30, hard_max=250, warn_min=120, warn_max=220, label="Height", unit="cm",
+    ),
+    "weight": dict(
+        hard_min=0.5, hard_max=300, warn_min=30, warn_max=250, label="Weight", unit="kg",
+    ),
+    "baseline_sap": dict(
+        hard_min=30, hard_max=300, warn_min=70, warn_max=220, label="SAP", unit="mmHg",
+    ),
+    "baseline_dap": dict(
+        hard_min=10, hard_max=200, warn_min=40, warn_max=140, label="DAP", unit="mmHg",
+        cross_check_sap=True,
+    ),
+    "baseline_hr": dict(
+        hard_min=0, hard_max=250, warn_min=40, warn_max=180, label="HR", unit="bpm",
+    ),
+}
+
+
+def _check_hard_bounds(value: float, rules: dict) -> str | None:
+    """
+    Return an error message if value violates the field's hard min/max, else None.
+    """
+    label, unit = rules["label"], rules["unit"]
+    if value < rules["hard_min"]:
+        if rules["hard_min"] == 0:
+            return f"{label} cannot be negative."
+        return f"{label} must be at least {rules['hard_min']} {unit}."
+    if value > rules["hard_max"]:
+        return f"{label} cannot exceed {rules['hard_max']} {unit}."
+    return None
+
+
+def _check_dap_below_sap(value: float, sap_value) -> str | None:
+    """
+    Return an error message if DAP is not strictly below the current SAP value.
+    """
+    try:
+        sap = float(sap_value)
+    except (TypeError, ValueError):
+        return None
+    if value >= sap:
+        return "DAP must be lower than SAP."
+    return None
+
+
+def _check_warn_bounds(value: float, rules: dict):
+    """
+    Return ("warning", message) outside the typical range, else ("normal", "").
+    """
+    unit = rules["unit"]
+    warn_min = rules.get("warn_min")
+    warn_max = rules.get("warn_max")
+    if warn_min is not None and value < warn_min:
+        return "warning", (
+            f"This value is outside the typical range ({warn_min}–{rules['hard_max']} "
+            f"{unit}). Please verify that it has been entered correctly."
+        )
+    if warn_max is not None and value > warn_max:
+        lo = warn_min if warn_min is not None else rules["hard_min"]
+        return "warning", (
+            f"This value is outside the typical range ({lo}–{warn_max} {unit}). "
+            f"Please verify that it has been entered correctly."
+        )
+    return "normal", ""
+
+
+def _validate_field_value(field_id: str, raw_value, sap_value=None):
+    """
+    Validate a draft value for an editable field against FIELD_RULES.
+
+    Returns (status, message) where status is "normal", "warning", or
+    "error". A status of "error" means the value must not be saved.
+    """
+    rules = FIELD_RULES[field_id]
+
+    if raw_value is None or (isinstance(raw_value, str) and raw_value.strip() == ""):
+        return "error", "This field cannot be empty."
+
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return "error", "Please enter a valid number."
+
+    hard_error = _check_hard_bounds(value, rules)
+    if hard_error is not None:
+        return "error", hard_error
+
+    if rules.get("cross_check_sap"):
+        cross_error = _check_dap_below_sap(value, sap_value)
+        if cross_error is not None:
+            return "error", cross_error
+
+    return _check_warn_bounds(value, rules)
+
+
+def _draft_class(status: str) -> str:
+    """
+    Return the draft input's className for a validation status.
+    """
+    if status == "error":
+        return "field-input field-input--error"
+    if status == "warning":
+        return "field-input field-input--warning"
+    return "field-input"
+
+
+def _message_class(status: str) -> str:
+    """
+    Return the validation message div's className for a validation status.
+    """
+    if status == "error":
+        return "field-message field-message--error"
+    if status == "warning":
+        return "field-message field-message--warning"
+    return "field-message"
+
+
+def _register_live_validation_callback(field_id: str):
+    """
+    Register real-time draft validation: border color, message, Save gating.
+    """
+    needs_sap = FIELD_RULES[field_id].get("cross_check_sap", False)
+
+    outputs = [
+        Output(f"{field_id}-draft", "className"),
+        Output(f"{field_id}-message", "children"),
+        Output(f"{field_id}-message", "className"),
+        Output(f"{field_id}-save-btn", "disabled"),
+    ]
+    inputs = [Input(f"{field_id}-draft", "value")]
+    states = [State("baseline_sap", "value")] if needs_sap else []
+
+    def _validate(draft_value, *extra_states):
+        """
+        Re-validate the draft value on every keystroke (no Save needed).
+        """
+        sap_value = extra_states[0] if needs_sap else None
+        status, message = _validate_field_value(field_id, draft_value, sap_value)
+        return _draft_class(status), message, _message_class(status), status == "error"
+
+    app.callback(*outputs, *inputs, *states)(_validate)
+
+
+for _field_id in FIELD_RULES:
+    _register_live_validation_callback(_field_id)
+
+
+def _source_for(value, original_value, source_label):
+    """
+    Return (display_text, className, date_text) for a field's current value.
+    """
+    if value == original_value:
+        return source_label, "param-source", timestamp_display(EHR_RECORD_DATE, EHR_RECORD_TIME)
+    today = datetime.date.today().strftime("%d/%m/%y")
+    now = datetime.datetime.now().strftime("%H:%M")
+    return "Manual", "param-source param-source--manual", timestamp_display(today, now)
+
+
+def _restore_class_for(value, original_value):
+    """
+    Return the Restore link's className - hidden when value matches the original.
+    """
+    if value == original_value:
+        return "popover-restore popover-restore--hidden"
+    return "popover-restore"
+
+
+def _field_result(value, original_value, source_label, popover_open=False):
+    """
+    Build the 7-tuple of Outputs shared by every branch of the commit callback.
+    """
+    source, source_class, date = _source_for(value, original_value, source_label)
+    popover_class = "edit-popover edit-popover--open" if popover_open else "edit-popover"
+    return (
+        value, popover_class, value, source, source_class, date,
+        _restore_class_for(value, original_value),
+    )
+
+
+def _register_editable_field_callback(field_id: str, original_value: float, source_label: str):
+    """
+    Register the Save/Cancel/Restore popover callback for one patient-parameter field.
+    """
+    needs_sap = FIELD_RULES[field_id].get("cross_check_sap", False)
+
+    outputs = [
+        Output(field_id, "value"),
+        Output(f"{field_id}-popover", "className"),
+        Output(f"{field_id}-draft", "value"),
+        Output(f"{field_id}-source", "children"),
+        Output(f"{field_id}-source", "className"),
+        Output(f"{field_id}-date", "children"),
+        Output(f"{field_id}-restore-btn", "className"),
+    ]
+    inputs = [
+        Input(f"{field_id}-badge", "n_clicks"),
+        Input(f"{field_id}-save-btn", "n_clicks"),
+        Input(f"{field_id}-cancel-btn", "n_clicks"),
+        Input(f"{field_id}-restore-btn", "n_clicks"),
+        Input(f"{field_id}-draft", "n_submit"),
+    ]
+    states = [State(f"{field_id}-draft", "value"), State(field_id, "value")]
+    if needs_sap:
+        states.append(State("baseline_sap", "value"))
+
+    def _update_field(badge_clicks, save_clicks, cancel_clicks, restore_clicks, draft_submit,
+                       *extra_states):
+        """
+        Open/close the edit popover and apply Save/Cancel/Restore for this field.
+        """
+        draft_value, current_value = extra_states[0], extra_states[1]
+        sap_value = extra_states[2] if needs_sap else None
+        triggered = ctx.triggered_id
+
+        if triggered == f"{field_id}-restore-btn":
+            return _field_result(original_value, original_value, source_label)
+
+        if triggered in (f"{field_id}-save-btn", f"{field_id}-draft"):
+            status, _ = _validate_field_value(field_id, draft_value, sap_value)
+            if status == "error":
+                # Invalid value: refuse to commit, leave the popover open as-is.
+                # The live-validation callback already shows the error inline.
+                return (no_update,) * 7
+            return _field_result(float(draft_value), original_value, source_label)
+
+        if triggered == f"{field_id}-badge":
+            return _field_result(current_value, original_value, source_label, popover_open=True)
+
+        # Cancel (or any other trigger): close the popover without changing the saved value.
+        return _field_result(current_value, original_value, source_label)
+
+    app.callback(*outputs, *inputs, *states, prevent_initial_call=True)(_update_field)
+
+
+for _field_id, _original_value, _source_label in EDITABLE_FIELDS:
+    _register_editable_field_callback(_field_id, _original_value, _source_label)
 
 
 # ============================================================
