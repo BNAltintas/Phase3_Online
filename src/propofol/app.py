@@ -914,10 +914,10 @@ FIELD_RULES = {
         hard_min=0.5, hard_max=300, warn_min=30, warn_max=250, label="Weight", unit="kg",
     ),
     "baseline_sap": dict(
-        hard_min=30, hard_max=300, warn_min=70, warn_max=220, label="SAP", unit="mmHg",
+        hard_min=30, hard_max=300, warn_min=70, warn_max=220, label="SBP", unit="mmHg",
     ),
     "baseline_dap": dict(
-        hard_min=10, hard_max=200, warn_min=40, warn_max=140, label="DAP", unit="mmHg",
+        hard_min=10, hard_max=200, warn_min=40, warn_max=140, label="DBP", unit="mmHg",
         cross_check_sap=True,
     ),
     "baseline_hr": dict(
@@ -949,7 +949,7 @@ def _check_dap_below_sap(value: float, sap_value) -> str | None:
     except (TypeError, ValueError):
         return None
     if value >= sap:
-        return "DAP must be lower than SAP."
+        return "DBP must be lower than SBP."
     return None
 
 
@@ -1205,9 +1205,9 @@ def run_model(
         if weight <= 0:
             raise ValueError("Weight must be positive.")
         if baseline_sap <= 0 or baseline_dap <= 0:
-            raise ValueError("Baseline SAP and DAP must be positive.")
+            raise ValueError("Baseline SBP and DBP must be positive.")
         if baseline_sap <= baseline_dap:
-            raise ValueError("Baseline SAP must be higher than DAP.")
+            raise ValueError("Baseline SBP must be higher than DBP.")
         if baseline_hr <= 0:
             raise ValueError("Baseline HR must be positive.")
 

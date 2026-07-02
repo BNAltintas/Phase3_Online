@@ -48,7 +48,7 @@ def derived_value_row(label: str, value_id: str, tooltip: str):
     return html.Div(
         [
             html.Span(
-                [label, html.Span("ⓘ", title=tooltip, className="info-icon")],
+                [label, html.Span("i", title=tooltip, className="info-icon")],
                 className="derived-label",
             ),
             html.Span(id=value_id, children="-", className="derived-value"),
@@ -270,11 +270,11 @@ def build_patient_parameters_card():
                 [
                     *param_table_header(),
                     *editable_field_row(
-                        "SAP (mmHg)", "baseline_sap", 120, 120, min_value=30, step=0.1,
+                        "SBP (mmHg)", "baseline_sap", 120, 120, min_value=30, step=0.1,
                         source_label="Monitor",
                     ),
                     *editable_field_row(
-                        "DAP (mmHg)", "baseline_dap", 70, 70, min_value=10, step=0.1,
+                        "DBP (mmHg)", "baseline_dap", 70, 70, min_value=10, step=0.1,
                         source_label="Monitor",
                     ),
                     *editable_field_row(
@@ -288,10 +288,10 @@ def build_patient_parameters_card():
             html.Div(
                 [
                     derived_value_row(
-                        "MAP (mmHg)", "derived-map", "MAP = (SAP + 2 × DAP) / 3",
+                        "MAP (mmHg)", "derived-map", "MAP = DBP + (SBP − DBP) / 3",
                     ),
                     derived_value_row(
-                        "Baseline PP (mmHg)", "derived-pp", "Baseline PP = SAP − DAP",
+                        "Baseline PP (mmHg)", "derived-pp", "Baseline PP = SBP − DBP",
                     ),
                 ],
                 className="derived-values",

@@ -107,10 +107,20 @@ input[type=number] {
 }
 
 .info-icon {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
   margin-left: 4px;
-  font-size: 11px;
-  color: var(--text-secondary);
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background-color: var(--blue-accent);
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  font-style: normal;
+  line-height: 1;
   cursor: help;
 }
 
