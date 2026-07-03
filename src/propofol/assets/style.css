@@ -413,12 +413,6 @@ body {
   min-width: 0;
 }
 
-.page-title {
-  margin: 0 0 14px 0;
-  font-size: 19px;
-  color: var(--text-primary);
-}
-
 .section-label {
   font-size: 11px;
   font-weight: 700;

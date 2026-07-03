@@ -56,7 +56,7 @@ MIN_SWITCH_MIN = TARGET_ASSESSMENT_START_MIN
 MAX_SWITCH_MIN = float(SIM_MINUTES)
 
 # Automatic clinical rounding.
-PROPOFOL_BOLUS_STEP_MG = 5.0
+PROPOFOL_BOLUS_STEP_MG = 10.0
 PUMP_RATE_STEP_ML_H = 1.0
 
 # Default concentrations. The app can override these.
@@ -748,7 +748,7 @@ class Su2023PropofolRemifentanilRecommender:
             remi_params,
         ) = self._split_x(x)
 
-        # Propofol bolus: final clinical dose in 5 mg steps.
+        # Propofol bolus: final clinical dose in PROPOFOL_BOLUS_STEP_MG steps.
         prop_bolus_mg_raw = max(prop_bolus_mgkg, 0.0) * self.weight_kg
         prop_bolus_mg = (
             round_to_step(prop_bolus_mg_raw, PROPOFOL_BOLUS_STEP_MG)

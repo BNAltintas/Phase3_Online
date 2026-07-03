@@ -16,6 +16,8 @@ from propofol.dashboard_layout import (
 )
 from propofol.patient import EleveldPatient as Patient
 from propofol.recommend_regimen2023 import (
+    DEFAULT_PROPOFOL_CONC_MG_ML,
+    DEFAULT_REMI_CONC_MCG_ML,
     MAP_ABS_MIN_TARGET,
     MAP_REL_FRAC_TARGET,
     TARGET_ASSESSMENT_START_MIN,
@@ -63,21 +65,19 @@ def compute_pp(sap: float, dap: float) -> float:
     return sap - dap
 
 
-def parse_concentration(selection, custom_value, name: str) -> float:
+def validate_concentration(value, name: str) -> float:
     """
-    Parse a concentration value from a selection or custom input.
+    Validate a directly-edited concentration value.
     """
-    if selection == "custom":
-        if custom_value is None or custom_value == "":
-            raise ValueError(f"Please provide a custom {name} concentration.")
-        value = float(custom_value)
-    else:
-        value = float(selection)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} concentration must be a number.")
 
-    if not np.isfinite(value) or value <= 0:
+    if not np.isfinite(parsed) or parsed <= 0:
         raise ValueError(f"{name} concentration must be positive.")
 
-    return value
+    return parsed
 
 
 def make_empty_figure(title: str | None = None):
@@ -924,6 +924,8 @@ EDITABLE_FIELDS = [
     ("bis-target-high", float(TARGET_BIS_HIGH), "Default"),
     ("map-target-abs", float(MAP_ABS_MIN_TARGET), "Default"),
     ("map-target-rel", float(MAP_REL_FRAC_TARGET) * 100.0, "Default"),
+    ("propofol-concentration", float(DEFAULT_PROPOFOL_CONC_MG_ML), "Default"),
+    ("remifentanil-concentration", float(DEFAULT_REMI_CONC_MCG_ML), "Default"),
 ]
 
 # Validation bounds shown in the edit popover. Hard limits block Save;
@@ -970,6 +972,17 @@ FIELD_RULES = {
     "map-target-rel": dict(
         hard_min=30, hard_max=100, warn_min=50, warn_max=90,
         label="MAP target (relative)", unit="%",
+    ),
+    # hard_min is a small positive floor (not 0) so an exact 0 is rejected,
+    # matching the "must be positive" rule the old dropdown+custom flow
+    # enforced server-side in parse_concentration.
+    "propofol-concentration": dict(
+        hard_min=0.1, hard_max=100, warn_min=5, warn_max=30,
+        label="Propofol concentration", unit="mg/mL",
+    ),
+    "remifentanil-concentration": dict(
+        hard_min=0.1, hard_max=500, warn_min=5, warn_max=100,
+        label="Remifentanil concentration", unit="µg/mL",
     ),
 }
 
@@ -1228,10 +1241,8 @@ for _field_id, _original_value, _source_label in EDITABLE_FIELDS:
     State("baseline_hr", "value"),
     State("sex-store", "data"),
     State("opiate-dropdown", "value"),
-    State("propofol-concentration-dropdown", "value"),
-    State("propofol-concentration-custom", "value"),
-    State("remifentanil-concentration-dropdown", "value"),
-    State("remifentanil-concentration-custom", "value"),
+    State("propofol-concentration", "value"),
+    State("remifentanil-concentration", "value"),
     State("bis-target-low", "value"),
     State("bis-target-high", "value"),
     State("map-target-abs", "value"),
@@ -1248,10 +1259,8 @@ def run_model(
     baseline_hr,
     sex,
     opiate,
-    propofol_concentration_selection,
-    propofol_concentration_custom,
-    remifentanil_concentration_selection,
-    remifentanil_concentration_custom,
+    propofol_concentration_value,
+    remifentanil_concentration_value,
     target_bis_low,
     target_bis_high,
     map_target_abs,
@@ -1301,15 +1310,11 @@ def run_model(
         if opiate in {"sufentanil", "fentanyl"}:
             raise ValueError("Only remifentanil is currently supported.")
 
-        propofol_concentration = parse_concentration(
-            propofol_concentration_selection,
-            propofol_concentration_custom,
-            name="propofol",
+        propofol_concentration = validate_concentration(
+            propofol_concentration_value, name="Propofol",
         )
-        remifentanil_concentration = parse_concentration(
-            remifentanil_concentration_selection,
-            remifentanil_concentration_custom,
-            name="remifentanil",
+        remifentanil_concentration = validate_concentration(
+            remifentanil_concentration_value, name="Remifentanil",
         )
 
         patient = Patient(

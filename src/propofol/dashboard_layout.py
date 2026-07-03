@@ -158,46 +158,6 @@ def editable_field_row(
     ]
 
 
-def concentration_block(
-    label: str,
-    dropdown_id: str,
-    custom_input_id: str,
-    custom_label: str,
-    options: list[dict],
-    value,
-):
-    """
-    Create a concentration dropdown plus its "custom value" input, stacked
-    for use inside the Model settings card.
-    """
-    return html.Div(
-        [
-            field_block(
-                label,
-                dcc.Dropdown(
-                    id=dropdown_id,
-                    options=options,
-                    value=value,
-                    clearable=False,
-                    style=DROPDOWN_STYLE,
-                ),
-            ),
-            field_block(
-                custom_label,
-                dcc.Input(
-                    id=custom_input_id,
-                    type="number",
-                    value=None,
-                    min=0,
-                    step=0.1,
-                    placeholder="Only used if custom",
-                    className="field-input",
-                ),
-            ),
-        ]
-    )
-
-
 def graph_card(title: str, graph_id: str, note: str | None = None, tall: bool = False):
     """
     Create a graph card with an optional note.
@@ -340,34 +300,22 @@ def build_model_settings_card():
                     style=DROPDOWN_STYLE,
                 ),
             ),
-            concentration_block(
-                label="Propofol concentration (mg/mL)",
-                dropdown_id="propofol-concentration-dropdown",
-                custom_input_id="propofol-concentration-custom",
-                custom_label="Custom propofol concentration (mg/mL)",
-                options=[
-                    {"label": "10 mg/mL", "value": "10"},
-                    {"label": "20 mg/mL", "value": "20"},
-                    {"label": "Custom", "value": "custom"},
+            html.H4("Concentrations", className="card-subheading"),
+            html.Div(
+                [
+                    *param_table_header(show_date=False),
+                    *editable_field_row(
+                        "Propofol (mg/mL)", "propofol-concentration",
+                        DEFAULT_PROPOFOL_CONC_MG_ML, DEFAULT_PROPOFOL_CONC_MG_ML,
+                        min_value=0.1, step=0.1, source_label="Default", show_date=False,
+                    ),
+                    *editable_field_row(
+                        "Remifentanil (µg/mL)", "remifentanil-concentration",
+                        DEFAULT_REMI_CONC_MCG_ML, DEFAULT_REMI_CONC_MCG_ML,
+                        min_value=0.1, step=0.1, source_label="Default", show_date=False,
+                    ),
                 ],
-                value=str(int(DEFAULT_PROPOFOL_CONC_MG_ML)),
-            ),
-            concentration_block(
-                label="Remifentanil concentration (µg/mL)",
-                dropdown_id="remifentanil-concentration-dropdown",
-                custom_input_id="remifentanil-concentration-custom",
-                custom_label="Custom remifentanil concentration (µg/mL)",
-                options=[
-                    {"label": "5 µg/mL", "value": "5"},
-                    {"label": "10 µg/mL", "value": "10"},
-                    {"label": "20 µg/mL", "value": "20"},
-                    {"label": "25 µg/mL", "value": "25"},
-                    {"label": "40 µg/mL", "value": "40"},
-                    {"label": "50 µg/mL", "value": "50"},
-                    {"label": "100 µg/mL", "value": "100"},
-                    {"label": "Custom", "value": "custom"},
-                ],
-                value=str(int(DEFAULT_REMI_CONC_MCG_ML)),
+                className="param-table param-table--no-date",
             ),
             html.H4("Target BIS", className="card-subheading"),
             html.Div(
@@ -573,11 +521,6 @@ def build_layout():
 
             html.Div(
                 [
-                    html.H2(
-                        "Propofol ± Opiate Dose Recommendation",
-                        className="page-title",
-                    ),
-
                     html.Div(
                         [
                             build_input_column(),
