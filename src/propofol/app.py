@@ -100,90 +100,141 @@ def _safe_array(x) -> np.ndarray:
 # Schedule formatting
 # ============================================================
 
-def format_propofol_schedule(rates_ml_h, rates_mcgkgmin) -> list[str]:
+def confidence_tier(confidence_percent: float) -> str:
     """
-    Format the propofol schedule for display.
+    Categorize a numeric confidence percentage into a HIGH/MEDIUM/LOW label
+    for display. Presentation only - does not affect confidence_percent
+    itself or how it is calculated.
     """
-    ml_rows = compress_minute_schedule(rates_ml_h)
-    mcg_rows = compress_minute_schedule(rates_mcgkgmin)
+    if confidence_percent >= 70:
+        return "HIGH"
+    if confidence_percent >= 40:
+        return "MEDIUM"
+    return "LOW"
 
-    if len(ml_rows) == 0:
-        return ["No maintenance"]
 
-    lines = []
-    for ml_row, mcg_row in zip(ml_rows, mcg_rows, strict=False):
-        lines.append(
-            f"{ml_row['start_min']:.0f}–{ml_row['end_min']:.0f} min: "
-            f"{ml_row['rate']:.0f} mL/h ({mcg_row['rate']:.0f} µg/kg/min)"
+def _maintenance_rows(rate_ml_h, rate_secondary, secondary_label: str) -> list:
+    """
+    Build alternating interval/rate grid-cell components for one drug's
+    compressed maintenance schedule. A near-zero rate is shown as "Pause"
+    instead of "0 mL/h (0 x/kg/min)".
+    """
+    ml_rows = compress_minute_schedule(rate_ml_h)
+    secondary_rows = compress_minute_schedule(rate_secondary)
+
+    cells = []
+    for ml_row, sec_row in zip(ml_rows, secondary_rows, strict=False):
+        interval_text = f"{ml_row['start_min']:.0f}–{ml_row['end_min']:.0f} min"
+        is_pause = np.isclose(ml_row["rate"], 0.0, atol=1e-8)
+
+        if is_pause:
+            rate_text = "Pause"
+            rate_class = "maintenance-rate maintenance-rate--pause"
+        else:
+            rate_text = f"{ml_row['rate']:.0f} mL/h ({sec_row['rate']:.0f} {secondary_label})"
+            rate_class = "maintenance-rate"
+
+        cells.append(html.Div(interval_text, className="maintenance-interval"))
+        cells.append(html.Div(rate_text, className=rate_class))
+
+    return cells
+
+
+def make_induction_card(rec):
+    """
+    Build the induction-dose recommendation card: total dose and
+    weight-adjusted dose on the left, model confidence on the right.
+    """
+    tier = confidence_tier(rec.confidence_percent)
+    tier_class = tier.lower()
+
+    return html.Div(
+        [
+            html.H4("Induction recommendation", className="card-subheading"),
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            html.Div("Total dose", className="induction-dose-label"),
+                            html.Div(
+                                f"{rec.propofol_bolus_mg:.0f} mg",
+                                className="induction-dose-value",
+                            ),
+                            html.Div(
+                                f"Weight-adjusted: {rec.propofol_bolus_mgkg:.2f} mg/kg",
+                                className="induction-dose-subtext",
+                            ),
+                        ],
+                        className="induction-dose-block",
+                    ),
+                    html.Div(
+                        [
+                            html.Div("Model confidence", className="induction-confidence-label"),
+                            html.Div(
+                                f"{rec.confidence_percent:.0f}%",
+                                className=(
+                                    f"induction-confidence-value "
+                                    f"induction-confidence-value--{tier_class}"
+                                ),
+                            ),
+                            html.Div(
+                                f"{tier} CONFIDENCE",
+                                className=(
+                                    f"induction-confidence-tier "
+                                    f"induction-confidence-tier--{tier_class}"
+                                ),
+                            ),
+                        ],
+                        className="induction-confidence-block",
+                    ),
+                ],
+                className="induction-card-body",
+            ),
+        ],
+        className="card induction-card",
+    )
+
+
+def make_maintenance_card(rec):
+    """
+    Build the maintenance-regimen card: one row per contiguous dosing segment.
+    """
+    children = [html.H4("Maintenance regimen", className="card-subheading")]
+
+    prop_cells = _maintenance_rows(
+        rec.propofol_inf_rates_ml_h, rec.propofol_inf_rates_mcgkgmin, "µg/kg/min",
+    )
+    children.append(
+        html.Div(prop_cells, className="maintenance-table")
+        if prop_cells
+        else html.Div("No maintenance", className="maintenance-empty")
+    )
+
+    if rec.remifentanil_selected:
+        children.append(
+            html.H4("Remifentanil", className="card-subheading maintenance-subheading"),
+        )
+        remi_cells = _maintenance_rows(
+            rec.remifentanil_inf_rates_ml_h, rec.remifentanil_inf_rates_ngkgmin, "ng/kg/min",
+        )
+        children.append(
+            html.Div(remi_cells, className="maintenance-table")
+            if remi_cells
+            else html.Div("No maintenance", className="maintenance-empty")
         )
 
-    return lines
-
-
-def format_remifentanil_schedule(rates_ml_h, rates_ngkgmin) -> list[str]:
-    """
-    Format the remifentanil schedule for display.
-    """
-    ml_rows = compress_minute_schedule(rates_ml_h)
-    ng_rows = compress_minute_schedule(rates_ngkgmin)
-
-    if len(ml_rows) == 0:
-        return ["No maintenance"]
-
-    lines = []
-    for ml_row, ng_row in zip(ml_rows, ng_rows, strict=False):
-        lines.append(
-            f"{ml_row['start_min']:.0f}–{ml_row['end_min']:.0f} min: "
-            f"{ml_row['rate']:.0f} mL/h ({ng_row['rate']:.0f} ng/kg/min)"
-        )
-
-    return lines
+    return html.Div(children, className="card maintenance-card")
 
 
 def make_summary(rec):
     """
-    Create a summary of the propofol and remifentanil regimen.
+    Build the recommendation output: an induction-dose card followed by a
+    maintenance-regimen card.
     """
-    lines = [
-        f"Propofol induction dose: {rec.propofol_bolus_mg:.0f} mg "
-        f"({rec.propofol_bolus_mgkg:.3f} mg/kg)",
-        "Propofol maintenance regimen:",
+    return [
+        make_induction_card(rec),
+        make_maintenance_card(rec),
     ]
-
-    lines.extend(
-        f"  {line}"
-        for line in format_propofol_schedule(
-            rec.propofol_inf_rates_ml_h,
-            rec.propofol_inf_rates_mcgkgmin,
-        )
-    )
-
-    if rec.remifentanil_selected:
-        lines.extend(
-            [
-                "Remifentanil maintenance regimen:",
-            ]
-        )
-        lines.extend(
-            f"  {line}"
-            for line in format_remifentanil_schedule(
-                rec.remifentanil_inf_rates_ml_h,
-                rec.remifentanil_inf_rates_ngkgmin,
-            )
-        )
-
-    lines.append(f"Model confidence: {rec.confidence_percent:.1f}%")
-
-    return html.Pre(
-        "\n".join(lines),
-        style={
-            "whiteSpace": "pre-wrap",
-            "fontFamily": "monospace",
-            "fontSize": "14px",
-            "lineHeight": "1.4",
-            "margin": 0,
-        },
-    )
 
 
 # ============================================================
@@ -1356,14 +1407,17 @@ def run_model(
         )
 
     except Exception as e:
-        error_component = html.Pre(
-            f"Error while running recommendation:\n{str(e)}",
-            style={
-                "whiteSpace": "pre-wrap",
-                "fontFamily": "monospace",
-                "color": "#b00020",
-                "margin": 0,
-            },
+        error_component = html.Div(
+            html.Pre(
+                f"Error while running recommendation:\n{str(e)}",
+                style={
+                    "whiteSpace": "pre-wrap",
+                    "fontFamily": "monospace",
+                    "color": "#b00020",
+                    "margin": 0,
+                },
+            ),
+            className="card",
         )
 
         empty = make_empty_figure()

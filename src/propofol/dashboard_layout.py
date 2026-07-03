@@ -442,23 +442,14 @@ def build_input_column():
 
 def build_recommendation_column():
     """
-    Build the center dashboard column: the recommendation summary, confidence,
-    and maintenance regimen (all rendered together into `summary-output`).
+    Build the center dashboard column: the recommendation summary (rendered
+    into `summary-output` as an induction-dose card followed by a
+    maintenance-regimen card, each with its own `.card` styling).
     """
     return html.Div(
         [
             html.Div("RECOMMENDATION", className="section-label"),
-            html.Div(
-                id="summary-output",
-                style={
-                    "whiteSpace": "pre-wrap",
-                    "padding": "18px",
-                    "border": "1px solid #ddd",
-                    "borderRadius": "12px",
-                    "backgroundColor": "#fafafa",
-                    "minHeight": "80px",
-                },
-            ),
+            html.Div(id="summary-output"),
         ],
         className="recommendation-column",
     )
