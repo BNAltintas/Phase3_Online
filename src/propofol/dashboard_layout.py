@@ -438,12 +438,36 @@ def build_sidebar():
     )
 
 
-def build_input_column():
+def build_patient_id_card():
     """
-    Build the left dashboard column: patient/model inputs plus the run button.
+    Build the small patient-identification card shown above Input Parameters.
+
+    Static placeholder content only (hardcoded "Test Patient" / "TEST-001") -
+    no ids, no callbacks, no effect on model inputs or data flow.
     """
     return html.Div(
         [
+            html.Span("👤", className="patient-id-icon"),
+            html.Div(
+                [
+                    html.Div("Test Patient", className="patient-id-name"),
+                    html.Div("Patient ID: TEST-001", className="patient-id-label"),
+                ],
+                className="patient-id-info",
+            ),
+        ],
+        className="card patient-id-card",
+    )
+
+
+def build_input_column():
+    """
+    Build the left dashboard column: patient ID card, patient/model inputs,
+    and the run button.
+    """
+    return html.Div(
+        [
+            build_patient_id_card(),
             html.Div("INPUT PARAMETERS", className="section-label"),
             build_patient_parameters_card(),
             build_model_settings_card(),

@@ -38,6 +38,37 @@ input[type=number] {
   color: var(--text-primary);
 }
 
+/* Compact patient-identification card shown above Input Parameters. */
+.patient-id-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.patient-id-icon {
+  font-size: 20px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.patient-id-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.patient-id-name {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.patient-id-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
 .card-subheading {
   font-weight: 700;
   font-size: 13px;
