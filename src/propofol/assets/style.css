@@ -177,30 +177,6 @@ input[type=number] {
   cursor: help;
 }
 
-/* ---------- Toggle pills (Sex) ---------- */
-
-.toggle-buttons {
-  display: flex;
-  gap: 4px;
-}
-
-.toggle-btn {
-  padding: 4px 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background-color: var(--bg-card);
-  color: var(--text-primary);
-  font-weight: 600;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.toggle-btn--active {
-  background-color: var(--navy-700);
-  border-color: var(--navy-700);
-  color: var(--text-on-navy);
-}
-
 /* ---------- Parameter table (click-to-edit) ---------- */
 
 .param-table {
@@ -246,8 +222,29 @@ input[type=number] {
   color: var(--text-secondary);
 }
 
-.param-value-toggle {
+.param-value-dropdown {
   display: flex;
+}
+
+/* Compact the Sex dropdown to fit the same 62px Value column every other
+   patient-parameter row uses, so Source/Date-Time stay in their own
+   columns instead of being covered by a wider control. Dash's default
+   dropdown sizing (16px font, 12px side padding, 15px arrow) needs far
+   more than 62px to show "Female" without clipping it down to a single
+   letter - this only trims that chrome, the dropdown itself is unchanged. */
+.param-value-dropdown .dash-dropdown {
+  font-size: 11px;
+}
+
+.param-value-dropdown .dash-dropdown-grid-container {
+  padding: 0 4px;
+  gap: 3px;
+}
+
+.param-value-dropdown .dash-dropdown-trigger-icon {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
 }
 
 .value-badge-wrapper {

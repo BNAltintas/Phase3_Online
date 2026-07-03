@@ -268,26 +268,22 @@ def build_patient_parameters_card():
                     ),
                     html.Div("Sex", className="param-label"),
                     html.Div(
-                        html.Div(
-                            [
-                                html.Button(
-                                    "Male", id="sex-male-btn", n_clicks=0,
-                                    className="toggle-btn",
-                                ),
-                                html.Button(
-                                    "Female", id="sex-female-btn", n_clicks=0,
-                                    className="toggle-btn",
-                                ),
+                        dcc.Dropdown(
+                            id="sex-dropdown",
+                            options=[
+                                {"label": "Male", "value": "male"},
+                                {"label": "Female", "value": "female"},
                             ],
-                            className="toggle-buttons",
+                            value="male",
+                            clearable=False,
+                            searchable=False,
                         ),
-                        className="param-value-toggle",
-                        style={"gridColumn": "2 / span 2"},
+                        className="param-value-dropdown",
                     ),
+                    html.Div("EHR", className="param-source"),
                     html.Div(
                         timestamp_display(EHR_RECORD_DATE, EHR_RECORD_TIME),
                         className="param-date",
-                        style={"gridColumn": "4"},
                     ),
                 ],
                 className="param-table",

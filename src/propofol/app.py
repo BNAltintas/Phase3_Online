@@ -55,15 +55,6 @@ MANUAL_OVERRIDE_COLOR = "#c2680f"
 # Small helpers
 # ============================================================
 
-def _button_class(selected: str, current: str) -> str:
-    """
-    Return the toggle-pill className for a button, marking it active if selected.
-    """
-    if selected == current:
-        return "toggle-btn toggle-btn--active"
-    return "toggle-btn"
-
-
 def compute_map(sap: float, dap: float) -> float:
     """
     Compute the mean arterial pressure (MAP) given systolic and diastolic pressures.
@@ -1349,34 +1340,20 @@ def make_induction_dose_rationale_figure(
 
 
 # ============================================================
-# Button callbacks
+# Sex dropdown callback
 # ============================================================
 
 @app.callback(
     Output("sex-store", "data"),
-    Output("sex-male-btn", "className"),
-    Output("sex-female-btn", "className"),
-    Input("sex-male-btn", "n_clicks"),
-    Input("sex-female-btn", "n_clicks"),
-    State("sex-store", "data"),
+    Input("sex-dropdown", "value"),
 )
-def update_sex(male_clicks, female_clicks, current_value):
+def update_sex(value):
     """
-    Update the selected sex based on button clicks.
+    Mirror the Sex dropdown's selected value into sex-store, which
+    run_model reads exactly as it did when Sex was a pair of toggle
+    buttons.
     """
-    triggered = ctx.triggered_id
-    value = current_value or "male"
-
-    if triggered == "sex-male-btn":
-        value = "male"
-    elif triggered == "sex-female-btn":
-        value = "female"
-
-    return (
-        value,
-        _button_class(value, "male"),
-        _button_class(value, "female"),
-    )
+    return value or "male"
 
 
 # ============================================================
@@ -1788,8 +1765,7 @@ _STALE_TRACKING_INPUTS = []
 for _field_id, _, _ in EDITABLE_FIELDS:
     _STALE_TRACKING_INPUTS.append(Input(f"{_field_id}-save-btn", "n_clicks"))
     _STALE_TRACKING_INPUTS.append(Input(f"{_field_id}-restore-btn", "n_clicks"))
-_STALE_TRACKING_INPUTS.append(Input("sex-male-btn", "n_clicks"))
-_STALE_TRACKING_INPUTS.append(Input("sex-female-btn", "n_clicks"))
+_STALE_TRACKING_INPUTS.append(Input("sex-dropdown", "value"))
 _STALE_TRACKING_INPUTS.append(Input("opiate-dropdown", "value"))
 
 

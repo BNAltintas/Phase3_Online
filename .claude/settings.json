@@ -18,7 +18,20 @@
       "Bash(node debug_stale_settle.js)",
       "Bash(./.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('src/propofol/app.py'\\).read\\(\\)\\)\")",
       "Bash(node debug_stale_layout.js)",
-      "Bash(node drive_override_then_stale.js)"
+      "Bash(node drive_override_then_stale.js)",
+      "Bash(node inspect_sex_row.js)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8082 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8082/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })",
+      "Bash(./.venv/Scripts/python.exe /tmp/run_server3.py)",
+      "Bash(node inspect_sex_row2.js)",
+      "Bash(node drive_sex_dropdown.js)",
+      "Bash(node drive_sex_stale.js)",
+      "Bash(sed -i \"s/127.0.0.1:808[0-9]/127.0.0.1:8083/\" inspect_sex_row2.js)",
+      "Bash(node inspect_dropdown_dom.js)",
+      "Bash(node inspect_dropdown_style.js)",
+      "Bash(node inspect_dropdown_grid.js)",
+      "Bash(sed -i \"s/127.0.0.1:808[0-9]/127.0.0.1:8083/\" drive_sex_dropdown.js)",
+      "Bash(node inspect_dropdown_open.js)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8083 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8083/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })"
     ]
   }
 }
