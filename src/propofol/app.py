@@ -195,48 +195,84 @@ def _store_dict_to_namespace(data: dict) -> SimpleNamespace:
     return ns
 
 
-def _validate_override_dose(raw_value, weight_kg: float):
+def _dose_unit_suffix(unit: str) -> str:
     """
-    Validate a manually-entered propofol induction dose (mg).
+    Return the display unit label for an override-dose unit code.
+    """
+    return "mg/kg" if unit == "mgkg" else "mg"
 
-    Hard bounds reject non-positive/absurd values outright (Save disabled).
-    Warn bounds are derived from BOLUS_MGKG_BOUNDS x patient weight - the
-    same range the optimizer normally searches within - so a dose outside it
-    is still allowed (per the "treat this as a what-if, don't silently
-    block" requirement) but flagged.
 
-    Returns (status, message, parsed_value_or_None).
+def _dose_value_for_display(value_mg: float, weight_kg: float, unit: str) -> str:
+    """
+    Format an absolute mg dose in whichever unit the user is currently typing in.
+    """
+    if unit == "mgkg":
+        return f"{value_mg / weight_kg:.2f}"
+    return f"{value_mg:.0f}"
+
+
+def _validate_override_dose(raw_value, weight_kg: float, unit: str = "total"):
+    """
+    Validate a manually-entered propofol induction dose, typed as either a
+    total dose in mg (unit="total") or a weight-adjusted dose in mg/kg
+    (unit="mgkg").
+
+    Hard bounds reject non-positive/absurd values outright. Warn bounds are
+    derived from BOLUS_MGKG_BOUNDS x patient weight - the same range the
+    optimizer normally searches within - so a dose outside it is still
+    allowed (per the "treat this as a what-if, don't silently block"
+    requirement) but flagged. Bounds are always evaluated in mg internally
+    (converting a typed mg/kg value first), so both units are held to the
+    same real-world limits; only the display text changes.
+
+    Returns (status, message, parsed_value_mg_or_None) - the parsed value,
+    when not None, is always the absolute mg dose the model needs,
+    regardless of which unit the user typed in.
     """
     if raw_value is None or (isinstance(raw_value, str) and raw_value.strip() == ""):
         return "error", "Please enter a manual dose.", None
 
     try:
-        value = float(raw_value)
+        typed_value = float(raw_value)
     except (TypeError, ValueError):
         return "error", "Please enter a valid number.", None
 
-    if not np.isfinite(value) or value <= 0:
+    if not np.isfinite(typed_value) or typed_value <= 0:
         return "error", "Manual dose must be positive.", None
 
-    hard_max_mg = 8.0 * float(weight_kg)
-    if value > hard_max_mg:
-        return "error", f"Manual dose cannot exceed {hard_max_mg:.0f} mg for this patient.", None
+    weight_kg = float(weight_kg)
+    value_mg = typed_value * weight_kg if unit == "mgkg" else typed_value
+    unit_label = _dose_unit_suffix(unit)
 
-    warn_min_mg = BOLUS_MGKG_BOUNDS[0] * float(weight_kg)
-    warn_max_mg = BOLUS_MGKG_BOUNDS[1] * float(weight_kg)
-    if value < warn_min_mg or value > warn_max_mg:
+    hard_max_mg = 8.0 * weight_kg
+    if value_mg > hard_max_mg:
+        return (
+            "error",
+            (
+                f"Manual dose cannot exceed "
+                f"{_dose_value_for_display(hard_max_mg, weight_kg, unit)} "
+                f"{unit_label} for this patient."
+            ),
+            None,
+        )
+
+    warn_min_mg = BOLUS_MGKG_BOUNDS[0] * weight_kg
+    warn_max_mg = BOLUS_MGKG_BOUNDS[1] * weight_kg
+    if value_mg < warn_min_mg or value_mg > warn_max_mg:
         return (
             "warning",
             (
                 f"This dose is outside the model's typical range "
-                f"({warn_min_mg:.0f}–{warn_max_mg:.0f} mg for this patient). "
+                f"({_dose_value_for_display(warn_min_mg, weight_kg, unit)}"
+                f"–{_dose_value_for_display(warn_max_mg, weight_kg, unit)} "
+                f"{unit_label} for this patient). "
                 f"Maintenance will still be re-optimized, but BIS/MAP targets may "
                 f"not be fully reachable."
             ),
-            value,
+            value_mg,
         )
 
-    return "normal", "", value
+    return "normal", "", value_mg
 
 
 # ============================================================
@@ -289,9 +325,24 @@ def _override_popover(prefill_value):
     rendered (closed by default) regardless of whether an override is
     currently active, so its component ids stay stable for the callbacks
     that target them.
+
+    The unit toggle (Total dose / mg/kg) always opens defaulted to "Total
+    dose" - handle_override resets it every time the popover is opened, so
+    prefill_value (always an absolute mg amount) never needs converting for
+    display here.
     """
     return html.Div(
         [
+            dcc.RadioItems(
+                id="override-unit",
+                options=[
+                    {"label": "Total dose", "value": "total"},
+                    {"label": "mg/kg", "value": "mgkg"},
+                ],
+                value="total",
+                inline=True,
+                className="override-unit-toggle",
+            ),
             dcc.Input(
                 id="override-dose-draft",
                 type="text",
@@ -1181,8 +1232,9 @@ def make_induction_dose_rationale_figure(
             mode="lines+markers",
             line=dict(color="red", width=3),
             marker=dict(color="red", size=6),
-            showlegend=False,
-            hovertemplate="Dose %{x:.3f} mg/kg<br>Minimal MAP %{y:.1f} mmHg<extra></extra>",
+            name="MAP",
+            showlegend=True,
+            hovertemplate="Dose %{x:.2f} mg/kg<br>Minimal MAP %{y:.1f} mmHg<extra></extra>",
         ),
         secondary_y=False,
     )
@@ -1195,9 +1247,10 @@ def make_induction_dose_rationale_figure(
             mode="lines+markers",
             line=dict(color="blue", width=3),
             marker=dict(color="blue", size=6),
-            showlegend=False,
+            name="BIS",
+            showlegend=True,
             hovertemplate=(
-                "Dose %{x:.3f} mg/kg<br>"
+                "Dose %{x:.2f} mg/kg<br>"
                 "Maximal BIS %{y:.1f}<br>"
                 "Minimal BIS %{customdata[0]:.1f}<extra></extra>"
             ),
@@ -1213,7 +1266,7 @@ def make_induction_dose_rationale_figure(
             marker=dict(color="red", size=14, symbol="diamond"),
             showlegend=False,
             hovertemplate=(
-                "Selected dose %{x:.3f} mg/kg<br>"
+                "Recommendation %{x:.2f} mg/kg<br>"
                 "Minimal MAP %{y:.1f} mmHg<br>"
                 f"MAP target {map_target:.1f}-{map_target_upper:.1f} mmHg<extra></extra>"
             ),
@@ -1230,7 +1283,7 @@ def make_induction_dose_rationale_figure(
             marker=dict(color="blue", size=14, symbol="diamond"),
             showlegend=False,
             hovertemplate=(
-                "Selected dose %{x:.3f} mg/kg<br>"
+                "Recommendation %{x:.2f} mg/kg<br>"
                 "Maximal BIS %{y:.1f}<br>"
                 "Minimal BIS %{customdata[0]:.1f}<br>"
                 f"BIS target {rec.target_bis_low:.0f}-{rec.target_bis_high:.0f}<extra></extra>"
@@ -1239,7 +1292,38 @@ def make_induction_dose_rationale_figure(
         secondary_y=True,
     )
 
-    # Selected recommended induction dose, shown in bold black.
+    # Legend-only entries for the shapes below (target band, recommendation
+    # line, manual-override line) - Plotly shapes never appear in the
+    # legend on their own, so a zero-data dummy trace styled to match is
+    # the standard way to add one. Purely presentational: none of these
+    # affect the plotted data.
+    fig.add_trace(
+        go.Scatter(
+            x=[None], y=[None], mode="markers",
+            marker=dict(symbol="square", size=12, color="rgba(0, 150, 0, 0.25)"),
+            name="Target zone",
+            showlegend=True,
+        ),
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=[None], y=[None], mode="lines",
+            line=dict(color="green", width=3, dash="dash"),
+            name="Recommendation",
+            showlegend=True,
+        ),
+    )
+    if manual_dose_mgkg is not None:
+        fig.add_trace(
+            go.Scatter(
+                x=[None], y=[None], mode="lines",
+                line=dict(color=MANUAL_OVERRIDE_COLOR, width=3, dash="dash"),
+                name="Manual override",
+                showlegend=True,
+            ),
+        )
+
+    # Recommended induction dose reference line, shown in bold green.
     fig.add_shape(
         type="line",
         xref="x",
@@ -1248,7 +1332,7 @@ def make_induction_dose_rationale_figure(
         x1=selected_dose_mgkg,
         y0=0,
         y1=1,
-        line=dict(color="black", width=3, dash="dash"),
+        line=dict(color="green", width=3, dash="dash"),
         layer="above",
     )
     fig.add_annotation(
@@ -1256,10 +1340,10 @@ def make_induction_dose_rationale_figure(
         y=1.07,
         xref="x",
         yref="paper",
-        text=f"<b>Selected {selected_dose_mgkg:.3f} mg/kg</b>",
+        text=f"<b>Recommendation {selected_dose_mgkg:.2f} mg/kg</b>",
         showarrow=False,
         yanchor="bottom",
-        font=dict(color="black", size=13),
+        font=dict(color="green", size=13),
     )
 
     # Manual-override dose, shown in orange, when active.
@@ -1272,7 +1356,7 @@ def make_induction_dose_rationale_figure(
                 mode="markers",
                 marker=dict(color=MANUAL_OVERRIDE_COLOR, size=14, symbol="diamond"),
                 showlegend=False,
-                hovertemplate="Manual dose %{x:.3f} mg/kg<br>Minimal MAP %{y:.1f} mmHg<extra></extra>",
+                hovertemplate="Manual dose %{x:.2f} mg/kg<br>Minimal MAP %{y:.1f} mmHg<extra></extra>",
             ),
             secondary_y=False,
         )
@@ -1283,7 +1367,7 @@ def make_induction_dose_rationale_figure(
                 mode="markers",
                 marker=dict(color=MANUAL_OVERRIDE_COLOR, size=14, symbol="diamond"),
                 showlegend=False,
-                hovertemplate="Manual dose %{x:.3f} mg/kg<br>Maximal BIS %{y:.1f}<extra></extra>",
+                hovertemplate="Manual dose %{x:.2f} mg/kg<br>Maximal BIS %{y:.1f}<extra></extra>",
             ),
             secondary_y=True,
         )
@@ -1303,17 +1387,32 @@ def make_induction_dose_rationale_figure(
             y=1.14,
             xref="x",
             yref="paper",
-            text=f"<b>Manual {manual_dose_mgkg:.3f} mg/kg</b>",
+            text=f"<b>Manual dose {manual_dose_mgkg:.2f} mg/kg</b>",
             showarrow=False,
             yanchor="bottom",
             font=dict(color=MANUAL_OVERRIDE_COLOR, size=13),
         )
 
     fig.update_layout(
-        title="Induction-dose rationale",
+        # No in-plot title text - the card header ("Induction-dose rationale")
+        # already shows it in black, so a second grey title here was a
+        # redundant duplicate.
         template="plotly_white",
-        showlegend=False,
-        margin=dict(t=115 if manual_dose_mgkg is not None else 95),
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.22,
+            xanchor="center",
+            x=0.5,
+            font=dict(size=11),
+        ),
+        margin=dict(
+            t=115 if manual_dose_mgkg is not None else 95,
+            b=90,
+            l=100,
+            r=90,
+        ),
         xaxis=dict(
             title=dict(text="Propofol induction dose (mg/kg)", font=dict(color="green")),
             tickfont=dict(color="green"),
@@ -1334,6 +1433,38 @@ def make_induction_dose_rationale_figure(
             overlaying="y",
             side="right",
         ),
+    )
+
+    # Directional arrows next to each y-axis, purely to help interpret which
+    # way is "more" on each axis - neither changes any plotted data. ax/ay
+    # are pixel offsets for the arrow tail relative to the (x, y) head
+    # position (Plotly's axref/ayref only support "pixel" or another axis's
+    # domain, not "paper", so the head is anchored in paper coordinates and
+    # the tail is just an offset from it).
+    # Left axis (MAP): points up, since higher on this axis is higher MAP.
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=-0.20, y=0.55,
+        ax=0, ay=40,
+        showarrow=True,
+        arrowhead=2,
+        arrowsize=1.3,
+        arrowwidth=3,
+        arrowcolor="red",
+        text="",
+    )
+    # Right axis (BIS): points down, since this axis is visually inverted -
+    # lower on the page is a higher BIS value.
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=1.16, y=0.45,
+        ax=0, ay=-40,
+        showarrow=True,
+        arrowhead=2,
+        arrowsize=1.3,
+        arrowwidth=3,
+        arrowcolor="blue",
+        text="",
     )
 
     return fig
@@ -2104,55 +2235,75 @@ def update_result_visibility(rec_store, stale):
     Output("override-dose-draft", "className"),
     Output("override-dose-message", "children"),
     Output("override-dose-message", "className"),
-    Output("override-save-btn", "disabled"),
-    Input("override-dose-draft", "value"),
+    Input("override-save-btn", "n_clicks"),
+    Input("override-dose-draft", "n_submit"),
+    State("override-dose-draft", "value"),
+    State("override-unit", "value"),
     State("recommendation-store", "data"),
     prevent_initial_call=True,
 )
-def validate_override_draft(draft_value, rec_store):
+def validate_override_draft(save_clicks, submit_count, draft_value, unit, rec_store):
     """
-    Re-validate the manual-dose draft on every keystroke, mirroring the
-    live-validation pattern used for every other editable field.
+    Validate the manual-dose draft only when the user commits it (clicking
+    Save or pressing Enter) - not on every keystroke, so partial typing
+    (e.g. "1", "10", "100") never flashes a spurious error while the user
+    is still typing. The Save button is never programmatically disabled by
+    this (there is nothing to keep it in sync with anymore), so it always
+    stays clickable and handle_override re-validates independently on its
+    own trigger.
     """
     if not rec_store or rec_store.get("error") or not rec_store.get("context"):
-        return "field-input", "", "field-message", True
+        return "field-input", "", "field-message"
 
     weight_kg = float(rec_store["context"]["weight"])
-    status, message, _ = _validate_override_dose(draft_value, weight_kg)
-    return _draft_class(status), message, _message_class(status), status == "error"
+    status, message, _ = _validate_override_dose(draft_value, weight_kg, unit or "total")
+    return _draft_class(status), message, _message_class(status)
 
 
 @app.callback(
     Output("override-popover", "className"),
     Output("override-dose-draft", "value"),
+    Output("override-dose-draft", "className", allow_duplicate=True),
+    Output("override-dose-message", "children", allow_duplicate=True),
+    Output("override-dose-message", "className", allow_duplicate=True),
+    Output("override-unit", "value"),
     Output("manual-scenario-store", "data", allow_duplicate=True),
     Input("override-dose-btn", "n_clicks"),
     Input("override-save-btn", "n_clicks"),
     Input("override-cancel-btn", "n_clicks"),
     Input("override-return-btn", "n_clicks"),
+    Input("override-dose-draft", "n_submit"),
     State("override-dose-draft", "value"),
+    State("override-unit", "value"),
     State("recommendation-store", "data"),
     State("manual-scenario-store", "data"),
     prevent_initial_call=True,
 )
 def handle_override(
-    open_clicks, save_clicks, cancel_clicks, return_clicks,
-    draft_value, rec_store, manual_store,
+    open_clicks, save_clicks, cancel_clicks, return_clicks, submit_count,
+    draft_value, unit, rec_store, manual_store,
 ):
     """
     Open/close the "Override propofol dose" popover and apply Save / Cancel
-    / Return-to-recommendation. Save triggers a real (fixed-bolus)
-    re-optimization - this is the one action in this callback that is not
-    instant, and it shows the existing dcc.Loading spinner automatically
-    since these components live inside summary-output.
+    / Return-to-recommendation. Pressing Enter in the draft field
+    (n_submit) commits exactly like clicking Save. Save triggers a real
+    (fixed-bolus) re-optimization - this is the one action in this
+    callback that is not instant, and it shows the existing dcc.Loading
+    spinner automatically since these components live inside
+    summary-output.
+
+    Opening the popover always resets the unit toggle to "Total dose" and
+    clears any leftover validation message/border from a previous edit, so
+    each edit starts clean regardless of how the last one ended.
     """
     triggered = ctx.triggered_id
+    clean = ("field-input", "", "field-message")
 
     if triggered == "override-return-btn":
-        return "edit-popover", no_update, None
+        return "edit-popover", no_update, no_update, no_update, no_update, no_update, None
 
     if not rec_store or rec_store.get("error") or not rec_store.get("context"):
-        return no_update, no_update, no_update
+        return (no_update,) * 7
 
     context = rec_store["context"]
 
@@ -2162,18 +2313,18 @@ def handle_override(
             if manual_store
             else rec_store["result"]["propofol_bolus_mg"]
         )
-        return "edit-popover edit-popover--open", prefill, no_update
+        return ("edit-popover edit-popover--open", prefill, *clean, "total", no_update)
 
     if triggered == "override-cancel-btn":
-        return "edit-popover", no_update, no_update
+        return ("edit-popover", no_update, *clean, no_update, no_update)
 
-    if triggered == "override-save-btn":
+    if triggered in ("override-save-btn", "override-dose-draft"):
         weight_kg = float(context["weight"])
-        status, _, manual_dose_mg = _validate_override_dose(draft_value, weight_kg)
+        status, _, manual_dose_mg = _validate_override_dose(draft_value, weight_kg, unit or "total")
         if status == "error":
             # Invalid value: refuse to commit, leave the popover open.
-            # The live-validation callback already shows the error inline.
-            return no_update, no_update, no_update
+            # validate_override_draft (same trigger) shows the error inline.
+            return (no_update,) * 7
 
         try:
             patient = _patient_from_context(context)
@@ -2191,16 +2342,28 @@ def handle_override(
         except Exception:
             # Keep the popover open; live-validation already covers the
             # common invalid-input cases, so a failure here is unexpected.
-            return no_update, no_update, no_update
+            return (no_update,) * 7
 
         manual_store_data = {
             "dose_mg": manual_dose_mg,
             "result": _rec_to_store_dict(manual_rec),
         }
-        return "edit-popover", no_update, manual_store_data
+        return ("edit-popover", no_update, no_update, no_update, no_update, no_update, manual_store_data)
 
     # Any other trigger: close the popover without changing anything.
-    return "edit-popover", no_update, no_update
+    return ("edit-popover", no_update, no_update, no_update, no_update, no_update, no_update)
+
+
+@app.callback(
+    Output("override-dose-draft", "placeholder"),
+    Input("override-unit", "value"),
+)
+def update_override_placeholder(unit):
+    """
+    Keep the draft input's placeholder text matching the selected unit -
+    presentation only, does not affect validation or the committed value.
+    """
+    return "Manual dose in mg/kg" if unit == "mgkg" else "Manual dose in mg"
 
 
 def main() -> None:

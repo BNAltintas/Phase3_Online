@@ -31,7 +31,17 @@
       "Bash(node inspect_dropdown_grid.js)",
       "Bash(sed -i \"s/127.0.0.1:808[0-9]/127.0.0.1:8083/\" drive_sex_dropdown.js)",
       "Bash(node inspect_dropdown_open.js)",
-      "PowerShell(Get-NetTCPConnection -LocalPort 8083 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8083/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })"
+      "PowerShell(Get-NetTCPConnection -LocalPort 8083 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8083/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })",
+      "Bash(node drive_override_redesign.js)",
+      "Bash(node drive_override_typing.js)",
+      "Bash(node drive_override_enter_mgkg.js)",
+      "Bash(node drive_override_reedit.js)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8084 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8084/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })",
+      "Bash(./.venv/Scripts/python.exe /tmp/run_server5.py)",
+      "Bash(awk '/^def make_induction_dose_rationale_figure/,/^def [a-z_]+\\\\\\(/{print NR\": \"$0}' src/propofol/app.py)",
+      "Bash(node drive_rationale_redesign.js)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8085 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8085/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })",
+      "Bash(./.venv/Scripts/python.exe /tmp/run_server6.py)"
     ]
   }
 }
