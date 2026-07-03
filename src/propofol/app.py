@@ -1774,6 +1774,56 @@ for _field_id, _original_value, _source_label in EDITABLE_FIELDS:
 
 
 # ============================================================
+# Stale-recommendation tracking
+#
+# Once a recommendation exists, any *committed* input change (Save/Restore
+# on a patient/model-setting field, a sex toggle, or a new opiate selection
+# - not just opening/canceling a popover) marks it stale and clears any
+# active manual override, so update_result_visibility (below) hides the now
+# out-of-date cards/graphs behind a "re-run" placeholder instead of letting
+# them keep displaying results computed from the previous inputs.
+# ============================================================
+
+_STALE_TRACKING_INPUTS = []
+for _field_id, _, _ in EDITABLE_FIELDS:
+    _STALE_TRACKING_INPUTS.append(Input(f"{_field_id}-save-btn", "n_clicks"))
+    _STALE_TRACKING_INPUTS.append(Input(f"{_field_id}-restore-btn", "n_clicks"))
+_STALE_TRACKING_INPUTS.append(Input("sex-male-btn", "n_clicks"))
+_STALE_TRACKING_INPUTS.append(Input("sex-female-btn", "n_clicks"))
+_STALE_TRACKING_INPUTS.append(Input("opiate-dropdown", "value"))
+
+
+@app.callback(
+    Output("recommendation-stale-store", "data"),
+    Output("manual-scenario-store", "data", allow_duplicate=True),
+    *_STALE_TRACKING_INPUTS,
+    State("recommendation-store", "data"),
+    State("manual-scenario-store", "data"),
+    prevent_initial_call=True,
+)
+def mark_inputs_stale(*args):
+    """
+    Mark the current recommendation stale and clear any active manual
+    override, but only if a recommendation actually exists yet - editing
+    inputs before the first "Run recommendation" has nothing to mark stale.
+
+    manual-scenario-store is only written (to None) when an override is
+    actually active. Writing it unconditionally on every input change would
+    re-trigger render_recommendation's (redundant, several-seconds-long)
+    figure recompute every time - and since render_recommendation's outputs
+    live inside the dcc.Loading wrapper, that would blank the whole
+    recommendation/predictions area behind a loading spinner on every
+    keystroke-driven Save, not just when there was actually something to
+    clear.
+    """
+    rec_store, manual_store = args[-2], args[-1]
+    if rec_store is None:
+        return no_update, no_update
+    clear_manual = None if manual_store is not None else no_update
+    return True, clear_manual
+
+
+# ============================================================
 # Main recommendation callback
 #
 # run_model computes the recommendation and stores it (recommendation-store)
@@ -1806,6 +1856,7 @@ def _patient_from_context(context: dict) -> Patient:
 @app.callback(
     Output("recommendation-store", "data"),
     Output("manual-scenario-store", "data"),
+    Output("recommendation-stale-store", "data", allow_duplicate=True),
     Input("run-btn", "n_clicks"),
     State("age", "value"),
     State("height", "value"),
@@ -1942,10 +1993,10 @@ def run_model(
             },
             "result": _rec_to_store_dict(rec),
         }
-        return store_data, None
+        return store_data, None, False
 
     except Exception as e:
-        return {"error": str(e), "context": None, "result": None}, None
+        return {"error": str(e), "context": None, "result": None}, None, False
 
 
 @app.callback(
@@ -2017,6 +2068,56 @@ def render_recommendation(rec_store, manual_store):
         map_fig = make_map_figure_dual(original, manual)
 
     return summary, dose_rationale_fig, propofol_pk_fig, remifentanil_pk_fig, bis_fig, map_fig
+
+
+# ============================================================
+# Before/after-run state
+#
+# Purely presentational: toggles which of {empty placeholder, stale
+# placeholder, real content} is visible for the recommendation, rationale,
+# and predictions sections. It never touches figure/card content itself
+# (render_recommendation, above, still owns that), so hidden content stays
+# in the DOM - already-computed but out-of-date graphs are just not shown,
+# rather than being cleared and recomputed.
+# ============================================================
+
+@app.callback(
+    Output("recommendation-empty-placeholder", "style"),
+    Output("recommendation-stale-placeholder", "style"),
+    Output("summary-output", "style"),
+    Output("rationale-empty-placeholder", "style"),
+    Output("rationale-stale-placeholder", "style"),
+    Output("dose-rationale-card-wrapper", "style"),
+    Output("predictions-empty-placeholder", "style"),
+    Output("predictions-stale-placeholder", "style"),
+    Output("predictions-grid", "style"),
+    Input("recommendation-store", "data"),
+    Input("recommendation-stale-store", "data"),
+)
+def update_result_visibility(rec_store, stale):
+    """
+    Derive the before-run / after-run / stale display state from
+    recommendation-store (has a recommendation ever been run?) and
+    recommendation-stale-store (have inputs changed since?), and show
+    exactly one of the three states for each of the three sections.
+    """
+    has_result = rec_store is not None
+    is_stale = has_result and bool(stale)
+    show_fresh = has_result and not is_stale
+    show_empty = not has_result
+
+    hidden = {"display": "none"}
+    shown = None
+
+    empty_style = shown if show_empty else hidden
+    stale_style = shown if is_stale else hidden
+    fresh_style = shown if show_fresh else hidden
+
+    return (
+        empty_style, stale_style, fresh_style,
+        empty_style, stale_style, fresh_style,
+        empty_style, stale_style, fresh_style,
+    )
 
 
 # ============================================================

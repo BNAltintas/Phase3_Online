@@ -226,6 +226,27 @@ def graph_card(
     )
 
 
+STALE_MESSAGE = "Input parameters changed. Re-run recommendation to update dosing guidance."
+
+
+def _placeholder_card(text: str, card_id: str, stale: bool = False, hidden: bool = False):
+    """
+    Build a "no result to show yet" placeholder card - either the initial
+    "not run yet" message or the "inputs changed, re-run" stale message.
+    Purely presentational: it carries no data and is only ever shown/hidden
+    via its `style` prop by `update_result_visibility` in app.py.
+    """
+    class_name = "card result-placeholder"
+    if stale:
+        class_name += " result-placeholder--stale"
+    return html.Div(
+        text,
+        id=card_id,
+        className=class_name,
+        style={"display": "none"} if hidden else None,
+    )
+
+
 def build_patient_parameters_card():
     """
     Build the card containing patient, baseline vitals, and derived value inputs.
@@ -484,16 +505,40 @@ def build_recommendation_column():
     into `summary-output` as an induction-dose card followed by a
     maintenance-regimen card, each with its own `.card` styling), with the
     induction-dose rationale graph stacked directly underneath.
+
+    Before a recommendation has ever been run, and whenever the current
+    recommendation is stale (inputs changed since it was generated),
+    `summary-output` and the rationale graph card are hidden behind a
+    placeholder card instead - see `update_result_visibility` in app.py,
+    which is the sole owner of all of these `style` props.
     """
     return html.Div(
         [
             html.Div("RECOMMENDATION", className="section-label"),
-            html.Div(id="summary-output"),
-            graph_card(
-                "Induction-dose rationale",
-                "dose-rationale-graph",
-                tall=True,
-                default_visible=True,
+            _placeholder_card(
+                "Run recommendation to generate personalized dosing guidance.",
+                "recommendation-empty-placeholder",
+            ),
+            _placeholder_card(
+                STALE_MESSAGE, "recommendation-stale-placeholder", stale=True, hidden=True,
+            ),
+            html.Div(id="summary-output", style={"display": "none"}),
+            _placeholder_card(
+                "Explanation will appear after running recommendation.",
+                "rationale-empty-placeholder",
+            ),
+            _placeholder_card(
+                STALE_MESSAGE, "rationale-stale-placeholder", stale=True, hidden=True,
+            ),
+            html.Div(
+                graph_card(
+                    "Induction-dose rationale",
+                    "dose-rationale-graph",
+                    tall=True,
+                    default_visible=True,
+                ),
+                id="dose-rationale-card-wrapper",
+                style={"display": "none"},
             ),
         ],
         className="recommendation-column",
@@ -502,11 +547,21 @@ def build_recommendation_column():
 
 def build_predictions_column():
     """
-    Build the right dashboard column: BIS, MAP, and PK graphs stacked vertically.
+    Build the right dashboard column: BIS, MAP, and PK graphs stacked
+    vertically, hidden behind a placeholder card before a recommendation
+    exists or while it is stale - see build_recommendation_column's
+    docstring and `update_result_visibility` in app.py.
     """
     return html.Div(
         [
             html.Div("PREDICTIONS", className="section-label"),
+            _placeholder_card(
+                "Predictions will appear after running recommendation.",
+                "predictions-empty-placeholder",
+            ),
+            _placeholder_card(
+                STALE_MESSAGE, "predictions-stale-placeholder", stale=True, hidden=True,
+            ),
             html.Div(
                 [
                     graph_card("BIS", "bis-graph", default_visible=True),
@@ -514,7 +569,9 @@ def build_predictions_column():
                     graph_card("Propofol PK/PD", "propofol-pk-graph", default_visible=False),
                     graph_card("Remifentanil PK", "remifentanil-pk-graph", default_visible=False),
                 ],
+                id="predictions-grid",
                 className="predictions-grid",
+                style={"display": "none"},
             ),
         ],
         className="predictions-column",
@@ -543,6 +600,10 @@ def build_layout():
             # Cleared by "Return to recommendation" and by every new
             # "Run recommendation" click.
             dcc.Store(id="manual-scenario-store", data=None),
+            # True when a patient/model-setting input has changed since
+            # recommendation-store's current data was generated. Reset to
+            # False by every "Run recommendation" click.
+            dcc.Store(id="recommendation-stale-store", data=False),
 
             build_sidebar(),
 

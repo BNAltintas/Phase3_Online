@@ -38,6 +38,28 @@ input[type=number] {
   color: var(--text-primary);
 }
 
+/* "No result yet" / "result is stale" placeholder card, shown in place of
+   the recommendation/rationale/predictions cards before a recommendation
+   has been run, or after inputs change and it needs to be re-run. */
+.result-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 110px;
+  padding: 20px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.result-placeholder--stale {
+  color: #c2680f;
+  background-color: rgba(194, 104, 15, 0.08);
+  border-color: rgba(194, 104, 15, 0.35);
+  font-weight: 600;
+}
+
 /* Compact patient-identification card shown above Input Parameters. */
 .patient-id-card {
   display: flex;
@@ -449,11 +471,18 @@ body {
 }
 
 /* Wraps the recommendation column + predictions column (everything
-   `run_model` updates). Explicit flex-basis + min-width: 0 keeps this
-   column's width stable and independent of its children's content-driven
-   intrinsic size, so it doesn't reflow once Plotly paints the graphs. */
+   `run_model` updates). flex-basis: 0% (not "auto") + min-width: 0 keeps
+   this column's width based purely on available space, not on its
+   children's content-driven intrinsic size - "auto" would size it to its
+   content's preferred (max-content) width first and only shrink from
+   there, which is exactly backwards for a column that must give the fixed
+   input column its own space and take only what's left. Content whose
+   preferred width doesn't easily shrink (e.g. the placeholder-card text
+   used before/between recommendations) would otherwise force this column
+   - and therefore the whole row - to wrap under the input column instead
+   of sitting beside it. */
 .output-column {
-  flex: 1 1 auto;
+  flex: 1 1 0%;
   min-width: 0;
 }
 

@@ -4,7 +4,21 @@
       "Bash(node debug_shift.js)",
       "Bash(git worktree *)",
       "PowerShell(Get-NetTCPConnection -LocalPort 8080 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8080/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })",
-      "Bash(./.venv/Scripts/python.exe /tmp/run_server.py)"
+      "Bash(./.venv/Scripts/python.exe /tmp/run_server.py)",
+      "Bash(./.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('src/propofol/app.py'\\).read\\(\\)\\); ast.parse\\(open\\('src/propofol/dashboard_layout.py'\\).read\\(\\)\\)\")",
+      "Bash(./.venv/Scripts/python.exe -c ' *)",
+      "Bash(node drive_states.js)",
+      "Bash(node debug_run.js)",
+      "Bash(node debug_run2.js)",
+      "Bash(node debug_run3.js)",
+      "Bash(sed -i 's/waitForTimeout\\(5000\\)/waitForTimeout\\(20000\\)/' debug_run3.js)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8081 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8081/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })",
+      "Bash(./.venv/Scripts/python.exe /tmp/run_server2.py)",
+      "Bash(sed -i \"s/timeout: 30000/timeout: 60000/g\" drive_states.js)",
+      "Bash(node debug_stale_settle.js)",
+      "Bash(./.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('src/propofol/app.py'\\).read\\(\\)\\)\")",
+      "Bash(node debug_stale_layout.js)",
+      "Bash(node drive_override_then_stale.js)"
     ]
   }
 }
