@@ -78,9 +78,13 @@ SU2023_REMI_A1_OUTPUT_INDEX = 4
 # Generic helpers
 # ============================================================
 
-def map_lower_bound_from_baseline(baseline_map: float) -> float:
-    """MAP lower target: highest of 65 mmHg or 70% of baseline MAP."""
-    return float(max(MAP_ABS_MIN_TARGET, MAP_REL_FRAC_TARGET * float(baseline_map)))
+def map_lower_bound_from_baseline(
+    baseline_map: float,
+    map_abs_min_target: float = MAP_ABS_MIN_TARGET,
+    map_rel_frac_target: float = MAP_REL_FRAC_TARGET,
+) -> float:
+    """MAP lower target: highest of the absolute floor or a fraction of baseline MAP."""
+    return float(max(float(map_abs_min_target), float(map_rel_frac_target) * float(baseline_map)))
 
 
 def assessment_mask(t: Sequence[float]) -> np.ndarray:
@@ -445,6 +449,15 @@ class RecommendationResult:
     feasible_map: bool
     feasible: bool
 
+    # Actual target values used for this specific run (may differ from the
+    # module defaults if the user customized them in the UI). Downstream
+    # display code should read these rather than the module constants, so
+    # plots/summaries always match what was actually optimized against.
+    target_bis_low: float
+    target_bis_high: float
+    map_abs_min_target_mmhg: float
+    map_rel_frac_target: float
+
     confidence: ConfidenceResult
     confidence_percent: float
 
@@ -509,11 +522,13 @@ def trajectory_target_flags(
     bis: Sequence[float],
     map_mmhg: Sequence[float],
     map_lower_bound: float,
+    bis_low: float = TARGET_BIS_LOW,
+    bis_high: float = TARGET_BIS_HIGH,
 ) -> tuple[bool, bool, bool]:
     """
     Target definition after the post-induction onset period:
-        BIS trajectory must stay between 40 and 60.
-        MAP trajectory must stay >= max(65, 0.70 x baseline MAP).
+        BIS trajectory must stay between bis_low and bis_high.
+        MAP trajectory must stay >= map_lower_bound.
     """
     t = np.asarray(t, dtype=float)
     bis = np.asarray(bis, dtype=float)
@@ -532,7 +547,7 @@ def trajectory_target_flags(
     if np.any(~np.isfinite(bis_eval)) or np.any(~np.isfinite(map_eval)):
         return False, False, False
 
-    feasible_bis = bool(np.all((bis_eval >= TARGET_BIS_LOW) & (bis_eval <= TARGET_BIS_HIGH)))
+    feasible_bis = bool(np.all((bis_eval >= bis_low) & (bis_eval <= bis_high)))
     feasible_map = bool(np.all(map_eval >= float(map_lower_bound)))
     feasible = bool(feasible_bis and feasible_map)
 
@@ -568,6 +583,10 @@ class Su2023PropofolRemifentanilRecommender:
         mode: str = OPTIMIZATION_MODE,
         propofol_conc_mg_ml: float = DEFAULT_PROPOFOL_CONC_MG_ML,
         remifentanil_conc_mcg_ml: float = DEFAULT_REMI_CONC_MCG_ML,
+        target_bis_low: float = TARGET_BIS_LOW,
+        target_bis_high: float = TARGET_BIS_HIGH,
+        map_abs_min_target: float = MAP_ABS_MIN_TARGET,
+        map_rel_frac_target: float = MAP_REL_FRAC_TARGET,
         map_output_index: int = SU2023_MAP_OUTPUT_INDEX,
         remi_a1_output_index: int = SU2023_REMI_A1_OUTPUT_INDEX,
         seed: int = OPTIMIZATION_BASE_SEED,
@@ -580,6 +599,15 @@ class Su2023PropofolRemifentanilRecommender:
             propofol_conc_mg_ml,
             remifentanil_conc_mcg_ml,
         )
+
+        self.target_bis_low = float(target_bis_low)
+        self.target_bis_high = float(target_bis_high)
+        if self.target_bis_low >= self.target_bis_high:
+            raise ValueError("target_bis_low must be lower than target_bis_high.")
+        self.target_bis_mid = (self.target_bis_low + self.target_bis_high) / 2.0
+        self.map_abs_min_target = float(map_abs_min_target)
+        self.map_rel_frac_target = float(map_rel_frac_target)
+
         self.map_output_index = int(map_output_index)
         self.remi_a1_output_index = int(remi_a1_output_index)
         self.seed = int(seed)
@@ -590,7 +618,9 @@ class Su2023PropofolRemifentanilRecommender:
 
         self.weight_kg = float(self.patient.weight)
         self.baseline_map = float(self.patient.base_map)
-        self.map_lower_bound = map_lower_bound_from_baseline(self.baseline_map)
+        self.map_lower_bound = map_lower_bound_from_baseline(
+            self.baseline_map, self.map_abs_min_target, self.map_rel_frac_target,
+        )
 
         self.pk_prop = PropofolPK(patient=self.patient, use_bsv=self.use_bsv)
         self.pd_prop = EleveldPD(patient=self.patient, use_bsv=self.use_bsv)
@@ -890,14 +920,18 @@ class Su2023PropofolRemifentanilRecommender:
         """
         Hierarchical objective for the deterministic optimizer.
 
-        Priority order after TARGET_ASSESSMENT_START_MIN:
-            1. Avoid BIS > 60 at any time point. This is the highest-priority
-               violation and receives a near-hard penalty.
-            2. Avoid BIS < 40 at any time point. This is still strongly
-               penalized, but less strongly than BIS > 60.
-            3. Avoid MAP below max(65 mmHg, 70% baseline MAP).
-            4. Among target-satisfying regimens, prefer BIS around 50, lower
-               drug exposure, and simpler pump schedules.
+        Priority order after TARGET_ASSESSMENT_START_MIN (bounds are
+        self.target_bis_low/high and self.map_lower_bound, which default to
+        the module constants but may be user-configured per run):
+            1. Avoid BIS above the upper target at any time point. This is
+               the highest-priority violation and receives a near-hard
+               penalty.
+            2. Avoid BIS below the lower target at any time point. This is
+               still strongly penalized, but less strongly than #1.
+            3. Avoid MAP below the MAP lower bound.
+            4. Among target-satisfying regimens, prefer BIS around the
+               target midpoint, lower drug exposure, and simpler pump
+               schedules.
 
         This hierarchy means MAP, dose, and smoothness penalties cannot dominate
         a regimen that leaves the patient too light after the onset period.
@@ -922,7 +956,7 @@ class Su2023PropofolRemifentanilRecommender:
         # ----------------------------------------------------
         # Any point above 60 means insufficient hypnotic depth. This must be
         # more important than MAP, dose, smoothness, or BIS < 40.
-        bis_over = np.clip(bis_eval - TARGET_BIS_HIGH, 0.0, None)
+        bis_over = np.clip(bis_eval - self.target_bis_high, 0.0, None)
 
         if np.any(bis_over > 0.0):
             max_over = float(np.max(bis_over))
@@ -932,14 +966,14 @@ class Su2023PropofolRemifentanilRecommender:
             frac_over = n_over / float(len(bis_eval))
 
             # Small early-onset term, so the optimizer also learns to reach
-            # BIS <= 60 before the assessment window begins.
+            # the upper BIS target before the assessment window begins.
             early_mask = (t >= 1.0) & (t < TARGET_ASSESSMENT_START_MIN)
             early_penalty = 0.0
             if np.any(early_mask):
                 early_bis = np.asarray(bis, dtype=float)[early_mask]
                 if np.any(np.isfinite(early_bis)):
                     early_min = float(np.nanmin(early_bis))
-                    early_penalty = 50_000.0 * max(early_min - TARGET_BIS_HIGH, 0.0) ** 2
+                    early_penalty = 50_000.0 * max(early_min - self.target_bis_high, 0.0) ** 2
 
             return float(
                 1e11
@@ -956,7 +990,7 @@ class Su2023PropofolRemifentanilRecommender:
         # Oversedation is important, but the user explicitly wants BIS > 60 to
         # dominate. Therefore the base penalty is two orders of magnitude lower
         # than the BIS > 60 branch.
-        bis_under = np.clip(TARGET_BIS_LOW - bis_eval, 0.0, None)
+        bis_under = np.clip(self.target_bis_low - bis_eval, 0.0, None)
 
         if np.any(bis_under > 0.0):
             max_under = float(np.max(bis_under))
@@ -997,14 +1031,15 @@ class Su2023PropofolRemifentanilRecommender:
         # ----------------------------------------------------
         # 4) Tie-breakers once BIS and MAP are both feasible
         # ----------------------------------------------------
-        # Prefer BIS centered around 50, but keep this much weaker than any
-        # actual target violation.
-        bis_target_dev = bis_eval - TARGET_BIS_MID
+        # Prefer BIS centered around the midpoint of the target range, but keep
+        # this much weaker than any actual target violation.
+        bis_target_dev = bis_eval - self.target_bis_mid
         bis_centering_penalty = 2_500.0 * float(np.mean(bis_target_dev ** 2))
 
-        # Encourage reaching BIS <= 60 before the assessment window, but only as
-        # a weak tie-breaker once post-onset targets are satisfied.
-        adequate_idx = np.where(np.asarray(bis, dtype=float) <= TARGET_BIS_HIGH)[0]
+        # Encourage reaching the upper BIS target before the assessment
+        # window, but only as a weak tie-breaker once post-onset targets are
+        # satisfied.
+        adequate_idx = np.where(np.asarray(bis, dtype=float) <= self.target_bis_high)[0]
         if len(adequate_idx) == 0:
             onset_penalty = 50_000.0
         else:
@@ -1170,6 +1205,8 @@ class Su2023PropofolRemifentanilRecommender:
             bis=bis,
             map_mmhg=map_mmhg,
             map_lower_bound=self.map_lower_bound,
+            bis_low=self.target_bis_low,
+            bis_high=self.target_bis_high,
         )
 
         confidence = simulate_confidence(
@@ -1178,6 +1215,10 @@ class Su2023PropofolRemifentanilRecommender:
             use_remifentanil=self.use_remifentanil,
             propofol_conc_mg_ml=self.propofol_conc_mg_ml,
             remifentanil_conc_mcg_ml=self.remifentanil_conc_mcg_ml,
+            target_bis_low=self.target_bis_low,
+            target_bis_high=self.target_bis_high,
+            map_abs_min_target=self.map_abs_min_target,
+            map_rel_frac_target=self.map_rel_frac_target,
             map_output_index=self.map_output_index,
             remi_a1_output_index=self.remi_a1_output_index,
             base_seed=self.seed + 10_000,
@@ -1207,6 +1248,10 @@ class Su2023PropofolRemifentanilRecommender:
             feasible_bis=feasible_bis,
             feasible_map=feasible_map,
             feasible=feasible,
+            target_bis_low=self.target_bis_low,
+            target_bis_high=self.target_bis_high,
+            map_abs_min_target_mmhg=self.map_abs_min_target,
+            map_rel_frac_target=self.map_rel_frac_target,
             confidence=confidence,
             confidence_percent=confidence.confidence_percent,
             objective_value=float(best_loss),
@@ -1232,6 +1277,10 @@ def simulate_regimen_once(
     remifentanil_conc_mcg_ml: float,
     map_output_index: int,
     remi_a1_output_index: int,
+    target_bis_low: float = TARGET_BIS_LOW,
+    target_bis_high: float = TARGET_BIS_HIGH,
+    map_abs_min_target: float = MAP_ABS_MIN_TARGET,
+    map_rel_frac_target: float = MAP_REL_FRAC_TARGET,
     seed: Optional[int] = None,
 ):
     """
@@ -1247,6 +1296,10 @@ def simulate_regimen_once(
         mode=OPTIMIZATION_MODE,
         propofol_conc_mg_ml=propofol_conc_mg_ml,
         remifentanil_conc_mcg_ml=remifentanil_conc_mcg_ml,
+        target_bis_low=target_bis_low,
+        target_bis_high=target_bis_high,
+        map_abs_min_target=map_abs_min_target,
+        map_rel_frac_target=map_rel_frac_target,
         map_output_index=map_output_index,
         remi_a1_output_index=remi_a1_output_index,
         seed=seed or OPTIMIZATION_BASE_SEED,
@@ -1261,6 +1314,10 @@ def simulate_confidence(
     use_remifentanil: bool,
     propofol_conc_mg_ml: float,
     remifentanil_conc_mcg_ml: float,
+    target_bis_low: float = TARGET_BIS_LOW,
+    target_bis_high: float = TARGET_BIS_HIGH,
+    map_abs_min_target: float = MAP_ABS_MIN_TARGET,
+    map_rel_frac_target: float = MAP_REL_FRAC_TARGET,
     map_output_index: int = SU2023_MAP_OUTPUT_INDEX,
     remi_a1_output_index: int = SU2023_REMI_A1_OUTPUT_INDEX,
     base_seed: int = 10_000,
@@ -1286,6 +1343,10 @@ def simulate_confidence(
                 use_bsv=True,
                 propofol_conc_mg_ml=propofol_conc_mg_ml,
                 remifentanil_conc_mcg_ml=remifentanil_conc_mcg_ml,
+                target_bis_low=target_bis_low,
+                target_bis_high=target_bis_high,
+                map_abs_min_target=map_abs_min_target,
+                map_rel_frac_target=map_rel_frac_target,
                 map_output_index=map_output_index,
                 remi_a1_output_index=remi_a1_output_index,
                 seed=base_seed + i,
@@ -1296,6 +1357,8 @@ def simulate_confidence(
                 bis=bis,
                 map_mmhg=map_mmhg,
                 map_lower_bound=map_lower_bound,
+                bis_low=target_bis_low,
+                bis_high=target_bis_high,
             )
 
             n_target_met += int(feasible)
@@ -1358,6 +1421,10 @@ def recommend_su2023_regimen(
     use_remifentanil: Optional[bool] = None,
     propofol_conc_mg_ml: float = DEFAULT_PROPOFOL_CONC_MG_ML,
     remifentanil_conc_mcg_ml: float = DEFAULT_REMI_CONC_MCG_ML,
+    target_bis_low: float = TARGET_BIS_LOW,
+    target_bis_high: float = TARGET_BIS_HIGH,
+    map_abs_min_target: float = MAP_ABS_MIN_TARGET,
+    map_rel_frac_target: float = MAP_REL_FRAC_TARGET,
     mode: str = OPTIMIZATION_MODE,
     seed: int = OPTIMIZATION_BASE_SEED,
 ) -> RecommendationResult:
@@ -1369,6 +1436,10 @@ def recommend_su2023_regimen(
         - "remifentanil"
 
     Sufentanil and fentanyl are intentionally not implemented yet.
+
+    target_bis_low/target_bis_high and map_abs_min_target/map_rel_frac_target
+    default to the module constants (the system defaults shown in the UI) but
+    can be overridden per call, e.g. from user-edited UI values.
     """
     opiate = str(opiate or "none").lower()
 
@@ -1390,6 +1461,10 @@ def recommend_su2023_regimen(
         mode=mode,
         propofol_conc_mg_ml=propofol_conc_mg_ml,
         remifentanil_conc_mcg_ml=remifentanil_conc_mcg_ml,
+        target_bis_low=target_bis_low,
+        target_bis_high=target_bis_high,
+        map_abs_min_target=map_abs_min_target,
+        map_rel_frac_target=map_rel_frac_target,
         seed=seed,
     )
 

@@ -16,6 +16,8 @@ from propofol.dashboard_layout import (
 )
 from propofol.patient import EleveldPatient as Patient
 from propofol.recommend_regimen2023 import (
+    MAP_ABS_MIN_TARGET,
+    MAP_REL_FRAC_TARGET,
     TARGET_ASSESSMENT_START_MIN,
     TARGET_BIS_HIGH,
     TARGET_BIS_LOW,
@@ -285,8 +287,17 @@ def make_bis_figure(rec):
     _add_band(fig, c.time_min, c.bis_p05, c.bis_p95, "BIS CI 5–95%")
     _add_line(fig, rec.time_min, rec.bis, "BIS deterministic")
 
-    fig.add_hline(y=TARGET_BIS_LOW, line_dash="dash", annotation_text="BIS 40")
-    fig.add_hline(y=TARGET_BIS_HIGH, line_dash="dash", annotation_text="BIS 60")
+    # Read the actual per-run targets off `rec` (not the module defaults), so
+    # the band always matches what this specific recommendation was optimized
+    # against, even if the user has since edited the target fields.
+    fig.add_hline(
+        y=rec.target_bis_low, line_dash="dash",
+        annotation_text=f"BIS {rec.target_bis_low:.0f}",
+    )
+    fig.add_hline(
+        y=rec.target_bis_high, line_dash="dash",
+        annotation_text=f"BIS {rec.target_bis_high:.0f}",
+    )
 
     fig.update_layout(
         title="BIS",
@@ -497,12 +508,19 @@ def make_induction_dose_rationale_figure(
     x_axis_min, x_axis_max = _dose_axis_limits_mgkg(selected_dose_mgkg)
     dose_grid_mgkg = _clinical_propofol_dose_grid_mgkg(selected_dose_mgkg)
 
+    # Re-use the exact targets that produced `rec`, not the module defaults or
+    # any since-edited (not-yet-run) UI state, so this re-simulated dose grid
+    # stays internally consistent with the recommendation being explained.
     runner = Su2023PropofolRemifentanilRecommender(
         patient=patient,
         use_remifentanil=(opiate == "remifentanil"),
         use_bsv=False,
         propofol_conc_mg_ml=propofol_conc_mg_ml,
         remifentanil_conc_mcg_ml=remifentanil_conc_mcg_ml,
+        target_bis_low=rec.target_bis_low,
+        target_bis_high=rec.target_bis_high,
+        map_abs_min_target=rec.map_abs_min_target_mmhg,
+        map_rel_frac_target=rec.map_rel_frac_target,
     )
 
     min_maps = []
@@ -609,12 +627,14 @@ def make_induction_dose_rationale_figure(
         )
 
     # BIS target band for the plotted maximal BIS curve.
-    # Since the blue line is max BIS, the clinically relevant upper boundary is 60.
-    # The lower boundary 40 is still shown as context, but excessive depth is
-    # checked using min_bis_values in both_targets_ok.
+    # Since the blue line is max BIS, the clinically relevant upper boundary is
+    # the upper target. The lower boundary is still shown as context, but
+    # excessive depth is checked using min_bis_values in both_targets_ok.
+    # Uses rec.target_bis_low/high (the actual targets used for this
+    # recommendation), not the module defaults.
     bis_band = _target_rect_y_limits(
-        band_low=TARGET_BIS_LOW,
-        band_high=TARGET_BIS_HIGH,
+        band_low=rec.target_bis_low,
+        band_high=rec.target_bis_high,
         axis_min=max_bis_axis_min,
         axis_max=max_bis_axis_max,
     )
@@ -638,8 +658,8 @@ def make_induction_dose_rationale_figure(
     #   minimal MAP between lower MAP target and 20% above baseline.
     #
     # BIS target:
-    #   maximal BIS <= 60, to ensure adequate hypnosis.
-    #   minimal BIS >= 40, to avoid excessive hypnotic depth.
+    #   maximal BIS <= upper target, to ensure adequate hypnosis.
+    #   minimal BIS >= lower target, to avoid excessive hypnotic depth.
     #
     # Use yref="paper" so the green range remains visible regardless of y-axis zoom.
     both_targets_ok = (
@@ -648,8 +668,8 @@ def make_induction_dose_rationale_figure(
         & np.isfinite(max_bis_values)
         & (min_maps >= map_target)
         & (min_maps <= map_target_upper)
-        & (min_bis_values >= TARGET_BIS_LOW)
-        & (max_bis_values <= TARGET_BIS_HIGH)
+        & (min_bis_values >= rec.target_bis_low)
+        & (max_bis_values <= rec.target_bis_high)
     )
 
     if np.any(both_targets_ok):
@@ -762,7 +782,7 @@ def make_induction_dose_rationale_figure(
                 "Selected dose %{x:.3f} mg/kg<br>"
                 "Maximal BIS %{y:.1f}<br>"
                 "Minimal BIS %{customdata[0]:.1f}<br>"
-                f"BIS target {TARGET_BIS_LOW:.0f}-{TARGET_BIS_HIGH:.0f}<extra></extra>"
+                f"BIS target {rec.target_bis_low:.0f}-{rec.target_bis_high:.0f}<extra></extra>"
             ),
         ),
         secondary_y=True,
@@ -900,11 +920,21 @@ EDITABLE_FIELDS = [
     ("baseline_sap", 120, "Monitor"),
     ("baseline_dap", 70, "Monitor"),
     ("baseline_hr", 70, "Monitor"),
+    ("bis-target-low", float(TARGET_BIS_LOW), "Default"),
+    ("bis-target-high", float(TARGET_BIS_HIGH), "Default"),
+    ("map-target-abs", float(MAP_ABS_MIN_TARGET), "Default"),
+    ("map-target-rel", float(MAP_REL_FRAC_TARGET) * 100.0, "Default"),
 ]
 
 # Validation bounds shown in the edit popover. Hard limits block Save;
 # typical-range (warn) limits only show a warning and still allow Save.
-# These are presentation/UX rules only - they do not feed into run_model.
+# These are presentation/UX rules only - they do not by themselves feed into
+# run_model (the BIS/MAP target fields are the exception: run_model reads
+# their *saved* value as a State, same as every other editable field).
+#
+# cross_check_field/cross_check_kind generalizes a two-field ordering rule
+# ("this field must be below/above that field"), used for SBP/DBP and for
+# the BIS lower/upper target pair.
 FIELD_RULES = {
     "age": dict(hard_min=0, hard_max=120, warn_min=None, warn_max=100, label="Age", unit="years"),
     "height": dict(
@@ -918,38 +948,66 @@ FIELD_RULES = {
     ),
     "baseline_dap": dict(
         hard_min=10, hard_max=200, warn_min=40, warn_max=140, label="DBP", unit="mmHg",
-        cross_check_sap=True,
+        cross_check_field="baseline_sap", cross_check_kind="below",
     ),
     "baseline_hr": dict(
         hard_min=0, hard_max=250, warn_min=40, warn_max=180, label="HR", unit="bpm",
     ),
+    "bis-target-low": dict(
+        hard_min=0, hard_max=100, warn_min=20, warn_max=50,
+        label="BIS target (lower)", unit="",
+        cross_check_field="bis-target-high", cross_check_kind="below",
+    ),
+    "bis-target-high": dict(
+        hard_min=0, hard_max=100, warn_min=50, warn_max=80,
+        label="BIS target (upper)", unit="",
+        cross_check_field="bis-target-low", cross_check_kind="above",
+    ),
+    "map-target-abs": dict(
+        hard_min=30, hard_max=150, warn_min=55, warn_max=90,
+        label="MAP target (absolute)", unit="mmHg",
+    ),
+    "map-target-rel": dict(
+        hard_min=30, hard_max=100, warn_min=50, warn_max=90,
+        label="MAP target (relative)", unit="%",
+    ),
 }
+
+
+def _unit_suffix(unit: str) -> str:
+    """
+    Return a leading-space unit suffix, or "" for dimensionless fields (e.g. BIS).
+    """
+    return f" {unit}" if unit else ""
 
 
 def _check_hard_bounds(value: float, rules: dict) -> str | None:
     """
     Return an error message if value violates the field's hard min/max, else None.
     """
-    label, unit = rules["label"], rules["unit"]
+    label, unit = rules["label"], _unit_suffix(rules["unit"])
     if value < rules["hard_min"]:
         if rules["hard_min"] == 0:
             return f"{label} cannot be negative."
-        return f"{label} must be at least {rules['hard_min']} {unit}."
+        return f"{label} must be at least {rules['hard_min']}{unit}."
     if value > rules["hard_max"]:
-        return f"{label} cannot exceed {rules['hard_max']} {unit}."
+        return f"{label} cannot exceed {rules['hard_max']}{unit}."
     return None
 
 
-def _check_dap_below_sap(value: float, sap_value) -> str | None:
+def _check_cross_field(value: float, other_value, kind: str, this_label: str, other_label: str):
     """
-    Return an error message if DAP is not strictly below the current SAP value.
+    Return an error message if value does not satisfy the ordering constraint
+    ("below" or "above") relative to another field's current value, else None.
     """
     try:
-        sap = float(sap_value)
+        other = float(other_value)
     except (TypeError, ValueError):
         return None
-    if value >= sap:
-        return "DBP must be lower than SBP."
+    if kind == "below" and value >= other:
+        return f"{this_label} must be lower than {other_label}."
+    if kind == "above" and value <= other:
+        return f"{this_label} must be higher than {other_label}."
     return None
 
 
@@ -957,24 +1015,24 @@ def _check_warn_bounds(value: float, rules: dict):
     """
     Return ("warning", message) outside the typical range, else ("normal", "").
     """
-    unit = rules["unit"]
+    unit = _unit_suffix(rules["unit"])
     warn_min = rules.get("warn_min")
     warn_max = rules.get("warn_max")
     if warn_min is not None and value < warn_min:
         return "warning", (
-            f"This value is outside the typical range ({warn_min}–{rules['hard_max']} "
+            f"This value is outside the typical range ({warn_min}–{rules['hard_max']}"
             f"{unit}). Please verify that it has been entered correctly."
         )
     if warn_max is not None and value > warn_max:
         lo = warn_min if warn_min is not None else rules["hard_min"]
         return "warning", (
-            f"This value is outside the typical range ({lo}–{warn_max} {unit}). "
+            f"This value is outside the typical range ({lo}–{warn_max}{unit}). "
             f"Please verify that it has been entered correctly."
         )
     return "normal", ""
 
 
-def _validate_field_value(field_id: str, raw_value, sap_value=None):
+def _validate_field_value(field_id: str, raw_value, other_value=None):
     """
     Validate a draft value for an editable field against FIELD_RULES.
 
@@ -995,8 +1053,12 @@ def _validate_field_value(field_id: str, raw_value, sap_value=None):
     if hard_error is not None:
         return "error", hard_error
 
-    if rules.get("cross_check_sap"):
-        cross_error = _check_dap_below_sap(value, sap_value)
+    cross_field = rules.get("cross_check_field")
+    if cross_field:
+        cross_error = _check_cross_field(
+            value, other_value, rules["cross_check_kind"],
+            rules["label"], FIELD_RULES[cross_field]["label"],
+        )
         if cross_error is not None:
             return "error", cross_error
 
@@ -1029,7 +1091,7 @@ def _register_live_validation_callback(field_id: str):
     """
     Register real-time draft validation: border color, message, Save gating.
     """
-    needs_sap = FIELD_RULES[field_id].get("cross_check_sap", False)
+    cross_field = FIELD_RULES[field_id].get("cross_check_field")
 
     outputs = [
         Output(f"{field_id}-draft", "className"),
@@ -1038,14 +1100,14 @@ def _register_live_validation_callback(field_id: str):
         Output(f"{field_id}-save-btn", "disabled"),
     ]
     inputs = [Input(f"{field_id}-draft", "value")]
-    states = [State("baseline_sap", "value")] if needs_sap else []
+    states = [State(cross_field, "value")] if cross_field else []
 
     def _validate(draft_value, *extra_states):
         """
         Re-validate the draft value on every keystroke (no Save needed).
         """
-        sap_value = extra_states[0] if needs_sap else None
-        status, message = _validate_field_value(field_id, draft_value, sap_value)
+        other_value = extra_states[0] if cross_field else None
+        status, message = _validate_field_value(field_id, draft_value, other_value)
         return _draft_class(status), message, _message_class(status), status == "error"
 
     app.callback(*outputs, *inputs, *states)(_validate)
@@ -1091,7 +1153,7 @@ def _register_editable_field_callback(field_id: str, original_value: float, sour
     """
     Register the Save/Cancel/Restore popover callback for one patient-parameter field.
     """
-    needs_sap = FIELD_RULES[field_id].get("cross_check_sap", False)
+    cross_field = FIELD_RULES[field_id].get("cross_check_field")
 
     outputs = [
         Output(field_id, "value"),
@@ -1110,8 +1172,8 @@ def _register_editable_field_callback(field_id: str, original_value: float, sour
         Input(f"{field_id}-draft", "n_submit"),
     ]
     states = [State(f"{field_id}-draft", "value"), State(field_id, "value")]
-    if needs_sap:
-        states.append(State("baseline_sap", "value"))
+    if cross_field:
+        states.append(State(cross_field, "value"))
 
     def _update_field(badge_clicks, save_clicks, cancel_clicks, restore_clicks, draft_submit,
                        *extra_states):
@@ -1119,14 +1181,14 @@ def _register_editable_field_callback(field_id: str, original_value: float, sour
         Open/close the edit popover and apply Save/Cancel/Restore for this field.
         """
         draft_value, current_value = extra_states[0], extra_states[1]
-        sap_value = extra_states[2] if needs_sap else None
+        other_value = extra_states[2] if cross_field else None
         triggered = ctx.triggered_id
 
         if triggered == f"{field_id}-restore-btn":
             return _field_result(original_value, original_value, source_label)
 
         if triggered in (f"{field_id}-save-btn", f"{field_id}-draft"):
-            status, _ = _validate_field_value(field_id, draft_value, sap_value)
+            status, _ = _validate_field_value(field_id, draft_value, other_value)
             if status == "error":
                 # Invalid value: refuse to commit, leave the popover open as-is.
                 # The live-validation callback already shows the error inline.
@@ -1170,6 +1232,10 @@ for _field_id, _original_value, _source_label in EDITABLE_FIELDS:
     State("propofol-concentration-custom", "value"),
     State("remifentanil-concentration-dropdown", "value"),
     State("remifentanil-concentration-custom", "value"),
+    State("bis-target-low", "value"),
+    State("bis-target-high", "value"),
+    State("map-target-abs", "value"),
+    State("map-target-rel", "value"),
     prevent_initial_call=True,
 )
 def run_model(
@@ -1186,6 +1252,10 @@ def run_model(
     propofol_concentration_custom,
     remifentanil_concentration_selection,
     remifentanil_concentration_custom,
+    target_bis_low,
+    target_bis_high,
+    map_target_abs,
+    map_target_rel_pct,
 ):
     """
     Run the pharmacokinetic model and generate recommendations based on user inputs.
@@ -1210,6 +1280,22 @@ def run_model(
             raise ValueError("Baseline SBP must be higher than DBP.")
         if baseline_hr <= 0:
             raise ValueError("Baseline HR must be positive.")
+
+        target_bis_low = float(target_bis_low)
+        target_bis_high = float(target_bis_high)
+        map_target_abs = float(map_target_abs)
+        map_target_rel_pct = float(map_target_rel_pct)
+
+        if target_bis_low <= 0 or target_bis_high <= 0:
+            raise ValueError("BIS targets must be positive.")
+        if target_bis_low >= target_bis_high:
+            raise ValueError("BIS target (lower) must be lower than BIS target (upper).")
+        if map_target_abs <= 0:
+            raise ValueError("MAP target (absolute) must be positive.")
+        if map_target_rel_pct <= 0:
+            raise ValueError("MAP target (relative) must be positive.")
+
+        map_target_rel_frac = map_target_rel_pct / 100.0
 
         opiate = opiate or "none"
         if opiate in {"sufentanil", "fentanyl"}:
@@ -1243,6 +1329,10 @@ def run_model(
             opiate=opiate,
             propofol_conc_mg_ml=propofol_concentration,
             remifentanil_conc_mcg_ml=remifentanil_concentration,
+            target_bis_low=target_bis_low,
+            target_bis_high=target_bis_high,
+            map_abs_min_target=map_target_abs,
+            map_rel_frac_target=map_target_rel_frac,
         )
 
         return (

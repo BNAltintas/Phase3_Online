@@ -159,6 +159,11 @@ input[type=number] {
   margin-bottom: 8px;
 }
 
+/* Parameter / Value / Source only, no Date/Time column (e.g. BIS/MAP targets). */
+.param-table--no-date {
+  grid-template-columns: auto 62px 54px;
+}
+
 .param-table-header {
   font-size: 9px;
   font-weight: 700;

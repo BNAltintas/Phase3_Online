@@ -57,14 +57,16 @@ def derived_value_row(label: str, value_id: str, tooltip: str):
     )
 
 
-def param_table_header():
-    """Build the PARAMETER / VALUE / SOURCE / TIME header row for a `.param-table`."""
-    return [
+def param_table_header(show_date: bool = True):
+    """Build the PARAMETER / VALUE / SOURCE (/ DATE-TIME) header row for a `.param-table`."""
+    header = [
         html.Div("Parameter", className="param-table-header"),
         html.Div("Value", className="param-table-header"),
         html.Div("Source", className="param-table-header"),
-        html.Div("Date/Time", className="param-table-header"),
     ]
+    if show_date:
+        header.append(html.Div("Date/Time", className="param-table-header"))
+    return header
 
 
 def editable_field_row(
@@ -75,6 +77,7 @@ def editable_field_row(
     min_value: float | None = None,
     step: float = 1,
     source_label: str = "EHR",
+    show_date: bool = True,
 ):
     """
     Build a click-to-edit parameter row: value badge, source/date, and edit popover.
@@ -85,6 +88,10 @@ def editable_field_row(
     `html.Div`) containing a scratch input plus Save/Cancel/Restore controls;
     the popover only ever writes back into the same `field_id` value, so the
     data flow into `run_model` is unchanged.
+
+    When show_date is False, the date cell is still rendered (app.py's
+    generic popover callback always writes to it) but hidden via inline
+    style, so it doesn't reserve a column in `.param-table`.
     """
     return [
         html.Div(label, className="param-label"),
@@ -107,6 +114,7 @@ def editable_field_row(
             timestamp_display(EHR_RECORD_DATE, EHR_RECORD_TIME),
             id=f"{field_id}-date",
             className="param-date",
+            style=None if show_date else {"display": "none"},
         ),
         html.Div(
             [
@@ -361,20 +369,37 @@ def build_model_settings_card():
                 ],
                 value=str(int(DEFAULT_REMI_CONC_MCG_ML)),
             ),
-            field_block(
-                "Target BIS",
-                html.Div(
-                    f"{int(TARGET_BIS_LOW)}–{int(TARGET_BIS_HIGH)}",
-                    className="value-display",
-                ),
+            html.H4("Target BIS", className="card-subheading"),
+            html.Div(
+                [
+                    *param_table_header(show_date=False),
+                    *editable_field_row(
+                        "Lower", "bis-target-low", TARGET_BIS_LOW, TARGET_BIS_LOW,
+                        min_value=0, step=1, source_label="Default", show_date=False,
+                    ),
+                    *editable_field_row(
+                        "Upper", "bis-target-high", TARGET_BIS_HIGH, TARGET_BIS_HIGH,
+                        min_value=0, step=1, source_label="Default", show_date=False,
+                    ),
+                ],
+                className="param-table param-table--no-date",
             ),
-            field_block(
-                "Target MAP",
-                html.Div(
-                    f">{int(MAP_ABS_MIN_TARGET)} mmHg or "
-                    f">{int(MAP_REL_FRAC_TARGET * 100)}% baseline",
-                    className="value-display",
-                ),
+            html.H4("Target MAP", className="card-subheading"),
+            html.Div(
+                [
+                    *param_table_header(show_date=False),
+                    *editable_field_row(
+                        "Absolute (mmHg)", "map-target-abs",
+                        MAP_ABS_MIN_TARGET, MAP_ABS_MIN_TARGET,
+                        min_value=30, step=1, source_label="Default", show_date=False,
+                    ),
+                    *editable_field_row(
+                        "Relative (% baseline)", "map-target-rel",
+                        MAP_REL_FRAC_TARGET * 100, MAP_REL_FRAC_TARGET * 100,
+                        min_value=30, step=1, source_label="Default", show_date=False,
+                    ),
+                ],
+                className="param-table param-table--no-date",
             ),
         ],
         className="card",
