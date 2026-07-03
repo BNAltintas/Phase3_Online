@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dash import dcc, html
 
+from propofol.more_info_content import MORE_INFO_SECTIONS, MORE_INFO_SUBTITLE, MORE_INFO_TITLE
 from propofol.recommend_regimen2023 import (
     DEFAULT_PROPOFOL_CONC_MG_ML,
     DEFAULT_REMI_CONC_MCG_ML,
@@ -409,12 +410,90 @@ def build_model_settings_card():
     )
 
 
+def _accordion_section(section_id: str, title: str, body_markdown: str, is_open: bool):
+    """
+    Build one collapsible "More Info" section: a clickable header (title +
+    chevron) and a body pane holding its Markdown text.
+
+    Only styling/visibility (className) is data-driven from `is_open` here
+    and by `render_more_info_accordion` in app.py afterwards - the
+    single-open-at-a-time behavior is entirely presentational and never
+    touches MORE_INFO_SECTIONS' content.
+    """
+    chevron_class = "accordion-chevron accordion-chevron--open" if is_open else "accordion-chevron"
+    body_class = "accordion-body" if is_open else "accordion-body accordion-body--collapsed"
+
+    return html.Div(
+        [
+            html.Div(
+                [
+                    html.Span(title, className="accordion-title"),
+                    html.Span(
+                        "⌄",
+                        id={"type": "more-info-accordion-chevron", "section": section_id},
+                        className=chevron_class,
+                    ),
+                ],
+                id={"type": "more-info-accordion-header", "section": section_id},
+                n_clicks=0,
+                className="accordion-header",
+            ),
+            html.Div(
+                dcc.Markdown(body_markdown, className="accordion-body-text"),
+                id={"type": "more-info-accordion-body", "section": section_id},
+                className=body_class,
+            ),
+        ],
+        className="card accordion-section",
+    )
+
+
+def build_more_info_view():
+    """
+    Build the "More Info" page: a "Back to recommendation" button, a
+    centered title/subtitle, and an accordion of explanatory sections
+    (content defined in more_info_content.py, not here). The first section
+    starts open, matching the reference design.
+    """
+    sections = [
+        _accordion_section(
+            section["id"], section["title"], section["body"],
+            is_open=(index == 0),
+        )
+        for index, section in enumerate(MORE_INFO_SECTIONS)
+    ]
+
+    return html.Div(
+        html.Div(
+            [
+                # Which section id is open ("" for none) - the first section
+                # starts open, matching the sections' own is_open above.
+                dcc.Store(id="more-info-open-section", data=MORE_INFO_SECTIONS[0]["id"]),
+                html.Button(
+                    "← Back to recommendation",
+                    id="back-to-recommendation-btn",
+                    n_clicks=0,
+                    className="back-to-recommendation-btn",
+                ),
+                html.H2(MORE_INFO_TITLE, className="more-info-title"),
+                html.P(MORE_INFO_SUBTITLE, className="more-info-subtitle"),
+                html.Div(sections, className="accordion"),
+            ],
+            className="more-info-content",
+        ),
+        id="more-info-view",
+        className="more-info-view",
+        style={"display": "none"},
+    )
+
+
 def build_sidebar():
     """
     Build the left navigation sidebar.
 
-    Only "Recommendation" is functional; "Scenario Exploration" and "More
-    Info" are placeholders for pages that do not exist yet.
+    "Recommendation" and "More Info" switch between the two pages;
+    "Scenario Exploration" is still a placeholder for a page that does not
+    exist yet.
     """
     return html.Div(
         [
@@ -423,6 +502,8 @@ def build_sidebar():
                 [
                     html.Div(
                         "Recommendation",
+                        id="nav-recommendation-btn",
+                        n_clicks=0,
                         className="sidebar-nav-item sidebar-nav-item--active",
                     ),
                     html.Div(
@@ -431,7 +512,9 @@ def build_sidebar():
                     ),
                     html.Div(
                         "More Info",
-                        className="sidebar-nav-item sidebar-nav-item--disabled",
+                        id="nav-more-info-btn",
+                        n_clicks=0,
+                        className="sidebar-nav-item",
                     ),
                 ],
                 className="sidebar-nav",
@@ -577,7 +660,11 @@ def build_predictions_column():
 def build_layout():
     """
     Build the main layout of the dashboard: a navigation sidebar plus a
-    three-column input/recommendation/predictions dashboard.
+    three-column input/recommendation/predictions dashboard, or the "More
+    Info" page - the two views are siblings, and only one is ever visible
+    at a time (Output("main-content", "style") /
+    Output("more-info-view", "style"), driven by active-page-store and
+    owned by render_active_page in app.py).
 
     The input column sits outside `dcc.Loading` (as before, inputs never
     show a loading overlay); the recommendation column (including the
@@ -600,6 +687,8 @@ def build_layout():
             # recommendation-store's current data was generated. Reset to
             # False by every "Run recommendation" click.
             dcc.Store(id="recommendation-stale-store", data=False),
+            # "recommendation" or "more-info" - which top-level page is shown.
+            dcc.Store(id="active-page-store", data="recommendation"),
 
             build_sidebar(),
 
@@ -626,8 +715,11 @@ def build_layout():
                         className="content-grid",
                     ),
                 ],
+                id="main-content",
                 className="main-content",
             ),
+
+            build_more_info_view(),
         ],
         className="app-shell",
     )

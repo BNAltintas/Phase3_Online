@@ -41,7 +41,15 @@
       "Bash(awk '/^def make_induction_dose_rationale_figure/,/^def [a-z_]+\\\\\\(/{print NR\": \"$0}' src/propofol/app.py)",
       "Bash(node drive_rationale_redesign.js)",
       "PowerShell(Get-NetTCPConnection -LocalPort 8085 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8085/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })",
-      "Bash(./.venv/Scripts/python.exe /tmp/run_server6.py)"
+      "Bash(./.venv/Scripts/python.exe /tmp/run_server6.py)",
+      "Bash(./.venv/Scripts/python.exe -c \"import dash_bootstrap_components; print\\(dash_bootstrap_components.__version__\\)\")",
+      "Bash(./.venv/Scripts/python.exe -c \"import dash; print\\(dash.__version__\\)\")",
+      "Bash(ls *.toml *.txt *.cfg)",
+      "Bash(find . -maxdepth 1 -iname \"requirements*\" -o -iname \"pyproject*\")",
+      "Bash(./.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('src/propofol/app.py'\\).read\\(\\)\\); ast.parse\\(open\\('src/propofol/dashboard_layout.py'\\).read\\(\\)\\); ast.parse\\(open\\('src/propofol/more_info_content.py'\\).read\\(\\)\\)\")",
+      "Bash(node drive_more_info.js)",
+      "Bash(node drive_more_info_narrow.js)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8086 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8086/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })"
     ]
   }
 }

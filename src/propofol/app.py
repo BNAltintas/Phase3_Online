@@ -7,7 +7,7 @@ from typing import Optional
 import dash
 import numpy as np
 import plotly.graph_objects as go
-from dash import MATCH, Input, Output, State, ctx, dcc, html, no_update
+from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html, no_update
 from plotly.subplots import make_subplots
 
 from propofol.config import BOLUS_MGKG_BOUNDS
@@ -1530,6 +1530,109 @@ def toggle_graph_visibility(checked_values, current_class_name):
 
     content_style = None if visible else {"display": "none"}
     return content_style, " ".join(classes)
+
+
+# ============================================================
+# Page navigation (Recommendation <-> More Info)
+#
+# The two pages are always-mounted siblings (built once in build_layout);
+# switching between them only ever toggles which one's `style` is
+# display:none, exactly like every other show/hide toggle in this app. No
+# page carries any model state, so this cannot affect the recommendation
+# pipeline, the manual-override pipeline, or any stored data.
+# ============================================================
+
+@app.callback(
+    Output("active-page-store", "data"),
+    Input("nav-recommendation-btn", "n_clicks"),
+    Input("nav-more-info-btn", "n_clicks"),
+    Input("back-to-recommendation-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+def set_active_page(rec_nav_clicks, more_info_nav_clicks, back_clicks):
+    """
+    Track which top-level page is active based on which nav/back control was clicked.
+    """
+    triggered = ctx.triggered_id
+    if triggered == "nav-more-info-btn":
+        return "more-info"
+    if triggered in ("nav-recommendation-btn", "back-to-recommendation-btn"):
+        return "recommendation"
+    return no_update
+
+
+@app.callback(
+    Output("main-content", "style"),
+    Output("more-info-view", "style"),
+    Output("nav-recommendation-btn", "className"),
+    Output("nav-more-info-btn", "className"),
+    Input("active-page-store", "data"),
+)
+def render_active_page(active_page):
+    """
+    Show exactly one of the two pages, and keep the sidebar's active
+    highlight in sync with it.
+    """
+    is_recommendation = active_page != "more-info"
+    hidden = {"display": "none"}
+
+    return (
+        None if is_recommendation else hidden,
+        hidden if is_recommendation else None,
+        "sidebar-nav-item sidebar-nav-item--active" if is_recommendation else "sidebar-nav-item",
+        "sidebar-nav-item sidebar-nav-item--active" if not is_recommendation else "sidebar-nav-item",
+    )
+
+
+# ============================================================
+# "More Info" accordion (single section open at a time)
+# ============================================================
+
+@app.callback(
+    Output("more-info-open-section", "data"),
+    Input({"type": "more-info-accordion-header", "section": ALL}, "n_clicks"),
+    State("more-info-open-section", "data"),
+    prevent_initial_call=True,
+)
+def set_open_more_info_section(_all_n_clicks, current_open):
+    """
+    Track which section is open. Clicking the already-open section's
+    header closes it; clicking any other section's header opens it (and
+    implicitly closes whichever was open, since only one id is ever stored).
+    """
+    triggered = ctx.triggered_id
+    if triggered is None:
+        return no_update
+
+    clicked_section = triggered["section"]
+    return None if clicked_section == current_open else clicked_section
+
+
+@app.callback(
+    Output({"type": "more-info-accordion-body", "section": ALL}, "className"),
+    Output({"type": "more-info-accordion-chevron", "section": ALL}, "className"),
+    Input("more-info-open-section", "data"),
+    State({"type": "more-info-accordion-body", "section": ALL}, "id"),
+    State({"type": "more-info-accordion-chevron", "section": ALL}, "id"),
+)
+def render_more_info_accordion(open_section, body_ids, chevron_ids):
+    """
+    Render the open/collapsed state for every section from a single source
+    of truth (more-info-open-section), so exactly one body is ever
+    expanded. Each body/chevron's own pattern-matching id already carries
+    its section, so no cross-referencing between the two is needed.
+    """
+    body_classes = [
+        "accordion-body" if body_id["section"] == open_section
+        else "accordion-body accordion-body--collapsed"
+        for body_id in body_ids
+    ]
+    chevron_classes = [
+        "accordion-chevron accordion-chevron--open" if chevron_id["section"] == open_section
+        else "accordion-chevron"
+        for chevron_id in chevron_ids
+    ]
+    return body_classes, chevron_classes
 
 
 # ============================================================

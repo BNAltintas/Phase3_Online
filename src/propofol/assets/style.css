@@ -414,6 +414,7 @@ body {
   font-weight: 600;
   font-size: 13px;
   color: var(--text-secondary);
+  cursor: pointer;
 }
 
 .sidebar-nav-item--active {
@@ -423,6 +424,7 @@ body {
 
 .sidebar-nav-item--disabled {
   color: #b5b9c5;
+  cursor: default;
 }
 
 .main-content {
@@ -835,4 +837,112 @@ body {
 .override-unit-toggle input[type="radio"] {
   cursor: pointer;
   margin: 0;
+}
+
+/* ---------- "More Info" page ---------- */
+
+.more-info-view {
+  flex: 1 1 auto;
+  padding: 18px 26px 40px;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.more-info-content {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.back-to-recommendation-btn {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--navy-900);
+  cursor: pointer;
+  margin-bottom: 20px;
+}
+
+.more-info-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--navy-900);
+  margin: 0 0 8px;
+}
+
+.more-info-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0 0 20px;
+}
+
+.accordion {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.accordion-section {
+  padding: 0;
+  margin-bottom: 0;
+  overflow: hidden;
+}
+
+.accordion-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+  cursor: pointer;
+}
+
+.accordion-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--navy-900);
+}
+
+.accordion-chevron {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  transition: transform 0.15s ease;
+}
+
+.accordion-chevron--open {
+  transform: rotate(180deg);
+  color: var(--blue-accent);
+}
+
+.accordion-body {
+  padding: 0 16px 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+.accordion-body--collapsed {
+  display: none;
+}
+
+.accordion-body-text {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  padding-top: 14px;
+}
+
+.accordion-body-text p {
+  margin: 0 0 10px;
+}
+
+.accordion-body-text ul,
+.accordion-body-text ol {
+  margin: 0 0 10px;
+  padding-left: 20px;
+}
+
+.accordion-body-text li {
+  margin-bottom: 4px;
 }
