@@ -158,24 +158,48 @@ def editable_field_row(
     ]
 
 
-def graph_card(title: str, graph_id: str, note: str | None = None, tall: bool = False):
+def graph_card(
+    title: str,
+    graph_id: str,
+    note: str | None = None,
+    tall: bool = False,
+    default_visible: bool = True,
+):
     """
-    Create a graph card with an optional note.
+    Create a graph card with a per-card "Show" checkbox in its header.
 
-    The card has a fixed height and is a flex column so the graph fills
-    the remaining space immediately, before Plotly's async chunk paints
-    anything - this avoids the card growing/jumping after render.
-    `config={"responsive": True}` keeps the plot in sync with its
-    container if the container is ever resized (e.g. window resize).
+    The header (title left, "Show" checkbox right) is always rendered.
+    The graph content below it collapses to nothing (no empty space) when
+    unchecked - handled generically for every graph card by
+    app.py's toggle_graph_visibility callback, keyed on graph_id via a
+    Dash pattern-matching id, so this is one mechanism reused by all 5
+    graph cards rather than bespoke per-card callbacks.
+
+    The card has a fixed height while expanded and is a flex column so the
+    graph fills the remaining space immediately, before Plotly's async
+    chunk paints anything - this avoids the card growing/jumping after
+    render. `config={"responsive": True}` keeps the plot in sync with its
+    container if the container is ever resized (e.g. window resize, or
+    becoming visible again after being hidden).
     """
-    children = [
-        html.H4(title, className="graph-card-title"),
-    ]
+    header = html.Div(
+        [
+            html.H4(title, className="graph-card-title"),
+            dcc.Checklist(
+                id={"type": "graph-visibility-toggle", "graph": graph_id},
+                options=[{"label": "Show", "value": "show"}],
+                value=["show"] if default_visible else [],
+                className="graph-card-toggle",
+            ),
+        ],
+        className="graph-card-header",
+    )
 
+    content_children = []
     if note:
-        children.append(html.Div(note, className="graph-card-note"))
+        content_children.append(html.Div(note, className="graph-card-note"))
 
-    children.append(
+    content_children.append(
         dcc.Graph(
             id=graph_id,
             className="graph-card-plot",
@@ -184,8 +208,22 @@ def graph_card(title: str, graph_id: str, note: str | None = None, tall: bool = 
         )
     )
 
+    content = html.Div(
+        content_children,
+        id={"type": "graph-card-content", "graph": graph_id},
+        className="graph-card-content",
+        style=None if default_visible else {"display": "none"},
+    )
+
     card_class = "graph-card graph-card--tall" if tall else "graph-card"
-    return html.Div(children, className=card_class)
+    if not default_visible:
+        card_class += " graph-card--collapsed"
+
+    return html.Div(
+        [header, content],
+        id={"type": "graph-card", "graph": graph_id},
+        className=card_class,
+    )
 
 
 def build_patient_parameters_card():
@@ -444,69 +482,67 @@ def build_recommendation_column():
     """
     Build the center dashboard column: the recommendation summary (rendered
     into `summary-output` as an induction-dose card followed by a
-    maintenance-regimen card, each with its own `.card` styling).
+    maintenance-regimen card, each with its own `.card` styling), with the
+    induction-dose rationale graph stacked directly underneath.
     """
     return html.Div(
         [
             html.Div("RECOMMENDATION", className="section-label"),
             html.Div(id="summary-output"),
+            graph_card(
+                "Induction-dose rationale",
+                "dose-rationale-graph",
+                tall=True,
+                default_visible=True,
+            ),
         ],
         className="recommendation-column",
     )
 
 
-def build_explanation_column():
+def build_predictions_column():
     """
-    Build the right dashboard column: the induction-dose rationale (explanation) graph.
-    """
-    return html.Div(
-        [
-            html.Div("EXPLANATION", className="section-label"),
-            graph_card(
-                "Induction-dose rationale",
-                "dose-rationale-graph",
-                tall=True,
-            ),
-        ],
-        className="explanation-column",
-    )
-
-
-def build_predictions_section():
-    """
-    Build the bottom predictions section: propofol/remifentanil PK and BIS/MAP graphs.
+    Build the right dashboard column: BIS, MAP, and PK graphs stacked vertically.
     """
     return html.Div(
         [
             html.Div("PREDICTIONS", className="section-label"),
             html.Div(
                 [
-                    graph_card("Propofol PK", "propofol-pk-graph"),
-                    graph_card("Remifentanil PK", "remifentanil-pk-graph"),
-                    graph_card("BIS", "bis-graph"),
-                    graph_card("MAP", "map-graph"),
+                    graph_card("BIS", "bis-graph", default_visible=True),
+                    graph_card("MAP", "map-graph", default_visible=True),
+                    graph_card("Propofol PK/PD", "propofol-pk-graph", default_visible=False),
+                    graph_card("Remifentanil PK", "remifentanil-pk-graph", default_visible=False),
                 ],
                 className="predictions-grid",
             ),
         ],
-        className="predictions-section",
+        className="predictions-column",
     )
 
 
 def build_layout():
     """
     Build the main layout of the dashboard: a navigation sidebar plus a
-    three-column input/recommendation/explanation dashboard, with the
-    prediction graphs below.
+    three-column input/recommendation/predictions dashboard.
 
     The input column sits outside `dcc.Loading` (as before, inputs never
-    show a loading overlay); the recommendation column, explanation column,
-    and predictions section are all inside one `dcc.Loading`, so every
-    `run_model` output shows the same loading feedback it did previously.
+    show a loading overlay); the recommendation column (including the
+    induction-dose rationale graph) and the predictions column are both
+    inside one `dcc.Loading`, so every `run_model` output shows the same
+    loading feedback it did previously.
     """
     return html.Div(
         [
             dcc.Store(id="sex-store", data="male"),
+            # Holds the original model recommendation (context + result),
+            # populated only by "Run recommendation" - never mutated by the
+            # manual-override flow.
+            dcc.Store(id="recommendation-store", data=None),
+            # Holds the manual-override scenario, if any. None when inactive.
+            # Cleared by "Return to recommendation" and by every new
+            # "Run recommendation" click.
+            dcc.Store(id="manual-scenario-store", data=None),
 
             build_sidebar(),
 
@@ -523,11 +559,10 @@ def build_layout():
                                     html.Div(
                                         [
                                             build_recommendation_column(),
-                                            build_explanation_column(),
+                                            build_predictions_column(),
                                         ],
                                         className="content-grid",
                                     ),
-                                    build_predictions_section(),
                                 ],
                             ),
                         ],

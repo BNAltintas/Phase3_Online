@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import datetime
+from types import SimpleNamespace
+from typing import Optional
 
 import dash
 import numpy as np
 import plotly.graph_objects as go
-from dash import Input, Output, State, ctx, html, no_update
+from dash import MATCH, Input, Output, State, ctx, dcc, html, no_update
 from plotly.subplots import make_subplots
 
+from propofol.config import BOLUS_MGKG_BOUNDS
 from propofol.dashboard_layout import (
     EHR_RECORD_DATE,
     EHR_RECORD_TIME,
@@ -26,6 +29,7 @@ from propofol.recommend_regimen2023 import (
     DecodedRegimen,
     Su2023PropofolRemifentanilRecommender,
     compress_minute_schedule,
+    recommend_maintenance_for_fixed_propofol_bolus,
     recommend_su2023_regimen,
 )
 
@@ -36,6 +40,15 @@ from propofol.recommend_regimen2023 import (
 app = dash.Dash(__name__)
 app.title = "Su2023 Propofol Dashboard"
 app.layout = build_layout()
+
+# The induction card's "Override propofol dose" button/popover only exist in
+# the DOM after the first "Run recommendation" (summary-output starts empty).
+# Callbacks that target those ids must be allowed to reference ids that are
+# not present in the initial layout - this is the standard Dash mechanism
+# for that.
+app.config.suppress_callback_exceptions = True
+
+MANUAL_OVERRIDE_COLOR = "#c2680f"
 
 
 # ============================================================
@@ -97,6 +110,145 @@ def _safe_array(x) -> np.ndarray:
 
 
 # ============================================================
+# Recommendation <-> dcc.Store serialization
+#
+# RecommendationResult only exists as a local variable inside the callback
+# that computed it. To let a later, separate action (saving a manual
+# override) redraw the original recommendation without recomputing it - and
+# to reconstruct a recommender for the override itself - the fields needed
+# for display/reconstruction are serialized into recommendation-store /
+# manual-scenario-store, then rebuilt into a lightweight namespace with the
+# same attribute shape as RecommendationResult, so the existing figure
+# functions work unchanged on either a live result or a stored one.
+# ============================================================
+
+def _array_list(x) -> Optional[list]:
+    """
+    Convert an array-like (or None) into a plain list for JSON storage.
+    """
+    return None if x is None else np.asarray(x, dtype=float).tolist()
+
+
+def _rec_to_store_dict(rec) -> dict:
+    """
+    Serialize the RecommendationResult fields needed to redraw the induction
+    and maintenance cards and the 5 prediction graphs, without re-running
+    any computation.
+    """
+    return {
+        "propofol_bolus_mg": float(rec.propofol_bolus_mg),
+        "propofol_bolus_mgkg": float(rec.propofol_bolus_mgkg),
+        "propofol_inf_rates_mgkgh": _array_list(rec.propofol_inf_rates_mgkgh),
+        "propofol_inf_rates_ml_h": _array_list(rec.propofol_inf_rates_ml_h),
+        "propofol_inf_rates_mcgkgmin": _array_list(rec.propofol_inf_rates_mcgkgmin),
+        "remifentanil_selected": bool(rec.remifentanil_selected),
+        "remifentanil_bolus_mcg": float(rec.remifentanil_bolus_mcg),
+        "remifentanil_bolus_mcgkg": float(rec.remifentanil_bolus_mcgkg),
+        "remifentanil_inf_rates_mcgkgmin": _array_list(rec.remifentanil_inf_rates_mcgkgmin),
+        "remifentanil_inf_rates_ml_h": _array_list(rec.remifentanil_inf_rates_ml_h),
+        "remifentanil_inf_rates_ngkgmin": _array_list(rec.remifentanil_inf_rates_ngkgmin),
+        "propofol_conc_mg_ml": float(rec.propofol_conc_mg_ml),
+        "remifentanil_conc_mcg_ml": float(rec.remifentanil_conc_mcg_ml),
+        "time_min": _array_list(rec.time_min),
+        "cp_propofol": _array_list(rec.cp_propofol),
+        "ce_propofol": _array_list(rec.ce_propofol),
+        "cp_remifentanil": _array_list(rec.cp_remifentanil),
+        "bis": _array_list(rec.bis),
+        "map_mmhg": _array_list(rec.map_mmhg),
+        "map_lower_bound_mmhg": float(rec.map_lower_bound_mmhg),
+        "feasible_bis": bool(rec.feasible_bis),
+        "feasible_map": bool(rec.feasible_map),
+        "feasible": bool(rec.feasible),
+        "target_bis_low": float(rec.target_bis_low),
+        "target_bis_high": float(rec.target_bis_high),
+        "map_abs_min_target_mmhg": float(rec.map_abs_min_target_mmhg),
+        "map_rel_frac_target": float(rec.map_rel_frac_target),
+        "confidence_percent": float(rec.confidence_percent),
+        "confidence_skipped": bool(rec.confidence_skipped),
+        "confidence": {
+            "time_min": _array_list(rec.confidence.time_min),
+            "bis_p05": _array_list(rec.confidence.bis_p05),
+            "bis_p95": _array_list(rec.confidence.bis_p95),
+            "map_p05": _array_list(rec.confidence.map_p05),
+            "map_p95": _array_list(rec.confidence.map_p95),
+            "cp_propofol_p05": _array_list(rec.confidence.cp_propofol_p05),
+            "cp_propofol_p95": _array_list(rec.confidence.cp_propofol_p95),
+            "ce_propofol_p05": _array_list(rec.confidence.ce_propofol_p05),
+            "ce_propofol_p95": _array_list(rec.confidence.ce_propofol_p95),
+            "cp_remifentanil_p05": _array_list(rec.confidence.cp_remifentanil_p05),
+            "cp_remifentanil_p95": _array_list(rec.confidence.cp_remifentanil_p95),
+        },
+    }
+
+
+def _store_dict_to_namespace(data: dict) -> SimpleNamespace:
+    """
+    Reconstruct a lightweight object with the same attribute shape as
+    RecommendationResult from a stored dict (as returned by
+    _rec_to_store_dict), so the existing figure-building functions - which
+    use rec.xxx / rec.confidence.xxx attribute access - work unchanged on
+    data that came back from a dcc.Store instead of a live
+    RecommendationResult.
+    """
+    data = dict(data)
+    confidence_dict = data.pop("confidence")
+
+    ns = SimpleNamespace(**data)
+    ns.confidence = SimpleNamespace(**confidence_dict)
+
+    for obj in (ns, ns.confidence):
+        for key, value in vars(obj).items():
+            if isinstance(value, list):
+                setattr(obj, key, np.asarray(value, dtype=float))
+
+    return ns
+
+
+def _validate_override_dose(raw_value, weight_kg: float):
+    """
+    Validate a manually-entered propofol induction dose (mg).
+
+    Hard bounds reject non-positive/absurd values outright (Save disabled).
+    Warn bounds are derived from BOLUS_MGKG_BOUNDS x patient weight - the
+    same range the optimizer normally searches within - so a dose outside it
+    is still allowed (per the "treat this as a what-if, don't silently
+    block" requirement) but flagged.
+
+    Returns (status, message, parsed_value_or_None).
+    """
+    if raw_value is None or (isinstance(raw_value, str) and raw_value.strip() == ""):
+        return "error", "Please enter a manual dose.", None
+
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return "error", "Please enter a valid number.", None
+
+    if not np.isfinite(value) or value <= 0:
+        return "error", "Manual dose must be positive.", None
+
+    hard_max_mg = 8.0 * float(weight_kg)
+    if value > hard_max_mg:
+        return "error", f"Manual dose cannot exceed {hard_max_mg:.0f} mg for this patient.", None
+
+    warn_min_mg = BOLUS_MGKG_BOUNDS[0] * float(weight_kg)
+    warn_max_mg = BOLUS_MGKG_BOUNDS[1] * float(weight_kg)
+    if value < warn_min_mg or value > warn_max_mg:
+        return (
+            "warning",
+            (
+                f"This dose is outside the model's typical range "
+                f"({warn_min_mg:.0f}–{warn_max_mg:.0f} mg for this patient). "
+                f"Maintenance will still be re-optimized, but BIS/MAP targets may "
+                f"not be fully reachable."
+            ),
+            value,
+        )
+
+    return "normal", "", value
+
+
+# ============================================================
 # Schedule formatting
 # ============================================================
 
@@ -140,72 +292,199 @@ def _maintenance_rows(rate_ml_h, rate_secondary, secondary_label: str) -> list:
     return cells
 
 
-def make_induction_card(rec):
+def _override_popover(prefill_value):
     """
-    Build the induction-dose recommendation card: total dose and
-    weight-adjusted dose on the left, model confidence on the right.
+    Build the click-to-open "Override propofol dose" popover. Always
+    rendered (closed by default) regardless of whether an override is
+    currently active, so its component ids stay stable for the callbacks
+    that target them.
     """
-    tier = confidence_tier(rec.confidence_percent)
-    tier_class = tier.lower()
-
     return html.Div(
         [
-            html.H4("Induction recommendation", className="card-subheading"),
+            dcc.Input(
+                id="override-dose-draft",
+                type="text",
+                value=prefill_value,
+                className="field-input",
+                placeholder="Manual dose in mg",
+            ),
+            html.Div(id="override-dose-message", className="field-message"),
             html.Div(
                 [
-                    html.Div(
-                        [
-                            html.Div("Total dose", className="induction-dose-label"),
-                            html.Div(
-                                f"{rec.propofol_bolus_mg:.0f} mg",
-                                className="induction-dose-value",
-                            ),
-                            html.Div(
-                                f"Weight-adjusted: {rec.propofol_bolus_mgkg:.2f} mg/kg",
-                                className="induction-dose-subtext",
-                            ),
-                        ],
-                        className="induction-dose-block",
+                    html.Button(
+                        "Save", id="override-save-btn", n_clicks=0,
+                        className="popover-btn popover-btn--save",
                     ),
-                    html.Div(
-                        [
-                            html.Div("Model confidence", className="induction-confidence-label"),
-                            html.Div(
-                                f"{rec.confidence_percent:.0f}%",
-                                className=(
-                                    f"induction-confidence-value "
-                                    f"induction-confidence-value--{tier_class}"
-                                ),
-                            ),
-                            html.Div(
-                                f"{tier} CONFIDENCE",
-                                className=(
-                                    f"induction-confidence-tier "
-                                    f"induction-confidence-tier--{tier_class}"
-                                ),
-                            ),
-                        ],
-                        className="induction-confidence-block",
+                    html.Button(
+                        "Cancel", id="override-cancel-btn", n_clicks=0,
+                        className="popover-btn popover-btn--cancel",
                     ),
                 ],
-                className="induction-card-body",
+                className="popover-actions",
             ),
         ],
-        className="card induction-card",
+        id="override-popover",
+        className="edit-popover",
     )
 
 
-def make_maintenance_card(rec):
+def make_induction_card(original, manual=None):
     """
-    Build the maintenance-regimen card: one row per contiguous dosing segment.
+    Build the induction-dose recommendation card.
+
+    With no manual override: total dose + weight-adjusted dose on the left,
+    model confidence on the right (unchanged from before manual override
+    existed).
+
+    With a manual override active: the manual dose is shown large/prominent
+    on the left (with the original recommendation noted smaller underneath),
+    and a "MANUAL DOSE ACTIVE" status box + "Return to recommendation"
+    button replace the confidence block on the right - confidence is never
+    computed for the manual dose, so nothing confidence-shaped is shown.
+
+    Both the confidence block and the manual-active block are always
+    rendered (only one is ever visible, via inline display:none) rather
+    than conditionally included - "Return to recommendation" is a callback
+    Input, and Dash logs a console error if a registered callback's Input
+    id is ever absent from the current DOM entirely, so its element must
+    always exist even while inactive.
     """
-    children = [html.H4("Maintenance regimen", className="card-subheading")]
+    override_button_label = "Edit manual dose" if manual is not None else "Override propofol dose"
+    prefill_value = manual.propofol_bolus_mg if manual is not None else original.propofol_bolus_mg
+    manual_active = manual is not None
+
+    tier = confidence_tier(original.confidence_percent)
+    tier_class = tier.lower()
+
+    original_dose_block = html.Div(
+        [
+            html.Div("Total dose", className="induction-dose-label"),
+            html.Div(
+                f"{original.propofol_bolus_mg:.0f} mg",
+                className="induction-dose-value",
+            ),
+            html.Div(
+                f"Weight-adjusted: {original.propofol_bolus_mgkg:.2f} mg/kg",
+                className="induction-dose-subtext",
+            ),
+        ],
+        className="induction-dose-block",
+        style={"display": "none"} if manual_active else None,
+    )
+    manual_dose_block = html.Div(
+        [
+            html.Div(
+                "Manual total dose",
+                className="induction-dose-label induction-dose-label--manual",
+            ),
+            html.Div(
+                f"{manual.propofol_bolus_mg:.0f} mg" if manual_active else "-",
+                className="induction-dose-value induction-dose-value--manual",
+            ),
+            html.Div(
+                f"Weight-adjusted: {manual.propofol_bolus_mgkg:.2f} mg/kg" if manual_active else "-",
+                className="induction-dose-subtext",
+            ),
+            html.Div(
+                (
+                    f"Model recommendation: {original.propofol_bolus_mg:.0f} mg "
+                    f"({original.propofol_bolus_mgkg:.2f} mg/kg)"
+                ),
+                className="induction-dose-original-note",
+            ),
+        ],
+        className="induction-dose-block",
+        style=None if manual_active else {"display": "none"},
+    )
+
+    confidence_block = html.Div(
+        [
+            html.Div("Model confidence", className="induction-confidence-label"),
+            html.Div(
+                f"{original.confidence_percent:.0f}%",
+                className=(
+                    f"induction-confidence-value "
+                    f"induction-confidence-value--{tier_class}"
+                ),
+            ),
+            html.Div(
+                f"{tier} CONFIDENCE",
+                className=(
+                    f"induction-confidence-tier "
+                    f"induction-confidence-tier--{tier_class}"
+                ),
+            ),
+        ],
+        className="induction-confidence-block",
+        style={"display": "none"} if manual_active else None,
+    )
+    manual_active_block = html.Div(
+        [
+            html.Div("MANUAL DOSE ACTIVE", className="induction-manual-badge"),
+            html.Button(
+                "Return to recommendation", id="override-return-btn", n_clicks=0,
+                className="override-return-btn",
+            ),
+        ],
+        className="induction-confidence-block",
+        style=None if manual_active else {"display": "none"},
+    )
+
+    infeasible_warning = html.Div(
+        "⚠ This manual dose may not fully reach the target BIS/MAP range.",
+        className="induction-infeasible-warning",
+        style=(
+            None
+            if (manual_active and not (manual.feasible_bis and manual.feasible_map))
+            else {"display": "none"}
+        ),
+    )
+
+    card_children = [
+        html.H4("Induction recommendation", className="card-subheading"),
+        html.Div(
+            [original_dose_block, manual_dose_block, confidence_block, manual_active_block],
+            className="induction-card-body",
+        ),
+        infeasible_warning,
+    ]
+
+    card_children.append(
+        html.Div(
+            [
+                html.Button(
+                    override_button_label, id="override-dose-btn", n_clicks=0,
+                    className="override-dose-btn",
+                ),
+                _override_popover(prefill_value),
+            ],
+            className="override-dose-section",
+        )
+    )
+
+    return html.Div(card_children, className="card induction-card")
+
+
+def _maintenance_section(rec, label: str | None = None, manual: bool = False):
+    """
+    Build one drug-schedule section (propofol + optional remifentanil) for
+    the maintenance card, optionally preceded by a scenario label
+    ("Original recommendation" / "Manual dose (re-optimized)").
+    """
+    children = []
+    if label is not None:
+        label_class = "maintenance-scenario-label"
+        if manual:
+            label_class += " maintenance-scenario-label--manual"
+        children.append(html.Div(label, className=label_class))
+
+    table_class = "maintenance-table maintenance-table--manual" if manual else "maintenance-table"
 
     prop_cells = _maintenance_rows(
         rec.propofol_inf_rates_ml_h, rec.propofol_inf_rates_mcgkgmin, "µg/kg/min",
     )
     children.append(
-        html.Div(prop_cells, className="maintenance-table")
+        html.Div(prop_cells, className=table_class)
         if prop_cells
         else html.Div("No maintenance", className="maintenance-empty")
     )
@@ -218,22 +497,44 @@ def make_maintenance_card(rec):
             rec.remifentanil_inf_rates_ml_h, rec.remifentanil_inf_rates_ngkgmin, "ng/kg/min",
         )
         children.append(
-            html.Div(remi_cells, className="maintenance-table")
+            html.Div(remi_cells, className=table_class)
             if remi_cells
             else html.Div("No maintenance", className="maintenance-empty")
+        )
+
+    return children
+
+
+def make_maintenance_card(original, manual=None):
+    """
+    Build the maintenance-regimen card. With no manual override, this is
+    just the original recommendation's schedule (unchanged from before
+    manual override existed). With a manual override active, the original
+    schedule remains visible (labeled, de-emphasized) with the manually
+    re-optimized schedule shown below it.
+    """
+    children = [html.H4("Maintenance regimen", className="card-subheading")]
+
+    if manual is None:
+        children.extend(_maintenance_section(original))
+    else:
+        children.extend(_maintenance_section(original, label="Original recommendation"))
+        children.extend(
+            _maintenance_section(manual, label="Manual dose (re-optimized)", manual=True),
         )
 
     return html.Div(children, className="card maintenance-card")
 
 
-def make_summary(rec):
+def make_summary(original, manual=None):
     """
     Build the recommendation output: an induction-dose card followed by a
-    maintenance-regimen card.
+    maintenance-regimen card. `manual`, when provided, is the re-optimized
+    manual-override scenario shown alongside the original recommendation.
     """
     return [
-        make_induction_card(rec),
-        make_maintenance_card(rec),
+        make_induction_card(original, manual),
+        make_maintenance_card(original, manual),
     ]
 
 
@@ -389,18 +690,111 @@ def make_map_figure(rec):
 
 
 # ============================================================
+# Manual-override dual-trace overlays
+#
+# Each function starts from the existing single-recommendation figure
+# (original recommendation's line style/colors/confidence bands untouched)
+# and adds the manual scenario as a deterministic-only orange overlay - no
+# confidence band, since confidence is intentionally not computed for the
+# manual dose.
+# ============================================================
+
+def make_propofol_pk_figure_dual(original, manual):
+    """
+    Overlay the manual-override propofol PK trace (orange) on the original
+    recommendation's propofol PK figure (unchanged colors/bands).
+    """
+    fig = make_propofol_pk_figure(original)
+
+    fig.add_trace(go.Scatter(
+        x=manual.time_min, y=manual.cp_propofol, mode="lines",
+        line=dict(color=MANUAL_OVERRIDE_COLOR, width=2),
+        name="Cp (manual dose)",
+    ))
+    fig.add_trace(go.Scatter(
+        x=manual.time_min, y=manual.ce_propofol, mode="lines",
+        line=dict(color=MANUAL_OVERRIDE_COLOR, width=2, dash="dot"),
+        name="Ce (manual dose)",
+    ))
+
+    return fig
+
+
+def make_remifentanil_pk_figure_dual(original, manual):
+    """
+    Overlay the manual-override remifentanil PK trace (orange) on the
+    original recommendation's remifentanil PK figure, if remifentanil is
+    selected in both. Propofol-only overrides don't change remifentanil's
+    own PK, but its maintenance schedule can shift during re-optimization,
+    so the two curves can differ.
+    """
+    if not original.remifentanil_selected:
+        return make_remifentanil_pk_figure(original)
+
+    fig = make_remifentanil_pk_figure(original)
+
+    if manual.remifentanil_selected and manual.cp_remifentanil is not None:
+        fig.add_trace(go.Scatter(
+            x=manual.time_min, y=manual.cp_remifentanil, mode="lines",
+            line=dict(color=MANUAL_OVERRIDE_COLOR, width=2),
+            name="Cp (manual dose)",
+        ))
+
+    return fig
+
+
+def make_bis_figure_dual(original, manual):
+    """
+    Overlay the manual-override BIS trace (orange) on the original
+    recommendation's BIS figure (unchanged colors/bands/target lines).
+    """
+    fig = make_bis_figure(original)
+
+    fig.add_trace(go.Scatter(
+        x=manual.time_min, y=manual.bis, mode="lines",
+        line=dict(color=MANUAL_OVERRIDE_COLOR, width=2),
+        name="BIS (manual dose)",
+    ))
+
+    return fig
+
+
+def make_map_figure_dual(original, manual):
+    """
+    Overlay the manual-override MAP trace (orange) on the original
+    recommendation's MAP figure (unchanged colors/bands/target line).
+    """
+    fig = make_map_figure(original)
+
+    fig.add_trace(go.Scatter(
+        x=manual.time_min, y=manual.map_mmhg, mode="lines",
+        line=dict(color=MANUAL_OVERRIDE_COLOR, width=2),
+        name="MAP (manual dose)",
+    ))
+
+    return fig
+
+
+# ============================================================
 # Dose-rationale graph
 # ============================================================
 
-def _dose_axis_limits_mgkg(selected_dose_mgkg: float) -> tuple[float, float]:
+def _dose_axis_limits_mgkg(
+    selected_dose_mgkg: float,
+    manual_dose_mgkg: float | None = None,
+) -> tuple[float, float]:
     """
-    Show only the clinically relevant local window around the recommended dose:
-        selected dose - 1.5 to selected dose + 1.5 mg/kg,
-    clipped to max 0.3-5.0 mg/kg.
+    Show only the clinically relevant local window around the recommended
+    dose: selected dose - 1.5 to selected dose + 1.5 mg/kg, clipped to max
+    0.3-5.0 mg/kg. When a manual dose is given, the window widens (if
+    needed) so both doses stay visible on the same axis.
     """
-    selected_dose_mgkg = float(selected_dose_mgkg)
-    x_min = max(0.30, selected_dose_mgkg - 1.50)
-    x_max = min(5.00, selected_dose_mgkg + 1.50)
+    doses = [float(selected_dose_mgkg)]
+    if manual_dose_mgkg is not None:
+        doses.append(float(manual_dose_mgkg))
+
+    x_min = max(0.30, min(doses) - 1.50)
+    x_max = min(5.00, max(doses) + 1.50)
 
     if x_max <= x_min:
         x_min, x_max = 0.30, 5.00
@@ -408,18 +802,25 @@ def _dose_axis_limits_mgkg(selected_dose_mgkg: float) -> tuple[float, float]:
     return float(x_min), float(x_max)
 
 
-def _clinical_propofol_dose_grid_mgkg(selected_bolus_mgkg: float) -> np.ndarray:
+def _clinical_propofol_dose_grid_mgkg(
+    selected_bolus_mgkg: float,
+    manual_dose_mgkg: float | None = None,
+) -> np.ndarray:
     """
     Build a local propofol induction-dose grid around the selected dose.
 
-    The displayed axis is selected dose ±1.5 mg/kg, clipped to 0.3-5.0 mg/kg.
-    A 0.10 mg/kg spacing gives a smooth rationale curve without making the
-    dashboard too slow.
+    The displayed axis is selected dose ±1.5 mg/kg, clipped to 0.3-5.0 mg/kg
+    (widened to also cover manual_dose_mgkg, if given). A 0.10 mg/kg spacing
+    gives a smooth rationale curve without making the dashboard too slow.
     """
-    x_min, x_max = _dose_axis_limits_mgkg(selected_bolus_mgkg)
+    x_min, x_max = _dose_axis_limits_mgkg(selected_bolus_mgkg, manual_dose_mgkg)
+
+    extra_points = [float(selected_bolus_mgkg)]
+    if manual_dose_mgkg is not None:
+        extra_points.append(float(manual_dose_mgkg))
 
     dose_grid = np.arange(x_min, x_max + 0.001, 0.10)
-    dose_grid = np.unique(np.concatenate([dose_grid, [float(selected_bolus_mgkg)]]))
+    dose_grid = np.unique(np.concatenate([dose_grid, extra_points]))
     dose_grid = dose_grid[(dose_grid >= x_min) & (dose_grid <= x_max)]
     dose_grid.sort()
 
@@ -527,6 +928,7 @@ def make_induction_dose_rationale_figure(
     opiate: str,
     propofol_conc_mg_ml: float,
     remifentanil_conc_mcg_ml: float,
+    manual_dose_mgkg: float | None = None,
 ):
     """
     Vary only the propofol induction bolus while keeping the recommended
@@ -534,7 +936,8 @@ def make_induction_dose_rationale_figure(
 
     X-axis:
         recommended propofol induction dose ±1.5 mg/kg,
-        clipped to 0.3-5.0 mg/kg.
+        clipped to 0.3-5.0 mg/kg (widened to also cover manual_dose_mgkg,
+        if given).
 
     Left y-axis:
         minimal MAP after target start.
@@ -550,14 +953,20 @@ def make_induction_dose_rationale_figure(
         Minimal BIS is still computed internally to check the lower BIS safety
         boundary:
             min BIS after target start >= 40.
+
+    manual_dose_mgkg, when given, adds a second marker + vertical reference
+    line for the manual-override dose. The sweep itself is still built
+    around `rec` (the original recommendation) and its maintenance
+    schedule, unchanged - only the axis window and the extra marker are
+    added, so this stays cheap (one sweep, not two).
     """
     selected_dose_mgkg = float(rec.propofol_bolus_mgkg)
     baseline_map = float(patient.base_map)
     map_target = float(rec.map_lower_bound_mmhg)
     map_target_upper = float(1.20 * baseline_map)
 
-    x_axis_min, x_axis_max = _dose_axis_limits_mgkg(selected_dose_mgkg)
-    dose_grid_mgkg = _clinical_propofol_dose_grid_mgkg(selected_dose_mgkg)
+    x_axis_min, x_axis_max = _dose_axis_limits_mgkg(selected_dose_mgkg, manual_dose_mgkg)
+    dose_grid_mgkg = _clinical_propofol_dose_grid_mgkg(selected_dose_mgkg, manual_dose_mgkg)
 
     # Re-use the exact targets that produced `rec`, not the module defaults or
     # any since-edited (not-yet-run) UI state, so this re-simulated dose grid
@@ -862,11 +1271,58 @@ def make_induction_dose_rationale_figure(
         font=dict(color="black", size=13),
     )
 
+    # Manual-override dose, shown in orange, when active.
+    if manual_dose_mgkg is not None:
+        manual_idx = int(np.argmin(np.abs(dose_grid_mgkg - manual_dose_mgkg)))
+        fig.add_trace(
+            go.Scatter(
+                x=[manual_dose_mgkg],
+                y=[float(min_maps[manual_idx])],
+                mode="markers",
+                marker=dict(color=MANUAL_OVERRIDE_COLOR, size=14, symbol="diamond"),
+                showlegend=False,
+                hovertemplate="Manual dose %{x:.3f} mg/kg<br>Minimal MAP %{y:.1f} mmHg<extra></extra>",
+            ),
+            secondary_y=False,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=[manual_dose_mgkg],
+                y=[float(max_bis_values[manual_idx])],
+                mode="markers",
+                marker=dict(color=MANUAL_OVERRIDE_COLOR, size=14, symbol="diamond"),
+                showlegend=False,
+                hovertemplate="Manual dose %{x:.3f} mg/kg<br>Maximal BIS %{y:.1f}<extra></extra>",
+            ),
+            secondary_y=True,
+        )
+        fig.add_shape(
+            type="line",
+            xref="x",
+            yref="paper",
+            x0=manual_dose_mgkg,
+            x1=manual_dose_mgkg,
+            y0=0,
+            y1=1,
+            line=dict(color=MANUAL_OVERRIDE_COLOR, width=3, dash="dash"),
+            layer="above",
+        )
+        fig.add_annotation(
+            x=manual_dose_mgkg,
+            y=1.14,
+            xref="x",
+            yref="paper",
+            text=f"<b>Manual {manual_dose_mgkg:.3f} mg/kg</b>",
+            showarrow=False,
+            yanchor="bottom",
+            font=dict(color=MANUAL_OVERRIDE_COLOR, size=13),
+        )
+
     fig.update_layout(
         title="Induction-dose rationale",
         template="plotly_white",
         showlegend=False,
-        margin=dict(t=95),
+        margin=dict(t=115 if manual_dose_mgkg is not None else 95),
         xaxis=dict(
             title=dict(text="Propofol induction dose (mg/kg)", font=dict(color="green")),
             tickfont=dict(color="green"),
@@ -921,6 +1377,51 @@ def update_sex(male_clicks, female_clicks, current_value):
         _button_class(value, "male"),
         _button_class(value, "female"),
     )
+
+
+# ============================================================
+# Per-graph "Show" visibility toggle
+#
+# One generic pattern-matching callback (MATCH on the "graph" key of the
+# dict ids graph_card() gives its checkbox/content/card) handles every
+# graph card uniformly - Induction-dose rationale, BIS, MAP, Propofol
+# PK/PD, and Remifentanil PK - driven only by that card's own checkbox.
+# It only toggles a wrapper div's display style and a CSS class; it never
+# touches a graph's `figure` prop, so graph generation, the recommendation
+# pipeline, and the manual-override pipeline are completely unaffected by
+# whether a card happens to be shown or hidden.
+# ============================================================
+
+def _without_collapsed_class(class_name: str | None) -> list[str]:
+    """
+    Return a card's className tokens with any previous "collapsed" marker
+    removed, so it can be safely added back or left off.
+    """
+    return [c for c in (class_name or "").split() if c != "graph-card--collapsed"]
+
+
+@app.callback(
+    Output({"type": "graph-card-content", "graph": MATCH}, "style"),
+    Output({"type": "graph-card", "graph": MATCH}, "className"),
+    Input({"type": "graph-visibility-toggle", "graph": MATCH}, "value"),
+    State({"type": "graph-card", "graph": MATCH}, "className"),
+    prevent_initial_call=True,
+)
+def toggle_graph_visibility(checked_values, current_class_name):
+    """
+    Show/hide one graph card's content based on its own "Show" checkbox.
+    When hidden, the card collapses to just its header (via
+    graph-card--collapsed overriding the fixed card height) so no empty
+    graph space remains.
+    """
+    visible = bool(checked_values) and "show" in checked_values
+
+    classes = _without_collapsed_class(current_class_name)
+    if not visible:
+        classes.append("graph-card--collapsed")
+
+    content_style = None if visible else {"display": "none"}
+    return content_style, " ".join(classes)
 
 
 # ============================================================
@@ -1274,15 +1775,37 @@ for _field_id, _original_value, _source_label in EDITABLE_FIELDS:
 
 # ============================================================
 # Main recommendation callback
+#
+# run_model computes the recommendation and stores it (recommendation-store)
+# - it no longer renders anything directly. A new "Run recommendation" click
+# also clears any active manual override (manual-scenario-store), since a
+# stale override computed against the previous inputs/recommendation would
+# no longer be meaningful. render_recommendation (below) is the single
+# owner of the actual display outputs, driven by both stores, so the same
+# rendering logic handles "just ran a new recommendation" and "just
+# changed override state" identically.
 # ============================================================
 
+def _patient_from_context(context: dict) -> Patient:
+    """
+    Reconstruct the Patient used for a stored recommendation context.
+    """
+    return Patient(
+        age=float(context["age"]),
+        height=float(context["height"]),
+        weight=float(context["weight"]),
+        sex=context["sex"] or "male",
+        opiates=(context["opiate"] == "remifentanil"),
+        blood_sampling_site="arterial",
+        base_sap=float(context["base_sap"]),
+        base_dap=float(context["base_dap"]),
+        base_hr=float(context["base_hr"]),
+    )
+
+
 @app.callback(
-    Output("summary-output", "children"),
-    Output("dose-rationale-graph", "figure"),
-    Output("propofol-pk-graph", "figure"),
-    Output("remifentanil-pk-graph", "figure"),
-    Output("bis-graph", "figure"),
-    Output("map-graph", "figure"),
+    Output("recommendation-store", "data"),
+    Output("manual-scenario-store", "data"),
     Input("run-btn", "n_clicks"),
     State("age", "value"),
     State("height", "value"),
@@ -1318,7 +1841,8 @@ def run_model(
     map_target_rel_pct,
 ):
     """
-    Run the pharmacokinetic model and generate recommendations based on user inputs.
+    Run the pharmacokinetic model and store the recommendation. Rendering is
+    handled separately by render_recommendation.
     """
     try:
         age = float(age)
@@ -1391,25 +1915,66 @@ def run_model(
             map_rel_frac_target=map_target_rel_frac,
         )
 
-        return (
-            make_summary(rec),
-            make_induction_dose_rationale_figure(
-                patient=patient,
-                rec=rec,
-                opiate=opiate,
-                propofol_conc_mg_ml=propofol_concentration,
-                remifentanil_conc_mcg_ml=remifentanil_concentration,
-            ),
-            make_propofol_pk_figure(rec),
-            make_remifentanil_pk_figure(rec),
-            make_bis_figure(rec),
-            make_map_figure(rec),
-        )
+        # opiate has already been normalized to "none"/"remifentanil" inside
+        # recommend_su2023_regimen's own logic via use_remifentanil, but that
+        # normalization is internal to it - redo it here so the stored
+        # context always holds the normalized value the manual-override path
+        # also expects.
+        normalized_opiate = "remifentanil" if opiate == "remifentanil" else "none"
+
+        store_data = {
+            "error": None,
+            "context": {
+                "age": age,
+                "height": height,
+                "weight": weight,
+                "sex": sex or "male",
+                "base_sap": baseline_sap,
+                "base_dap": baseline_dap,
+                "base_hr": baseline_hr,
+                "opiate": normalized_opiate,
+                "propofol_conc_mg_ml": propofol_concentration,
+                "remifentanil_conc_mcg_ml": remifentanil_concentration,
+                "target_bis_low": target_bis_low,
+                "target_bis_high": target_bis_high,
+                "map_abs_min_target": map_target_abs,
+                "map_rel_frac_target": map_target_rel_frac,
+            },
+            "result": _rec_to_store_dict(rec),
+        }
+        return store_data, None
 
     except Exception as e:
+        return {"error": str(e), "context": None, "result": None}, None
+
+
+@app.callback(
+    Output("summary-output", "children"),
+    Output("dose-rationale-graph", "figure"),
+    Output("propofol-pk-graph", "figure"),
+    Output("remifentanil-pk-graph", "figure"),
+    Output("bis-graph", "figure"),
+    Output("map-graph", "figure"),
+    Input("recommendation-store", "data"),
+    Input("manual-scenario-store", "data"),
+    prevent_initial_call=True,
+)
+def render_recommendation(rec_store, manual_store):
+    """
+    Render the recommendation card(s) and the 5 prediction graphs from
+    recommendation-store (the original recommendation, never overwritten)
+    and manual-scenario-store (the active manual override, if any). This is
+    the single owner of these outputs - it fires both when a new
+    recommendation is run and when the manual-override state changes, so
+    there is exactly one rendering code path for both cases.
+    """
+    if rec_store is None:
+        return no_update, no_update, no_update, no_update, no_update, no_update
+
+    if rec_store.get("error"):
         error_component = html.Div(
             html.Pre(
-                f"Error while running recommendation:\n{str(e)}",
+                f"Error while running recommendation:\n{rec_store['error']}",
                 style={
                     "whiteSpace": "pre-wrap",
                     "fontFamily": "monospace",
@@ -1419,9 +1984,146 @@ def run_model(
             ),
             className="card",
         )
-
         empty = make_empty_figure()
         return error_component, empty, empty, empty, empty, empty
+
+    context = rec_store["context"]
+    original = _store_dict_to_namespace(rec_store["result"])
+    manual = _store_dict_to_namespace(manual_store["result"]) if manual_store else None
+    manual_dose_mgkg = float(manual.propofol_bolus_mgkg) if manual is not None else None
+
+    patient = _patient_from_context(context)
+
+    summary = make_summary(original, manual)
+
+    dose_rationale_fig = make_induction_dose_rationale_figure(
+        patient=patient,
+        rec=original,
+        opiate=context["opiate"],
+        propofol_conc_mg_ml=context["propofol_conc_mg_ml"],
+        remifentanil_conc_mcg_ml=context["remifentanil_conc_mcg_ml"],
+        manual_dose_mgkg=manual_dose_mgkg,
+    )
+
+    if manual is None:
+        propofol_pk_fig = make_propofol_pk_figure(original)
+        remifentanil_pk_fig = make_remifentanil_pk_figure(original)
+        bis_fig = make_bis_figure(original)
+        map_fig = make_map_figure(original)
+    else:
+        propofol_pk_fig = make_propofol_pk_figure_dual(original, manual)
+        remifentanil_pk_fig = make_remifentanil_pk_figure_dual(original, manual)
+        bis_fig = make_bis_figure_dual(original, manual)
+        map_fig = make_map_figure_dual(original, manual)
+
+    return summary, dose_rationale_fig, propofol_pk_fig, remifentanil_pk_fig, bis_fig, map_fig
+
+
+# ============================================================
+# Manual-override callbacks
+# ============================================================
+
+@app.callback(
+    Output("override-dose-draft", "className"),
+    Output("override-dose-message", "children"),
+    Output("override-dose-message", "className"),
+    Output("override-save-btn", "disabled"),
+    Input("override-dose-draft", "value"),
+    State("recommendation-store", "data"),
+    prevent_initial_call=True,
+)
+def validate_override_draft(draft_value, rec_store):
+    """
+    Re-validate the manual-dose draft on every keystroke, mirroring the
+    live-validation pattern used for every other editable field.
+    """
+    if not rec_store or rec_store.get("error") or not rec_store.get("context"):
+        return "field-input", "", "field-message", True
+
+    weight_kg = float(rec_store["context"]["weight"])
+    status, message, _ = _validate_override_dose(draft_value, weight_kg)
+    return _draft_class(status), message, _message_class(status), status == "error"
+
+
+@app.callback(
+    Output("override-popover", "className"),
+    Output("override-dose-draft", "value"),
+    Output("manual-scenario-store", "data", allow_duplicate=True),
+    Input("override-dose-btn", "n_clicks"),
+    Input("override-save-btn", "n_clicks"),
+    Input("override-cancel-btn", "n_clicks"),
+    Input("override-return-btn", "n_clicks"),
+    State("override-dose-draft", "value"),
+    State("recommendation-store", "data"),
+    State("manual-scenario-store", "data"),
+    prevent_initial_call=True,
+)
+def handle_override(
+    open_clicks, save_clicks, cancel_clicks, return_clicks,
+    draft_value, rec_store, manual_store,
+):
+    """
+    Open/close the "Override propofol dose" popover and apply Save / Cancel
+    / Return-to-recommendation. Save triggers a real (fixed-bolus)
+    re-optimization - this is the one action in this callback that is not
+    instant, and it shows the existing dcc.Loading spinner automatically
+    since these components live inside summary-output.
+    """
+    triggered = ctx.triggered_id
+
+    if triggered == "override-return-btn":
+        return "edit-popover", no_update, None
+
+    if not rec_store or rec_store.get("error") or not rec_store.get("context"):
+        return no_update, no_update, no_update
+
+    context = rec_store["context"]
+
+    if triggered == "override-dose-btn":
+        prefill = (
+            manual_store["dose_mg"]
+            if manual_store
+            else rec_store["result"]["propofol_bolus_mg"]
+        )
+        return "edit-popover edit-popover--open", prefill, no_update
+
+    if triggered == "override-cancel-btn":
+        return "edit-popover", no_update, no_update
+
+    if triggered == "override-save-btn":
+        weight_kg = float(context["weight"])
+        status, _, manual_dose_mg = _validate_override_dose(draft_value, weight_kg)
+        if status == "error":
+            # Invalid value: refuse to commit, leave the popover open.
+            # The live-validation callback already shows the error inline.
+            return no_update, no_update, no_update
+
+        try:
+            patient = _patient_from_context(context)
+            manual_rec = recommend_maintenance_for_fixed_propofol_bolus(
+                patient=patient,
+                fixed_bolus_mg=manual_dose_mg,
+                opiate=context["opiate"],
+                propofol_conc_mg_ml=context["propofol_conc_mg_ml"],
+                remifentanil_conc_mcg_ml=context["remifentanil_conc_mcg_ml"],
+                target_bis_low=context["target_bis_low"],
+                target_bis_high=context["target_bis_high"],
+                map_abs_min_target=context["map_abs_min_target"],
+                map_rel_frac_target=context["map_rel_frac_target"],
+            )
+        except Exception:
+            # Keep the popover open; live-validation already covers the
+            # common invalid-input cases, so a failure here is unexpected.
+            return no_update, no_update, no_update
+
+        manual_store_data = {
+            "dose_mg": manual_dose_mg,
+            "result": _rec_to_store_dict(manual_rec),
+        }
+        return "edit-popover", no_update, manual_store_data
+
+    # Any other trigger: close the popover without changing anything.
+    return "edit-popover", no_update, no_update
 
 
 def main() -> None:

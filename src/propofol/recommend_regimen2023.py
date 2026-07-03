@@ -469,6 +469,12 @@ class RecommendationResult:
     max_rate_changes_allowed: int
     n_deterministic_optimization_runs: int
 
+    # True when confidence was intentionally not computed (the fixed-bolus
+    # manual-override path). Downstream display code should key off this
+    # flag - not off confidence_percent being NaN - to decide whether to
+    # show a confidence UI at all.
+    confidence_skipped: bool = False
+
 
 # ============================================================
 # Model solve/extraction helpers
@@ -568,6 +574,39 @@ def percentile_band(values: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray, n
     )
 
 
+def _skipped_confidence_result(time_min: np.ndarray) -> ConfidenceResult:
+    """
+    Build a placeholder ConfidenceResult for when confidence is intentionally
+    not computed (the fixed-bolus manual-override path). All bands are NaN
+    so any code that plots them draws nothing rather than a misleading band.
+    """
+    t = np.asarray(time_min, dtype=float)
+    nan_arr = np.full_like(t, np.nan, dtype=float)
+    return ConfidenceResult(
+        n_simulations=0,
+        n_completed=0,
+        n_failed=0,
+        n_target_met=0,
+        confidence_percent=float("nan"),
+        time_min=t.copy(),
+        bis_p05=nan_arr.copy(),
+        bis_p50=nan_arr.copy(),
+        bis_p95=nan_arr.copy(),
+        map_p05=nan_arr.copy(),
+        map_p50=nan_arr.copy(),
+        map_p95=nan_arr.copy(),
+        cp_propofol_p05=nan_arr.copy(),
+        cp_propofol_p50=nan_arr.copy(),
+        cp_propofol_p95=nan_arr.copy(),
+        ce_propofol_p05=nan_arr.copy(),
+        ce_propofol_p50=nan_arr.copy(),
+        ce_propofol_p95=nan_arr.copy(),
+        cp_remifentanil_p05=nan_arr.copy(),
+        cp_remifentanil_p50=nan_arr.copy(),
+        cp_remifentanil_p95=nan_arr.copy(),
+    )
+
+
 # ============================================================
 # Core recommender
 # ============================================================
@@ -587,10 +626,19 @@ class Su2023PropofolRemifentanilRecommender:
         target_bis_high: float = TARGET_BIS_HIGH,
         map_abs_min_target: float = MAP_ABS_MIN_TARGET,
         map_rel_frac_target: float = MAP_REL_FRAC_TARGET,
+        fixed_bolus_mgkg: Optional[float] = None,
         map_output_index: int = SU2023_MAP_OUTPUT_INDEX,
         remi_a1_output_index: int = SU2023_REMI_A1_OUTPUT_INDEX,
         seed: int = OPTIMIZATION_BASE_SEED,
     ) -> None:
+        # When set, the propofol bolus is pinned to this value (mg/kg) and
+        # only the maintenance schedule is optimized - see build_bounds().
+        # None (the default) preserves the original, fully free-bolus search
+        # used by every existing call site.
+        self.fixed_bolus_mgkg = (
+            float(fixed_bolus_mgkg) if fixed_bolus_mgkg is not None else None
+        )
+
         self.use_remifentanil = bool(use_remifentanil)
         self.use_bsv = bool(use_bsv)
         self.mode = str(mode or OPTIMIZATION_MODE).lower()
@@ -664,9 +712,22 @@ class Su2023PropofolRemifentanilRecommender:
     def build_bounds(self) -> list[tuple[float, float]]:
         """
         Build the bounds for the optimization parameters.
+
+        When self.fixed_bolus_mgkg is set, the bolus bound collapses to a
+        single point. clip_x_to_bounds() (used by every downstream consumer
+        of the parameter vector: _split_x, initial_vectors, the Powell
+        search itself) then pins that parameter to the fixed value on every
+        iteration, so only the maintenance-schedule parameters are actually
+        searched.
         """
+        bolus_bounds = (
+            (self.fixed_bolus_mgkg, self.fixed_bolus_mgkg)
+            if self.fixed_bolus_mgkg is not None
+            else BOLUS_MGKG_BOUNDS
+        )
+
         bounds: list[tuple[float, float]] = [
-            BOLUS_MGKG_BOUNDS,
+            bolus_bounds,
             (0.0, MAX_INITIAL_PAUSE_MIN),
             (MIN_SWITCH_MIN, MAX_SWITCH_MIN),
             INFUSION_MGKGH_BOUNDS,
@@ -749,10 +810,13 @@ class Su2023PropofolRemifentanilRecommender:
         ) = self._split_x(x)
 
         # Propofol bolus: final clinical dose in PROPOFOL_BOLUS_STEP_MG steps.
+        # Exception: a fixed (manually entered) bolus is never re-rounded -
+        # it is already an exact clinician-entered value, and re-rounding it
+        # would silently change the number the user typed.
         prop_bolus_mg_raw = max(prop_bolus_mgkg, 0.0) * self.weight_kg
         prop_bolus_mg = (
             round_to_step(prop_bolus_mg_raw, PROPOFOL_BOLUS_STEP_MG)
-            if apply_final_rounding
+            if apply_final_rounding and self.fixed_bolus_mgkg is None
             else prop_bolus_mg_raw
         )
         prop_bolus_mg = max(prop_bolus_mg, 0.0)
@@ -1179,11 +1243,17 @@ class Su2023PropofolRemifentanilRecommender:
         rounded_loss = self.rounded_objective(x)
         return float(rounded_loss), x
 
-    def optimize(self) -> RecommendationResult:
+    def optimize(self, skip_confidence: bool = False) -> RecommendationResult:
         """
         Run 3-5 deterministic Powell starts and choose the candidate with the
         lowest rounded-regimen objective. Confidence is then estimated with 100
         BSV simulations of the chosen rounded regimen only once.
+
+        skip_confidence=True bypasses the (expensive, 100-simulation)
+        confidence Monte Carlo entirely and returns a placeholder
+        ConfidenceResult (confidence_percent=NaN, all bands NaN). Used by the
+        fixed-bolus manual-override path, where confidence is not meaningful
+        for a hand-picked dose and recomputing it would be wasted work.
         """
         best_loss = np.inf
         best_x = None
@@ -1209,20 +1279,23 @@ class Su2023PropofolRemifentanilRecommender:
             bis_high=self.target_bis_high,
         )
 
-        confidence = simulate_confidence(
-            patient=self.patient,
-            regimen=regimen,
-            use_remifentanil=self.use_remifentanil,
-            propofol_conc_mg_ml=self.propofol_conc_mg_ml,
-            remifentanil_conc_mcg_ml=self.remifentanil_conc_mcg_ml,
-            target_bis_low=self.target_bis_low,
-            target_bis_high=self.target_bis_high,
-            map_abs_min_target=self.map_abs_min_target,
-            map_rel_frac_target=self.map_rel_frac_target,
-            map_output_index=self.map_output_index,
-            remi_a1_output_index=self.remi_a1_output_index,
-            base_seed=self.seed + 10_000,
-        )
+        if skip_confidence:
+            confidence = _skipped_confidence_result(t)
+        else:
+            confidence = simulate_confidence(
+                patient=self.patient,
+                regimen=regimen,
+                use_remifentanil=self.use_remifentanil,
+                propofol_conc_mg_ml=self.propofol_conc_mg_ml,
+                remifentanil_conc_mcg_ml=self.remifentanil_conc_mcg_ml,
+                target_bis_low=self.target_bis_low,
+                target_bis_high=self.target_bis_high,
+                map_abs_min_target=self.map_abs_min_target,
+                map_rel_frac_target=self.map_rel_frac_target,
+                map_output_index=self.map_output_index,
+                remi_a1_output_index=self.remi_a1_output_index,
+                base_seed=self.seed + 10_000,
+            )
 
         return RecommendationResult(
             propofol_bolus_mg=regimen.propofol_bolus_mg,
@@ -1261,6 +1334,7 @@ class Su2023PropofolRemifentanilRecommender:
             n_remifentanil_rate_changes=count_rate_changes(regimen.remifentanil_rates_ml_h),
             max_rate_changes_allowed=MAX_MAINTENANCE_RATE_CHANGES,
             n_deterministic_optimization_runs=self.n_starts,
+            confidence_skipped=skip_confidence,
         )
 
 
@@ -1469,6 +1543,78 @@ def recommend_su2023_regimen(
     )
 
     return recommender.optimize()
+
+
+def recommend_maintenance_for_fixed_propofol_bolus(
+    patient: Patient,
+    fixed_bolus_mg: float,
+    opiate: str = "none",
+    use_remifentanil: Optional[bool] = None,
+    propofol_conc_mg_ml: float = DEFAULT_PROPOFOL_CONC_MG_ML,
+    remifentanil_conc_mcg_ml: float = DEFAULT_REMI_CONC_MCG_ML,
+    target_bis_low: float = TARGET_BIS_LOW,
+    target_bis_high: float = TARGET_BIS_HIGH,
+    map_abs_min_target: float = MAP_ABS_MIN_TARGET,
+    map_rel_frac_target: float = MAP_REL_FRAC_TARGET,
+    mode: str = OPTIMIZATION_MODE,
+    seed: int = OPTIMIZATION_BASE_SEED,
+) -> RecommendationResult:
+    """
+    Re-optimize the maintenance schedule for a fixed, manually-entered
+    propofol induction bolus (mg). The bolus is pinned exactly as given
+    (never rounded); only the maintenance-rate parameters are searched.
+    Confidence is not computed (see Su2023PropofolRemifentanilRecommender
+    .optimize(skip_confidence=True)) - the returned result has
+    confidence_skipped=True and confidence_percent=NaN.
+
+    This is the manual-override entry point. The original, fully free-bolus
+    recommendation path (recommend_su2023_regimen) is untouched by this
+    function's existence - it is a separate, additive call.
+
+    Supported opiate options mirror recommend_su2023_regimen: "none" or
+    "remifentanil". If remifentanil is selected, its maintenance schedule is
+    still optimized freely alongside the fixed propofol bolus - only the
+    propofol bolus is fixed, never remifentanil.
+    """
+    opiate = str(opiate or "none").lower()
+
+    if use_remifentanil is None:
+        use_remifentanil = opiate == "remifentanil"
+
+    if opiate in {"sufentanil", "fentanyl"}:
+        raise NotImplementedError("Only remifentanil is currently supported.")
+
+    if bool(use_remifentanil):
+        opiate = "remifentanil"
+    else:
+        opiate = "none"
+
+    weight_kg = float(patient.weight)
+    if not np.isfinite(weight_kg) or weight_kg <= 0:
+        raise ValueError("Patient weight must be positive.")
+
+    fixed_bolus_mg = float(fixed_bolus_mg)
+    if not np.isfinite(fixed_bolus_mg) or fixed_bolus_mg <= 0:
+        raise ValueError("fixed_bolus_mg must be positive.")
+
+    fixed_bolus_mgkg = fixed_bolus_mg / weight_kg
+
+    recommender = Su2023PropofolRemifentanilRecommender(
+        patient=patient,
+        use_remifentanil=bool(use_remifentanil),
+        use_bsv=False,
+        mode=mode,
+        propofol_conc_mg_ml=propofol_conc_mg_ml,
+        remifentanil_conc_mcg_ml=remifentanil_conc_mcg_ml,
+        target_bis_low=target_bis_low,
+        target_bis_high=target_bis_high,
+        map_abs_min_target=map_abs_min_target,
+        map_rel_frac_target=map_rel_frac_target,
+        fixed_bolus_mgkg=fixed_bolus_mgkg,
+        seed=seed,
+    )
+
+    return recommender.optimize(skip_confidence=True)
 
 
 def compress_minute_schedule(rates: Optional[Sequence[float]]) -> list[dict[str, float]]:

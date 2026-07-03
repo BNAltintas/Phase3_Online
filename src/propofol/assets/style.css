@@ -443,12 +443,12 @@ body {
   min-width: 300px;
 }
 
-.explanation-column {
+.predictions-column {
   flex: 2 1 380px;
   min-width: 300px;
 }
 
-/* Wraps the recommendation/explanation row + predictions section (everything
+/* Wraps the recommendation column + predictions column (everything
    `run_model` updates). Explicit flex-basis + min-width: 0 keeps this
    column's width stable and independent of its children's content-driven
    intrinsic size, so it doesn't reflow once Plotly paints the graphs. */
@@ -457,13 +457,9 @@ body {
   min-width: 0;
 }
 
-.predictions-section {
-  margin-top: 4px;
-}
-
 .predictions-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 14px;
 }
 
@@ -489,12 +485,62 @@ body {
   height: 480px;
 }
 
+/* Collapsed (its "Show" checkbox unchecked): the card hugs just its
+   header, so no empty graph space remains. Overrides the fixed height
+   above - .graph-card--collapsed must come after .graph-card--tall in the
+   stylesheet so it wins for a collapsed tall card too. */
+.graph-card--collapsed {
+  height: auto;
+}
+
+.graph-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin-bottom: 8px;
+}
+
 .graph-card-title {
-  margin: 0 0 8px 0;
+  margin: 0;
   font-size: 14px;
   font-weight: 700;
   color: var(--text-primary);
+}
+
+.graph-card-toggle {
   flex: 0 0 auto;
+}
+
+.graph-card-toggle .form-check {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+}
+
+.graph-card-toggle label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.graph-card-toggle input[type="checkbox"] {
+  cursor: pointer;
+  margin: 0;
+}
+
+.graph-card-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .graph-card-note {
@@ -643,4 +689,103 @@ body {
 .maintenance-empty {
   font-size: 13px;
   color: var(--text-secondary);
+}
+
+/* Scenario labels + de-emphasized/secondary styling shown only while a
+   manual override is active, so the original recommendation stays visible
+   but reads as secondary next to the manual scenario. */
+
+.maintenance-scenario-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin: 10px 0 4px 0;
+}
+
+.maintenance-scenario-label--manual {
+  color: var(--blue-accent);
+}
+
+.maintenance-table--manual .maintenance-interval,
+.maintenance-table--manual .maintenance-rate {
+  color: var(--text-primary);
+}
+
+.maintenance-table--manual .maintenance-rate {
+  font-weight: 700;
+}
+
+/* ---------- Manual dose override ---------- */
+
+.induction-dose-label--manual {
+  color: var(--blue-accent);
+}
+
+.induction-dose-value--manual {
+  color: #c2680f;
+}
+
+.induction-dose-original-note {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-color);
+}
+
+.induction-manual-badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #c2680f;
+  background-color: rgba(194, 104, 15, 0.12);
+  border-radius: 10px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+.override-return-btn {
+  margin-top: 8px;
+  background: none;
+  border: none;
+  color: var(--blue-accent);
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+  text-align: right;
+}
+
+.induction-infeasible-warning {
+  font-size: 12px;
+  color: #c2680f;
+  background-color: rgba(194, 104, 15, 0.08);
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-top: 10px;
+}
+
+.override-dose-section {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+}
+
+.override-dose-btn {
+  background: none;
+  border: none;
+  color: var(--blue-accent);
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.override-dose-section .edit-popover {
+  margin-top: 8px;
+  grid-column: unset;
 }
