@@ -54,7 +54,15 @@ app.layout = build_layout()
 # for that.
 app.config.suppress_callback_exceptions = True
 
+# Shared prediction-graph color language, used consistently across BIS, MAP,
+# Propofol PK/PD, and Remifentanil PK: green always means the recommended
+# (model) prediction, orange always means a manual-dose override, and the
+# light-blue band color always means uncertainty/confidence interval - never
+# reused for anything else, so users can read any prediction graph the same
+# way without re-learning a per-graph color key.
+RECOMMENDED_COLOR = "#1f9254"
 MANUAL_OVERRIDE_COLOR = "#c2680f"
+UNCERTAINTY_BAND_COLOR = "#2f6fed"
 
 
 # ============================================================
@@ -595,9 +603,14 @@ def make_summary(original, manual=None):
 # General figure helpers
 # ============================================================
 
-def _add_band(fig: go.Figure, x, y_low, y_high, name: str):
+def _add_band(
+    fig: go.Figure, x, y_low, y_high, name: str,
+    color: str = UNCERTAINTY_BAND_COLOR, show_in_legend: bool = True,
+):
     """
-    Add a shaded band to a Plotly figure.
+    Add a shaded uncertainty band to a Plotly figure, always in the app-wide
+    light-blue "uncertainty" color at low opacity so it reads as visually
+    secondary to whatever prediction line(s) are drawn on top of it.
     """
     x = _safe_array(x)
     y_low = _safe_array(y_low)
@@ -610,16 +623,18 @@ def _add_band(fig: go.Figure, x, y_low, y_high, name: str):
             fill="toself",
             mode="lines",
             line=dict(width=0),
-            opacity=0.20,
+            fillcolor=color,
+            opacity=0.18,
             name=name,
+            showlegend=show_in_legend,
             hoverinfo="skip",
         )
     )
 
 
-def _add_line(fig: go.Figure, x, y, name: str):
+def _add_line(fig: go.Figure, x, y, name: str, color: str, width: float = 2.5, dash: str | None = None):
     """
-    Add a line to a Plotly figure.
+    Add a prediction line to a Plotly figure.
     """
     fig.add_trace(
         go.Scatter(
@@ -627,6 +642,7 @@ def _add_line(fig: go.Figure, x, y, name: str):
             y=y,
             mode="lines",
             name=name,
+            line=dict(color=color, width=width, dash=dash),
         )
     )
 
@@ -638,11 +654,11 @@ def make_propofol_pk_figure(rec):
     fig = go.Figure()
     c = rec.confidence
 
-    _add_band(fig, c.time_min, c.cp_propofol_p05, c.cp_propofol_p95, "Cp CI 5–95%")
-    _add_line(fig, rec.time_min, rec.cp_propofol, "Cp deterministic")
+    _add_band(fig, c.time_min, c.cp_propofol_p05, c.cp_propofol_p95, "90% Prediction Interval")
+    _add_line(fig, rec.time_min, rec.cp_propofol, "Recommended Cp", color=RECOMMENDED_COLOR)
 
-    _add_band(fig, c.time_min, c.ce_propofol_p05, c.ce_propofol_p95, "Ce CI 5–95%")
-    _add_line(fig, rec.time_min, rec.ce_propofol, "Ce deterministic")
+    _add_band(fig, c.time_min, c.ce_propofol_p05, c.ce_propofol_p95, "90% Prediction Interval", show_in_legend=False)
+    _add_line(fig, rec.time_min, rec.ce_propofol, "Recommended Ce", color=RECOMMENDED_COLOR, dash="dash")
 
     fig.update_layout(
         xaxis_title="Time (min)",
@@ -660,16 +676,16 @@ def make_remifentanil_pk_figure(rec):
     Create a Plotly figure for remifentanil pharmacokinetics (PK).
     """
     if not rec.remifentanil_selected:
-        return make_empty_figure("Remifentanil PK")
+        return make_empty_figure()
 
     fig = go.Figure()
     c = rec.confidence
 
     if c.cp_remifentanil_p05 is not None and c.cp_remifentanil_p95 is not None:
-        _add_band(fig, c.time_min, c.cp_remifentanil_p05, c.cp_remifentanil_p95, "Cp CI 5–95%")
+        _add_band(fig, c.time_min, c.cp_remifentanil_p05, c.cp_remifentanil_p95, "90% Prediction Interval")
 
     if rec.cp_remifentanil is not None:
-        _add_line(fig, rec.time_min, rec.cp_remifentanil, "Cp deterministic")
+        _add_line(fig, rec.time_min, rec.cp_remifentanil, "Recommended Cp", color=RECOMMENDED_COLOR)
 
     fig.update_layout(
         xaxis_title="Time (min)",
@@ -689,8 +705,8 @@ def make_bis_figure(rec):
     fig = go.Figure()
     c = rec.confidence
 
-    _add_band(fig, c.time_min, c.bis_p05, c.bis_p95, "BIS CI 5–95%")
-    _add_line(fig, rec.time_min, rec.bis, "BIS deterministic")
+    _add_band(fig, c.time_min, c.bis_p05, c.bis_p95, "90% Prediction Interval")
+    _add_line(fig, rec.time_min, rec.bis, "Recommended BIS", color=RECOMMENDED_COLOR)
 
     # Read the actual per-run targets off `rec` (not the module defaults), so
     # the band always matches what this specific recommendation was optimized
@@ -705,7 +721,6 @@ def make_bis_figure(rec):
     )
 
     fig.update_layout(
-        title="BIS",
         xaxis_title="Time (min)",
         yaxis_title="BIS",
         yaxis=dict(range=[0, 100]),
@@ -723,15 +738,14 @@ def make_map_figure(rec):
     fig = go.Figure()
     c = rec.confidence
 
-    _add_band(fig, c.time_min, c.map_p05, c.map_p95, "MAP CI 5–95%")
-    _add_line(fig, rec.time_min, rec.map_mmhg, "MAP deterministic")
+    _add_band(fig, c.time_min, c.map_p05, c.map_p95, "90% Prediction Interval")
+    _add_line(fig, rec.time_min, rec.map_mmhg, "Recommended MAP", color=RECOMMENDED_COLOR)
 
     fig.add_hline(y=rec.map_lower_bound_mmhg, line_dash="dash", annotation_text="MAP lower bound")
 
     y_upper = max(160.0, float(np.nanmax(c.map_p95)) + 10.0)
 
     fig.update_layout(
-        title="MAP",
         xaxis_title="Time (min)",
         yaxis_title="MAP (mmHg)",
         yaxis=dict(range=[0, y_upper]),
@@ -762,12 +776,12 @@ def make_propofol_pk_figure_dual(original, manual):
     fig.add_trace(go.Scatter(
         x=manual.time_min, y=manual.cp_propofol, mode="lines",
         line=dict(color=MANUAL_OVERRIDE_COLOR, width=2),
-        name="Cp (manual dose)",
+        name="Manual Cp",
     ))
     fig.add_trace(go.Scatter(
         x=manual.time_min, y=manual.ce_propofol, mode="lines",
-        line=dict(color=MANUAL_OVERRIDE_COLOR, width=2, dash="dot"),
-        name="Ce (manual dose)",
+        line=dict(color=MANUAL_OVERRIDE_COLOR, width=2, dash="dash"),
+        name="Manual Ce",
     ))
 
     return fig
@@ -790,7 +804,7 @@ def make_remifentanil_pk_figure_dual(original, manual):
         fig.add_trace(go.Scatter(
             x=manual.time_min, y=manual.cp_remifentanil, mode="lines",
             line=dict(color=MANUAL_OVERRIDE_COLOR, width=2),
-            name="Cp (manual dose)",
+            name="Manual Cp",
         ))
 
     return fig
@@ -806,7 +820,7 @@ def make_bis_figure_dual(original, manual):
     fig.add_trace(go.Scatter(
         x=manual.time_min, y=manual.bis, mode="lines",
         line=dict(color=MANUAL_OVERRIDE_COLOR, width=2),
-        name="BIS (manual dose)",
+        name="Manual BIS",
     ))
 
     return fig
@@ -822,7 +836,7 @@ def make_map_figure_dual(original, manual):
     fig.add_trace(go.Scatter(
         x=manual.time_min, y=manual.map_mmhg, mode="lines",
         line=dict(color=MANUAL_OVERRIDE_COLOR, width=2),
-        name="MAP (manual dose)",
+        name="Manual MAP",
     ))
 
     return fig
