@@ -114,7 +114,27 @@
       "Bash(python -m pytest -q)",
       "Bash(py -3 -m pytest --version)",
       "Bash(./.venv/Scripts/python.exe -m pytest -q)",
-      "PowerShell(Get-NetTCPConnection -LocalPort 8099 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue })"
+      "PowerShell(Get-NetTCPConnection -LocalPort 8099 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue })",
+      "Bash(find . -iname \"*.lock\")",
+      "Bash(find . -iname \".lock\")",
+      "Bash(cat pyvenv.cfg)",
+      "Bash(stat .lock)",
+      "Bash(python /tmp/run_server_polish.py)",
+      "Bash(node drive_card_polish.js)",
+      "Bash(timeout 60 node drive_manual_active.js)",
+      "Bash(echo \"EXIT: $?\")",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8099 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -Confirm:$false })",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8099 -ErrorAction SilentlyContinue)",
+      "Bash(tasklist //FI \"IMAGENAME eq python.exe\")",
+      "Bash(powershell -Command \"Get-Process python -ErrorAction SilentlyContinue\")",
+      "Bash(.venv/Scripts/python.exe -c \"import dash; print\\(dash.__version__\\)\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://127.0.0.1:8100/)",
+      "Bash(node drive_override_editui.js)",
+      "Bash(timeout 30 node drive_manual_active.js)",
+      "Bash(timeout 40 node drive_manual_active.js)",
+      "Bash(echo \"EXIT CODE: $?\")",
+      "Bash(timeout 90 node drive_manual_active.js)",
+      "Bash(.venv/Scripts/python.exe -m pytest -q)"
     ]
   }
 }

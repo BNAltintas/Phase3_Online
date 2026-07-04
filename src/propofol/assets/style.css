@@ -343,6 +343,30 @@ input[type=number] {
   margin-bottom: 4px;
 }
 
+.override-popover-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--navy-900);
+  margin-bottom: 10px;
+}
+
+.override-dose-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.override-dose-row .field-input {
+  flex: 1 1 38%;
+  min-width: 0;
+  margin-bottom: 0;
+  padding: 9px 10px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 8px;
+}
+
 .field-input--warning {
   border-color: #c2680f;
 }
@@ -692,8 +716,7 @@ body {
 
 .induction-card {
   background-color: var(--bg-card);
-  border-color: var(--border-color);
-  border-top: 4px solid var(--blue-accent);
+  border: 1.5px solid var(--blue-accent);
   padding-top: 16px;
 }
 
@@ -818,11 +841,10 @@ body {
 }
 
 .induction-manual-active-box {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex: 1 1 50%;
-  align-self: stretch;
+  align-self: flex-start;
   text-align: center;
   font-size: 13px;
   font-weight: 800;
@@ -831,11 +853,16 @@ body {
   color: #c2680f;
   background-color: rgba(194, 104, 15, 0.08);
   border: 1.5px solid #c2680f;
-  border-radius: 10px;
-  padding: 12px 16px;
+  border-radius: 8px;
+  padding: 8px 16px;
+  white-space: nowrap;
 }
 
 /* ---------- Maintenance regimen card ---------- */
+
+.maintenance-card {
+  border: 1.5px solid var(--blue-accent);
+}
 
 .maintenance-card-title-row {
   display: flex;
@@ -1052,23 +1079,45 @@ body {
 
 .override-unit-toggle {
   display: flex;
-  gap: 12px;
-  margin-bottom: 6px;
-  font-size: 11px;
+  flex: 1 1 62%;
+  align-items: stretch;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 0;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-secondary);
 }
 
 .override-unit-toggle label {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  flex: 1 1 50%;
+  padding: 9px 10px;
   cursor: pointer;
+  border-right: 1px solid var(--border-color);
+  white-space: nowrap;
+}
+
+.override-unit-toggle label:last-child {
+  border-right: none;
+}
+
+.override-unit-toggle label:has(input:checked) {
+  background-color: #eef3ff;
+  color: var(--blue-accent);
 }
 
 .override-unit-toggle input[type="radio"] {
-  cursor: pointer;
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
   margin: 0;
+  pointer-events: none;
 }
 
 /* ---------- "More Info" page ---------- */

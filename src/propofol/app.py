@@ -331,34 +331,41 @@ def _maintenance_rows(rate_ml_h, rate_secondary, secondary_label: str) -> list:
 
 def _override_popover(prefill_value):
     """
-    Build the click-to-open "Override propofol dose" popover. Always
-    rendered (closed by default) regardless of whether an override is
-    currently active, so its component ids stay stable for the callbacks
-    that target them.
+    Build the click-to-open "Manual dose" popover. Always rendered (closed
+    by default) regardless of whether an override is currently active, so
+    its component ids stay stable for the callbacks that target them.
 
-    The unit toggle (Total dose / mg/kg) always opens defaulted to "Total
-    dose" - handle_override resets it every time the popover is opened, so
-    prefill_value (always an absolute mg amount) never needs converting for
-    display here.
+    The dose input and the unit toggle (Total dose / mg/kg) sit side by
+    side in one row - purely a layout choice, the ids and the values they
+    carry are unchanged from before. The unit toggle always opens defaulted
+    to "Total dose" - handle_override resets it every time the popover is
+    opened, so prefill_value (always an absolute mg amount) never needs
+    converting for display here.
     """
     return html.Div(
         [
-            dcc.RadioItems(
-                id="override-unit",
-                options=[
-                    {"label": "Total dose", "value": "total"},
-                    {"label": "mg/kg", "value": "mgkg"},
+            html.Div("Manual dose", className="override-popover-title"),
+            html.Div(
+                [
+                    dcc.Input(
+                        id="override-dose-draft",
+                        type="text",
+                        value=prefill_value,
+                        className="field-input",
+                        placeholder="Manual dose in mg",
+                    ),
+                    dcc.RadioItems(
+                        id="override-unit",
+                        options=[
+                            {"label": "Total dose", "value": "total"},
+                            {"label": "mg/kg", "value": "mgkg"},
+                        ],
+                        value="total",
+                        inline=True,
+                        className="override-unit-toggle",
+                    ),
                 ],
-                value="total",
-                inline=True,
-                className="override-unit-toggle",
-            ),
-            dcc.Input(
-                id="override-dose-draft",
-                type="text",
-                value=prefill_value,
-                className="field-input",
-                placeholder="Manual dose in mg",
+                className="override-dose-row",
             ),
             html.Div(id="override-dose-message", className="field-message"),
             html.Div(
@@ -2043,6 +2050,40 @@ for _field_id, _, _ in EDITABLE_FIELDS:
     _register_focus_on_open_callback(f"{_field_id}-popover", f"{_field_id}-draft")
 
 _register_focus_on_open_callback("override-popover", "override-dose-draft")
+
+# ============================================================
+# Escape-to-cancel for the manual dose popover
+#
+# Pressing Escape in the draft input simply clicks the existing Cancel
+# button, so it goes through the exact same handle_override branch a real
+# click would - no duplicate cancel logic here. Scoped to just this one
+# popover (not the generic per-field editors) since that's the only editor
+# this request covers.
+# ============================================================
+
+app.clientside_callback(
+    """
+    function(popoverClassName) {
+        if (popoverClassName && popoverClassName.indexOf("edit-popover--open") !== -1) {
+            var el = document.getElementById("override-dose-draft");
+            if (el && !el.dataset.escBound) {
+                el.dataset.escBound = "1";
+                el.addEventListener("keydown", function (e) {
+                    if (e.key === "Escape") {
+                        var cancelBtn = document.getElementById("override-cancel-btn");
+                        if (cancelBtn) {
+                            cancelBtn.click();
+                        }
+                    }
+                });
+            }
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("override-dose-draft", "data-esc-tick"),
+    Input("override-popover", "className"),
+)
 
 
 # ============================================================
