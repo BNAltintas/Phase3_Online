@@ -639,6 +639,21 @@ body {
   height: 480px;
 }
 
+/* The dose-rationale card is the only user of .graph-card--tall - trim its
+   height and top/bottom padding specifically (rather than touching the
+   shared .graph-card/.graph-card--tall rules, which would also resize the
+   BIS/MAP/PK cards) so it fits the viewport at 100% zoom without the
+   plot's labels getting cramped. */
+#dose-rationale-card-wrapper .graph-card--tall {
+  height: 400px;
+  padding-top: 10px;
+  padding-bottom: 8px;
+}
+
+#dose-rationale-card-wrapper .graph-card-header {
+  margin-bottom: 4px;
+}
+
 /* Collapsed (its "Show" checkbox unchecked): the card hugs just its
    header, so no empty graph space remains. Overrides the fixed height
    above - .graph-card--collapsed must come after .graph-card--tall in the

@@ -136,7 +136,13 @@
       "Bash(timeout 90 node drive_manual_active.js)",
       "Bash(.venv/Scripts/python.exe -m pytest -q)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://127.0.0.1:8101/)",
-      "Bash(node drive_graph_colors.js)"
+      "Bash(node drive_graph_colors.js)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://127.0.0.1:8102/)",
+      "Bash(node drive_rationale_layout.js)",
+      "Bash(.venv/Scripts/python.exe /tmp/run_server_rationale.py)",
+      "Bash(node -e ' *)",
+      "Bash(.venv/Scripts/python.exe -c \"import plotly; print\\(plotly.__version__\\)\")",
+      "Bash(sed -i 's#127\\\\.0\\\\.0\\\\.1:[0-9]\\\\+#127.0.0.1:8102#g' drive_rationale_layout.js)"
     ]
   }
 }

@@ -1325,8 +1325,8 @@ def make_induction_dose_rationale_figure(
     fig.add_trace(
         go.Scatter(
             x=[None], y=[None], mode="markers",
-            marker=dict(symbol="square", size=12, color="rgba(0, 150, 0, 0.25)"),
-            name="Target zone",
+            marker=dict(symbol="square", size=10, color="rgba(0, 150, 0, 0.25)"),
+            name="Target",
             showlegend=True,
         ),
     )
@@ -1334,7 +1334,7 @@ def make_induction_dose_rationale_figure(
         go.Scatter(
             x=[None], y=[None], mode="lines",
             line=dict(color="green", width=3, dash="dash"),
-            name="Recommendation",
+            name="Rec.",
             showlegend=True,
         ),
     )
@@ -1343,7 +1343,7 @@ def make_induction_dose_rationale_figure(
             go.Scatter(
                 x=[None], y=[None], mode="lines",
                 line=dict(color=MANUAL_OVERRIDE_COLOR, width=3, dash="dash"),
-                name="Manual override",
+                name="Manual",
                 showlegend=True,
             ),
         )
@@ -1418,6 +1418,13 @@ def make_induction_dose_rationale_figure(
             font=dict(color=MANUAL_OVERRIDE_COLOR, size=13),
         )
 
+    # The legend sits above the plot, stacked above the "Recommendation"/
+    # "Manual dose" annotations (themselves at paper y=1.07/1.14) rather
+    # than below the plot - this reclaims the large bottom margin that
+    # previously existed only to hold it, which is what let the card shrink
+    # below without losing any label.
+    legend_y = 1.26 if manual_dose_mgkg is not None else 1.19
+
     fig.update_layout(
         # No in-plot title text - the card header ("Induction-dose rationale")
         # already shows it in black, so a second grey title here was a
@@ -1426,17 +1433,18 @@ def make_induction_dose_rationale_figure(
         showlegend=True,
         legend=dict(
             orientation="h",
-            yanchor="top",
-            y=-0.22,
-            xanchor="center",
-            x=0.5,
-            font=dict(size=11),
+            yanchor="bottom",
+            y=legend_y,
+            xanchor="left",
+            x=0,
+            font=dict(size=9),
+            tracegroupgap=2,
         ),
         margin=dict(
-            t=115 if manual_dose_mgkg is not None else 95,
-            b=90,
-            l=100,
-            r=90,
+            t=90 if manual_dose_mgkg is not None else 70,
+            b=42,
+            l=48,
+            r=38,
         ),
         xaxis=dict(
             title=dict(text="Propofol induction dose (mg/kg)", font=dict(color="green")),
