@@ -60,6 +60,21 @@ input[type=number] {
   font-weight: 600;
 }
 
+/* Shown the instant "Run recommendation" is clicked, before the model
+   finishes - a calm blue tint (not the orange "stale/warning" look above)
+   since this isn't a problem state, just a brief wait. */
+.result-placeholder--loading {
+  color: var(--navy-900);
+  background-color: rgba(47, 111, 237, 0.06);
+  border-color: rgba(47, 111, 237, 0.25);
+  font-weight: 600;
+}
+
+.result-placeholder-spinner {
+  margin-right: 8px;
+  color: var(--blue-accent);
+}
+
 /* Compact patient-identification card shown above Input Parameters. */
 .patient-id-card {
   display: flex;
@@ -1097,4 +1112,22 @@ body {
 
 .run-recommendation-btn:hover {
   background-color: var(--navy-700);
+}
+
+.run-recommendation-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.75;
+}
+
+.run-recommendation-btn:disabled:hover {
+  background-color: var(--blue-accent);
+}
+
+.run-btn-spinner {
+  display: none;
+  margin-right: 8px;
+}
+
+.run-recommendation-btn--loading .run-btn-spinner {
+  display: inline-block;
 }

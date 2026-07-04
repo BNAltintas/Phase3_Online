@@ -2344,6 +2344,58 @@ def render_recommendation(rec_store, manual_store):
 
 
 # ============================================================
+# Run-button loading feedback
+#
+# Two clientside callbacks (no server round-trip, so they resolve well
+# before run_model's actual computation finishes) give instant feedback on
+# click and reset it once the run completes. Disabling a real DOM button
+# also means the browser itself refuses further clicks while it is
+# disabled - a genuine guarantee against duplicate submissions, not just a
+# timing-based one. Neither touches run_model or any model/recommendation
+# state - recommendation-loading-store is purely a UI signal consumed by
+# update_result_visibility below.
+# ============================================================
+
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        return [
+            "run-recommendation-btn run-recommendation-btn--loading",
+            true,
+            "Generating recommendation...",
+            true
+        ];
+    }
+    """,
+    Output("run-btn", "className"),
+    Output("run-btn", "disabled"),
+    Output("run-btn-label", "children"),
+    Output("recommendation-loading-store", "data"),
+    Input("run-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+
+app.clientside_callback(
+    """
+    function(rec_store) {
+        return [
+            "run-recommendation-btn",
+            false,
+            "Run recommendation",
+            false
+        ];
+    }
+    """,
+    Output("run-btn", "className", allow_duplicate=True),
+    Output("run-btn", "disabled", allow_duplicate=True),
+    Output("run-btn-label", "children", allow_duplicate=True),
+    Output("recommendation-loading-store", "data", allow_duplicate=True),
+    Input("recommendation-store", "data"),
+    prevent_initial_call=True,
+)
+
+
+# ============================================================
 # Before/after-run state
 #
 # Purely presentational: toggles which of {empty placeholder, stale
@@ -2352,6 +2404,9 @@ def render_recommendation(rec_store, manual_store):
 # (render_recommendation, above, still owns that), so hidden content stays
 # in the DOM - already-computed but out-of-date graphs are just not shown,
 # rather than being cleared and recomputed.
+#
+# The "generating..." loading placeholder is deliberately NOT one of this
+# callback's outputs - see toggle_loading_placeholders below for why.
 # ============================================================
 
 @app.callback(
@@ -2391,6 +2446,61 @@ def update_result_visibility(rec_store, stale):
         empty_style, stale_style, fresh_style,
         empty_style, stale_style, fresh_style,
     )
+
+
+# ============================================================
+# Loading-placeholder visibility (independent of update_result_visibility)
+#
+# This is deliberately its OWN clientside callback with recommendation-
+# loading-store as its ONLY input, rather than a third input folded into
+# update_result_visibility above. Empirically, when a single callback
+# depends on both recommendation-loading-store and recommendation-store,
+# Dash's front-end appears to batch/defer firing it until BOTH inputs
+# have settled (since they share the same ultimate trigger - the
+# "Run recommendation" click) - the loading-only render never actually
+# reached the page, it jumped straight from empty to fresh. Keeping this
+# callback's only input isolated to the loading store (which changes via
+# a clientside callback with no shared upstream dependency) sidesteps that
+# entirely and fires immediately, exactly like the run-btn button state
+# does. When loading ends, this callback only hides its own placeholders
+# and leaves every other Output as `no_update`, so it can never clobber
+# whatever update_result_visibility has already (correctly) set.
+# ============================================================
+
+app.clientside_callback(
+    """
+    function(loading) {
+        var hidden = {display: "none"};
+        var noUpdate = window.dash_clientside.no_update;
+        if (loading) {
+            return [
+                null, hidden, hidden, hidden,
+                null, hidden, hidden, hidden,
+                null, hidden, hidden, hidden
+            ];
+        }
+        return [
+            hidden, noUpdate, noUpdate, noUpdate,
+            hidden, noUpdate, noUpdate, noUpdate,
+            hidden, noUpdate, noUpdate, noUpdate
+        ];
+    }
+    """,
+    Output("recommendation-loading-placeholder", "style"),
+    Output("recommendation-empty-placeholder", "style", allow_duplicate=True),
+    Output("recommendation-stale-placeholder", "style", allow_duplicate=True),
+    Output("summary-output", "style", allow_duplicate=True),
+    Output("rationale-loading-placeholder", "style"),
+    Output("rationale-empty-placeholder", "style", allow_duplicate=True),
+    Output("rationale-stale-placeholder", "style", allow_duplicate=True),
+    Output("dose-rationale-card-wrapper", "style", allow_duplicate=True),
+    Output("predictions-loading-placeholder", "style"),
+    Output("predictions-empty-placeholder", "style", allow_duplicate=True),
+    Output("predictions-stale-placeholder", "style", allow_duplicate=True),
+    Output("predictions-grid", "style", allow_duplicate=True),
+    Input("recommendation-loading-store", "data"),
+    prevent_initial_call=True,
+)
 
 
 # ============================================================

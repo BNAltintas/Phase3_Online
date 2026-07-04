@@ -245,18 +245,31 @@ def graph_card(
 STALE_MESSAGE = "Input parameters changed. Re-run recommendation to update dosing guidance."
 
 
-def _placeholder_card(text: str, card_id: str, stale: bool = False, hidden: bool = False):
+def _placeholder_card(
+    text: str, card_id: str, stale: bool = False, loading: bool = False, hidden: bool = False,
+):
     """
-    Build a "no result to show yet" placeholder card - either the initial
-    "not run yet" message or the "inputs changed, re-run" stale message.
-    Purely presentational: it carries no data and is only ever shown/hidden
-    via its `style` prop by `update_result_visibility` in app.py.
+    Build a "no result to show yet" placeholder card - the initial "not
+    run yet" message, the "inputs changed, re-run" stale message, or (with
+    loading=True) a spinner + "generating..." message shown the instant
+    "Run recommendation" is clicked, before the model finishes. Purely
+    presentational: it carries no data and is only ever shown/hidden via
+    its `style` prop by `update_result_visibility` in app.py.
     """
     class_name = "card result-placeholder"
     if stale:
         class_name += " result-placeholder--stale"
+    if loading:
+        class_name += " result-placeholder--loading"
+
+    content = (
+        [html.I(className="fa-solid fa-spinner fa-spin result-placeholder-spinner"), text]
+        if loading
+        else text
+    )
+
     return html.Div(
-        text,
+        content,
         id=card_id,
         className=class_name,
         style={"display": "none"} if hidden else None,
@@ -596,7 +609,10 @@ def build_input_column():
             build_patient_parameters_card(),
             build_model_settings_card(),
             html.Button(
-                "Run recommendation",
+                [
+                    html.I(className="fa-solid fa-spinner fa-spin run-btn-spinner"),
+                    html.Span("Run recommendation", id="run-btn-label"),
+                ],
                 id="run-btn",
                 n_clicks=0,
                 className="run-recommendation-btn",
@@ -613,11 +629,12 @@ def build_recommendation_column():
     maintenance-regimen card, each with its own `.card` styling), with the
     induction-dose rationale graph stacked directly underneath.
 
-    Before a recommendation has ever been run, and whenever the current
-    recommendation is stale (inputs changed since it was generated),
-    `summary-output` and the rationale graph card are hidden behind a
-    placeholder card instead - see `update_result_visibility` in app.py,
-    which is the sole owner of all of these `style` props.
+    Before a recommendation has ever been run, while one is actively being
+    generated (the instant "Run recommendation" is clicked), and whenever
+    the current recommendation is stale (inputs changed since it was
+    generated), `summary-output` and the rationale graph card are hidden
+    behind a placeholder card instead - see `update_result_visibility` in
+    app.py, which is the sole owner of all of these `style` props.
     """
     return html.Div(
         [
@@ -627,12 +644,20 @@ def build_recommendation_column():
                 "recommendation-empty-placeholder",
             ),
             _placeholder_card(
+                "Generating personalized recommendation...",
+                "recommendation-loading-placeholder", loading=True, hidden=True,
+            ),
+            _placeholder_card(
                 STALE_MESSAGE, "recommendation-stale-placeholder", stale=True, hidden=True,
             ),
             html.Div(id="summary-output", style={"display": "none"}),
             _placeholder_card(
                 "Explanation will appear after running recommendation.",
                 "rationale-empty-placeholder",
+            ),
+            _placeholder_card(
+                "Generating personalized recommendation...",
+                "rationale-loading-placeholder", loading=True, hidden=True,
             ),
             _placeholder_card(
                 STALE_MESSAGE, "rationale-stale-placeholder", stale=True, hidden=True,
@@ -685,6 +710,10 @@ def build_predictions_column():
                 "predictions-empty-placeholder",
             ),
             _placeholder_card(
+                "Simulating BIS and MAP predictions...",
+                "predictions-loading-placeholder", loading=True, hidden=True,
+            ),
+            _placeholder_card(
                 STALE_MESSAGE, "predictions-stale-placeholder", stale=True, hidden=True,
             ),
             html.Div(
@@ -733,6 +762,13 @@ def build_layout():
             # recommendation-store's current data was generated. Reset to
             # False by every "Run recommendation" click.
             dcc.Store(id="recommendation-stale-store", data=False),
+            # True from the instant "Run recommendation" is clicked until
+            # recommendation-store's data actually updates - lets
+            # update_result_visibility show a "generating..." placeholder
+            # immediately, well before run_model's computation finishes.
+            # Set/cleared by two clientside callbacks in app.py so the
+            # "start" transition has zero server round-trip latency.
+            dcc.Store(id="recommendation-loading-store", data=False),
             # "recommendation" or "more-info" - which top-level page is shown.
             dcc.Store(id="active-page-store", data="recommendation"),
 
