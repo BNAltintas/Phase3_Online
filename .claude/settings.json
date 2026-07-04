@@ -85,7 +85,17 @@
       "PowerShell(Get-NetTCPConnection -LocalPort 8094 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; \"stopped\")",
       "Bash(./.venv/Scripts/python.exe /tmp/run_server15.py)",
       "Bash(sed -i \"s/127.0.0.1:80[0-9][0-9]/127.0.0.1:8094/\" drive.js drive_states.js drive_override_recheck.js drive_graphs.js)",
-      "PowerShell(Get-NetTCPConnection -LocalPort 8094 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8094/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })"
+      "PowerShell(Get-NetTCPConnection -LocalPort 8094 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8094/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })",
+      "Bash(node drive_play_icon.js)",
+      "Bash(node drive_induction_redesign.js)",
+      "Bash(sed -i \"s/127.0.0.1:80[0-9][0-9]/127.0.0.1:8095/\" drive_autofocus.js)",
+      "Bash(rm -f induction_default_state.png induction_override_active.png)",
+      "Bash(node drive_debug_popover.js)",
+      "Bash(node drive_debug_trigger.js)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8095 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; \"stopped\")",
+      "Bash(./.venv/Scripts/python.exe /tmp/run_server16.py)",
+      "Bash(sed -i \"s/127.0.0.1:80[0-9][0-9]/127.0.0.1:8095/\" drive.js drive_states.js drive_override_recheck.js drive_graphs.js drive_loading_feedback.js)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8095 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8095/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })"
     ]
   }
 }

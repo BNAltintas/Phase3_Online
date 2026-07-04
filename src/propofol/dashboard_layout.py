@@ -610,6 +610,7 @@ def build_input_column():
             build_model_settings_card(),
             html.Button(
                 [
+                    html.I(className="fa-solid fa-play run-btn-play-icon"),
                     html.I(className="fa-solid fa-spinner fa-spin run-btn-spinner"),
                     html.Span("Run recommendation", id="run-btn-label"),
                 ],

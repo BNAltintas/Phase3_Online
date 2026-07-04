@@ -686,7 +686,22 @@ body {
   min-height: 260px;
 }
 
-/* ---------- Induction recommendation card ---------- */
+/* ---------- Induction recommendation card ----------
+   A prominent dark navy card (unlike every other .card, which stays
+   white) so the headline dose/confidence numbers read as THE main result
+   of the page, not just another panel. */
+
+.induction-card {
+  background-color: var(--navy-900);
+  border-color: var(--navy-900);
+}
+
+.induction-card-title {
+  font-weight: 700;
+  font-size: 14px;
+  margin: 0 0 16px 0;
+  color: #ffffff;
+}
 
 .induction-card-body {
   display: flex;
@@ -700,88 +715,84 @@ body {
   flex-direction: column;
   gap: 2px;
   justify-content: center;
+  flex: 1 1 50%;
 }
 
 .induction-dose-label {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--text-secondary);
+  color: var(--blue-accent);
 }
 
 .induction-dose-value {
   font-size: 34px;
   font-weight: 800;
-  color: var(--navy-900);
+  color: #ffffff;
   line-height: 1.1;
 }
 
 .induction-dose-subtext {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: rgba(255, 255, 255, 0.78);
   margin-top: 2px;
 }
 
 .induction-confidence-block {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: center;
   justify-content: center;
-  text-align: right;
-  gap: 3px;
-  border-left: 1px solid var(--border-color);
+  text-align: center;
+  gap: 6px;
+  border-left: 1px solid rgba(255, 255, 255, 0.18);
   padding-left: 16px;
-  min-width: 120px;
+  flex: 1 1 50%;
 }
 
 .induction-confidence-label {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--text-secondary);
+  color: var(--blue-accent);
 }
 
 .induction-confidence-value {
-  font-size: 24px;
+  font-size: 32px;
   font-weight: 800;
   line-height: 1.1;
 }
 
 .induction-confidence-value--high {
-  color: #1f9254;
+  color: #3ddc84;
 }
 
 .induction-confidence-value--medium {
-  color: #c2680f;
+  color: #f5a623;
 }
 
 .induction-confidence-value--low {
-  color: #d9362e;
+  color: #ff5c5c;
 }
 
 .induction-confidence-tier {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.03em;
-  padding: 2px 8px;
-  border-radius: 10px;
 }
 
 .induction-confidence-tier--high {
-  background-color: rgba(31, 146, 84, 0.12);
-  color: #1f9254;
+  color: #3ddc84;
 }
 
 .induction-confidence-tier--medium {
-  background-color: rgba(194, 104, 15, 0.12);
-  color: #c2680f;
+  color: #f5a623;
 }
 
 .induction-confidence-tier--low {
-  background-color: rgba(217, 54, 46, 0.12);
-  color: #d9362e;
+  color: #ff5c5c;
 }
 
 /* ---------- Maintenance regimen card ---------- */
@@ -849,74 +860,81 @@ body {
 
 /* ---------- Manual dose override ---------- */
 
-.induction-dose-label--manual {
-  color: var(--blue-accent);
-}
-
-.induction-dose-value--manual {
-  color: #c2680f;
-}
-
 .induction-dose-original-note {
   font-size: 11px;
-  color: var(--text-secondary);
+  color: rgba(255, 255, 255, 0.65);
   margin-top: 6px;
   padding-top: 6px;
-  border-top: 1px solid var(--border-color);
-}
-
-.induction-manual-badge {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: #c2680f;
-  background-color: rgba(194, 104, 15, 0.12);
-  border-radius: 10px;
-  padding: 3px 10px;
-  white-space: nowrap;
-}
-
-.override-return-btn {
-  margin-top: 8px;
-  background: none;
-  border: none;
-  color: var(--blue-accent);
-  font-weight: 600;
-  font-size: 12px;
-  cursor: pointer;
-  text-decoration: underline;
-  padding: 0;
-  text-align: right;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
 }
 
 .induction-infeasible-warning {
   font-size: 12px;
-  color: #c2680f;
-  background-color: rgba(194, 104, 15, 0.08);
-  border-radius: 6px;
+  color: #ffcf99;
+  background-color: rgba(255, 255, 255, 0.08);
+  border-left: 3px solid #f5a623;
+  border-radius: 0 6px 6px 0;
   padding: 6px 10px;
-  margin-top: 10px;
+  margin-top: 14px;
 }
 
 .override-dose-section {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border-color);
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
 }
 
-.override-dose-btn {
-  background: none;
+.induction-buttons-row {
+  display: flex;
+  gap: 10px;
+}
+
+/* Same polished look as .run-recommendation-btn, but smaller and with an
+   icon - blue by default, orange while a manual override is active (the
+   button itself is the "override is active" indicator, no separate badge
+   needed). */
+.induction-edit-btn,
+.induction-return-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 8px;
   border: none;
-  color: var(--blue-accent);
-  font-weight: 600;
-  font-size: 12px;
   cursor: pointer;
-  text-decoration: underline;
-  padding: 0;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.induction-edit-btn {
+  background-color: var(--blue-accent);
+  color: #ffffff;
+}
+
+.induction-edit-btn:hover {
+  background-color: var(--navy-700);
+}
+
+.induction-edit-btn--active {
+  background-color: #f5a623;
+}
+
+.induction-edit-btn--active:hover {
+  background-color: #d4890f;
+}
+
+.induction-return-btn {
+  background-color: #ffffff;
+  color: var(--navy-900);
+}
+
+.induction-return-btn:hover {
+  background-color: #eaf0fe;
 }
 
 .override-dose-section .edit-popover {
-  margin-top: 8px;
+  margin-top: 12px;
   grid-column: unset;
 }
 
@@ -1121,6 +1139,14 @@ body {
 
 .run-recommendation-btn:disabled:hover {
   background-color: var(--blue-accent);
+}
+
+.run-btn-play-icon {
+  margin-right: 8px;
+}
+
+.run-recommendation-btn--loading .run-btn-play-icon {
+  display: none;
 }
 
 .run-btn-spinner {

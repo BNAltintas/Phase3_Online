@@ -378,104 +378,66 @@ def _override_popover(prefill_value):
 
 def make_induction_card(original, manual=None):
     """
-    Build the induction-dose recommendation card.
+    Build the induction-dose recommendation card - a prominent dark card
+    showing the total dose (the manual override's dose when one is active,
+    otherwise the model's own recommendation) alongside the model
+    confidence.
 
-    With no manual override: total dose + weight-adjusted dose on the left,
-    model confidence on the right (unchanged from before manual override
-    existed).
+    Model confidence is computed only for the original (free-bolus)
+    recommendation, never for a manual override (recommend_maintenance_
+    for_fixed_propofol_bolus always sets confidence_skipped=True and never
+    calls simulate_confidence) - so the confidence block always reads from
+    `original`, regardless of whether a manual override is active. This is
+    a display choice, not a calculation change: the number shown was
+    already being computed exactly this way before, only now it always
+    stays visible (with the small "Model recommendation: ..." note below
+    the dose making clear which regimen it refers to) instead of being
+    swapped out for a separate "MANUAL DOSE ACTIVE" badge.
 
-    With a manual override active: the manual dose is shown large/prominent
-    on the left (with the original recommendation noted smaller underneath),
-    and a "MANUAL DOSE ACTIVE" status box + "Return to recommendation"
-    button replace the confidence block on the right - confidence is never
-    computed for the manual dose, so nothing confidence-shaped is shown.
-
-    Both the confidence block and the manual-active block are always
-    rendered (only one is ever visible, via inline display:none) rather
-    than conditionally included - "Return to recommendation" is a callback
-    Input, and Dash logs a console error if a registered callback's Input
-    id is ever absent from the current DOM entirely, so its element must
-    always exist even while inactive.
+    "Return to recommendation" is always rendered (never conditionally
+    excluded), only ever hidden via inline display:none, because it's a
+    callback Input - Dash logs a console error if a registered callback's
+    Input id is ever absent from the current DOM entirely.
     """
-    override_button_label = "Edit manual dose" if manual is not None else "Override propofol dose"
-    prefill_value = manual.propofol_bolus_mg if manual is not None else original.propofol_bolus_mg
     manual_active = manual is not None
+    prefill_value = manual.propofol_bolus_mg if manual_active else original.propofol_bolus_mg
 
     tier = confidence_tier(original.confidence_percent)
     tier_class = tier.lower()
 
-    original_dose_block = html.Div(
-        [
-            html.Div("Total dose", className="induction-dose-label"),
-            html.Div(
-                f"{original.propofol_bolus_mg:.0f} mg",
-                className="induction-dose-value",
-            ),
-            html.Div(
-                f"Weight-adjusted: {original.propofol_bolus_mgkg:.2f} mg/kg",
-                className="induction-dose-subtext",
-            ),
-        ],
-        className="induction-dose-block",
-        style={"display": "none"} if manual_active else None,
-    )
-    manual_dose_block = html.Div(
-        [
-            html.Div(
-                "Manual total dose",
-                className="induction-dose-label induction-dose-label--manual",
-            ),
-            html.Div(
-                f"{manual.propofol_bolus_mg:.0f} mg" if manual_active else "-",
-                className="induction-dose-value induction-dose-value--manual",
-            ),
-            html.Div(
-                f"Weight-adjusted: {manual.propofol_bolus_mgkg:.2f} mg/kg" if manual_active else "-",
-                className="induction-dose-subtext",
-            ),
+    dose_mg = manual.propofol_bolus_mg if manual_active else original.propofol_bolus_mg
+    dose_mgkg = manual.propofol_bolus_mgkg if manual_active else original.propofol_bolus_mgkg
+
+    dose_block_children = [
+        html.Div("TOTAL DOSE", className="induction-dose-label"),
+        html.Div(f"{dose_mg:.0f} mg", className="induction-dose-value"),
+        html.Div(f"Weight-adjusted: {dose_mgkg:.2f} mg/kg", className="induction-dose-subtext"),
+    ]
+    if manual_active:
+        dose_block_children.append(
             html.Div(
                 (
                     f"Model recommendation: {original.propofol_bolus_mg:.0f} mg "
                     f"({original.propofol_bolus_mgkg:.2f} mg/kg)"
                 ),
                 className="induction-dose-original-note",
-            ),
-        ],
-        className="induction-dose-block",
-        style=None if manual_active else {"display": "none"},
-    )
+            )
+        )
+    dose_block = html.Div(dose_block_children, className="induction-dose-block")
 
     confidence_block = html.Div(
         [
-            html.Div("Model confidence", className="induction-confidence-label"),
-            html.Div(
-                f"{original.confidence_percent:.0f}%",
-                className=(
-                    f"induction-confidence-value "
-                    f"induction-confidence-value--{tier_class}"
-                ),
-            ),
+            html.Div("MODEL CONFIDENCE", className="induction-confidence-label"),
             html.Div(
                 f"{tier} CONFIDENCE",
-                className=(
-                    f"induction-confidence-tier "
-                    f"induction-confidence-tier--{tier_class}"
-                ),
+                className=f"induction-confidence-tier induction-confidence-tier--{tier_class}",
+            ),
+            html.Div(
+                f"{original.confidence_percent:.0f}%",
+                className=f"induction-confidence-value induction-confidence-value--{tier_class}",
             ),
         ],
         className="induction-confidence-block",
-        style={"display": "none"} if manual_active else None,
-    )
-    manual_active_block = html.Div(
-        [
-            html.Div("MANUAL DOSE ACTIVE", className="induction-manual-badge"),
-            html.Button(
-                "Return to recommendation", id="override-return-btn", n_clicks=0,
-                className="override-return-btn",
-            ),
-        ],
-        className="induction-confidence-block",
-        style=None if manual_active else {"display": "none"},
     )
 
     infeasible_warning = html.Div(
@@ -488,27 +450,36 @@ def make_induction_card(original, manual=None):
         ),
     )
 
-    card_children = [
-        html.H4("Induction recommendation", className="card-subheading"),
-        html.Div(
-            [original_dose_block, manual_dose_block, confidence_block, manual_active_block],
-            className="induction-card-body",
-        ),
-        infeasible_warning,
-    ]
+    edit_btn_class = "induction-edit-btn"
+    if manual_active:
+        edit_btn_class += " induction-edit-btn--active"
 
-    card_children.append(
-        html.Div(
-            [
-                html.Button(
-                    override_button_label, id="override-dose-btn", n_clicks=0,
-                    className="override-dose-btn",
-                ),
-                _override_popover(prefill_value),
-            ],
-            className="override-dose-section",
-        )
+    buttons_row = html.Div(
+        [
+            html.Button(
+                [html.I(className="fa-solid fa-pen"), "Edit manual dose"],
+                id="override-dose-btn", n_clicks=0,
+                className=edit_btn_class,
+            ),
+            html.Button(
+                [html.I(className="fa-solid fa-rotate-left"), "Return to recommendation"],
+                id="override-return-btn", n_clicks=0,
+                className="induction-return-btn",
+                style=None if manual_active else {"display": "none"},
+            ),
+        ],
+        className="induction-buttons-row",
     )
+
+    card_children = [
+        html.H4("Induction recommendation", className="induction-card-title"),
+        html.Div([dose_block, confidence_block], className="induction-card-body"),
+        infeasible_warning,
+        html.Div(
+            [buttons_row, _override_popover(prefill_value)],
+            className="override-dose-section",
+        ),
+    ]
 
     return html.Div(card_children, className="card induction-card")
 
@@ -2571,11 +2542,25 @@ def handle_override(
     Opening the popover always resets the unit toggle to "Total dose" and
     clears any leftover validation message/border from a previous edit, so
     each edit starts clean regardless of how the last one ended.
+
+    All five Inputs live inside summary-output, which starts out absent
+    and is created in one shot the first time a recommendation renders -
+    so the very first time that happens, every one of these ids goes from
+    "did not exist" to "exists with its initial value" simultaneously.
+    Dash's front-end still resolves ctx.triggered_id to exactly one of
+    them for that event (which one is an implementation detail, not
+    something to rely on), so every branch below also checks the actual
+    n_clicks/n_submit count truthiness - a genuine click/submit is always
+    a non-zero/non-None value, while this simultaneous first-mount event
+    always carries each input's untouched falsy initial value (0 or None).
+    Without this, that first-mount event could be misread as a real click
+    on whichever id happens to "win" and pop the edit popover open
+    immediately after every "Run recommendation".
     """
     triggered = ctx.triggered_id
     clean = ("field-input", "", "field-message")
 
-    if triggered == "override-return-btn":
+    if triggered == "override-return-btn" and return_clicks:
         return "edit-popover", no_update, no_update, no_update, no_update, no_update, None
 
     if not rec_store or rec_store.get("error") or not rec_store.get("context"):
@@ -2583,7 +2568,7 @@ def handle_override(
 
     context = rec_store["context"]
 
-    if triggered == "override-dose-btn":
+    if triggered == "override-dose-btn" and open_clicks:
         prefill = (
             manual_store["dose_mg"]
             if manual_store
@@ -2591,10 +2576,10 @@ def handle_override(
         )
         return ("edit-popover edit-popover--open", prefill, *clean, "total", no_update)
 
-    if triggered == "override-cancel-btn":
+    if triggered == "override-cancel-btn" and cancel_clicks:
         return ("edit-popover", no_update, *clean, no_update, no_update)
 
-    if triggered in ("override-save-btn", "override-dose-draft"):
+    if triggered in ("override-save-btn", "override-dose-draft") and (save_clicks or submit_count):
         weight_kg = float(context["weight"])
         status, _, manual_dose_mg = _validate_override_dose(draft_value, weight_kg, unit or "total")
         if status == "error":
