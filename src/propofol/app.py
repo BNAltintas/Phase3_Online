@@ -1996,6 +1996,52 @@ for _field_id, _original_value, _source_label in EDITABLE_FIELDS:
 
 
 # ============================================================
+# Auto-focus a popover's draft input the moment it opens
+#
+# Every edit popover (every field in EDITABLE_FIELDS, plus the manual-
+# override dose popover) shares the same open/closed marker: its wrapper
+# div's className gains "edit-popover--open". This one clientside function
+# is wired to every such wrapper, so opening any popover always focuses
+# and selects its draft input immediately - no per-field JS, no change to
+# validation/save/cancel/restore logic, which continues to read the same
+# draft value exactly as before.
+# ============================================================
+
+def _register_focus_on_open_callback(popover_id: str, draft_id: str):
+    """
+    Focus and select a popover's draft input as soon as its wrapper gains
+    the "edit-popover--open" class, so the user can start typing (or
+    immediately overwrite the pre-filled value) without a second click.
+    Output goes to an otherwise-unused "data-focus-tick" attribute purely
+    because Dash clientside callbacks require an Output - nothing reads it.
+    """
+    app.clientside_callback(
+        f"""
+        function(popoverClassName) {{
+            if (popoverClassName && popoverClassName.indexOf("edit-popover--open") !== -1) {{
+                setTimeout(function () {{
+                    var el = document.getElementById("{draft_id}");
+                    if (el) {{
+                        el.focus();
+                        el.select();
+                    }}
+                }}, 0);
+            }}
+            return window.dash_clientside.no_update;
+        }}
+        """,
+        Output(f"{popover_id}", "data-focus-tick"),
+        Input(f"{popover_id}", "className"),
+    )
+
+
+for _field_id, _, _ in EDITABLE_FIELDS:
+    _register_focus_on_open_callback(f"{_field_id}-popover", f"{_field_id}-draft")
+
+_register_focus_on_open_callback("override-popover", "override-dose-draft")
+
+
+# ============================================================
 # Stale-recommendation tracking
 #
 # Once a recommendation exists, any *committed* input change (Save/Restore
