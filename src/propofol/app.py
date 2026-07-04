@@ -1547,14 +1547,18 @@ def toggle_graph_visibility(checked_values, current_class_name):
     Input("nav-recommendation-btn", "n_clicks"),
     Input("nav-more-info-btn", "n_clicks"),
     Input("back-to-recommendation-btn", "n_clicks"),
+    Input("learn-more-link-btn", "n_clicks"),
     prevent_initial_call=True,
 )
-def set_active_page(rec_nav_clicks, more_info_nav_clicks, back_clicks):
+def set_active_page(rec_nav_clicks, more_info_nav_clicks, back_clicks, learn_more_clicks):
     """
-    Track which top-level page is active based on which nav/back control was clicked.
+    Track which top-level page is active based on which nav/back control was
+    clicked. learn-more-link-btn (the dashboard's own "Learn more about the
+    model" link) is just a second entry point to the same "more-info" page
+    the sidebar's "More Info" item already switches to.
     """
     triggered = ctx.triggered_id
-    if triggered == "nav-more-info-btn":
+    if triggered in ("nav-more-info-btn", "learn-more-link-btn"):
         return "more-info"
     if triggered in ("nav-recommendation-btn", "back-to-recommendation-btn"):
         return "recommendation"

@@ -53,7 +53,10 @@
       "Bash(node drive_more_info_v2.js)",
       "PowerShell(Get-NetTCPConnection -LocalPort 8087 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8087/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://127.0.0.1:8087/ --max-time 3)",
-      "Bash(./.venv/Scripts/python.exe /tmp/run_server8.py)"
+      "Bash(./.venv/Scripts/python.exe /tmp/run_server8.py)",
+      "Bash(node drive_learn_more_link.js)",
+      "Bash(sed -i \"s/127.0.0.1:808[0-9]/127.0.0.1:8088/\" drive.js drive_states.js drive_override_recheck.js)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8088 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8088/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })"
     ]
   }
 }

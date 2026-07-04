@@ -635,10 +635,28 @@ def build_predictions_column():
     vertically, hidden behind a placeholder card before a recommendation
     exists or while it is stale - see build_recommendation_column's
     docstring and `update_result_visibility` in app.py.
+
+    Its header also carries a "Learn more about the model" link, placed
+    here so it sits in the upper-right of the main dashboard (this is the
+    rightmost column) without needing a separate top bar above the whole
+    3-column layout. Clicking it drives the same active-page-store switch
+    as the sidebar's "More Info" item (see set_active_page in app.py) - it
+    does not reload the page or touch any recommendation/input state.
     """
     return html.Div(
         [
-            html.Div("PREDICTIONS", className="section-label"),
+            html.Div(
+                [
+                    html.Div("PREDICTIONS", className="section-label"),
+                    html.Button(
+                        ["Learn more about the model", html.Span(" ↗", className="learn-more-link-icon")],
+                        id="learn-more-link-btn",
+                        n_clicks=0,
+                        className="learn-more-link",
+                    ),
+                ],
+                className="predictions-header-row",
+            ),
             _placeholder_card(
                 "Predictions will appear after running recommendation.",
                 "predictions-empty-placeholder",

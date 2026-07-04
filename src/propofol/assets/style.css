@@ -469,6 +469,18 @@ body {
   min-width: 300px;
 }
 
+.predictions-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.predictions-header-row .section-label {
+  margin-bottom: 0;
+}
+
 /* Wraps the recommendation column + predictions column (everything
    `run_model` updates). flex-basis: 0% (not "auto") + min-width: 0 keeps
    this column's width based purely on available space, not on its
@@ -816,6 +828,33 @@ body {
 .override-dose-section .edit-popover {
   margin-top: 8px;
   grid-column: unset;
+}
+
+/* Lightweight "Learn more about the model" link in the Predictions column
+   header - deliberately styled as a plain-text link (like
+   .override-dose-btn above) rather than a filled button, so it reads as a
+   secondary wayfinding aid and never competes visually with the
+   recommendation itself. */
+.learn-more-link {
+  background: none;
+  border: none;
+  color: var(--blue-accent);
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: none;
+  padding: 2px 4px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.learn-more-link:hover {
+  text-decoration: underline;
+  background-color: rgba(47, 111, 237, 0.08);
+}
+
+.learn-more-link-icon {
+  font-weight: 700;
 }
 
 .override-unit-toggle {
