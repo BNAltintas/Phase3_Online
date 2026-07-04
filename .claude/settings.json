@@ -99,7 +99,10 @@
       "Bash(node drive_maintenance_redesign.js)",
       "Bash(node drive_maintenance_manual.js)",
       "Bash(sed -i \"s/127.0.0.1:80[0-9][0-9]/127.0.0.1:8096/\" drive.js drive_states.js drive_override_recheck.js drive_graphs.js drive_loading_feedback.js drive_induction_redesign.js)",
-      "PowerShell(Get-NetTCPConnection -LocalPort 8096 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8096/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })"
+      "PowerShell(Get-NetTCPConnection -LocalPort 8096 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8096/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })",
+      "Bash(sed -i \"s/127.0.0.1:80[0-9][0-9]/127.0.0.1:8097/\" drive_induction_redesign.js)",
+      "Bash(sed -i \"s/127.0.0.1:80[0-9][0-9]/127.0.0.1:8097/\" drive.js drive_states.js drive_override_recheck.js drive_graphs.js drive_loading_feedback.js drive_maintenance_redesign.js drive_maintenance_manual.js)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8097 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8097/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })"
     ]
   }
 }

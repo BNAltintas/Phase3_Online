@@ -382,10 +382,10 @@ def _override_popover(prefill_value):
 
 def make_induction_card(original, manual=None):
     """
-    Build the induction-dose recommendation card - a prominent dark card
-    showing the total dose (the manual override's dose when one is active,
-    otherwise the model's own recommendation) alongside the model
-    confidence.
+    Build the induction-dose recommendation card - a white card with a
+    thin blue accent bar across the top, showing the total dose (the
+    manual override's dose when one is active, otherwise the model's own
+    recommendation) side-by-side with the model confidence.
 
     Model confidence is computed only for the original (free-bolus)
     recommendation, never for a manual override (recommend_maintenance_
@@ -393,10 +393,10 @@ def make_induction_card(original, manual=None):
     calls simulate_confidence) - so the confidence block always reads from
     `original`, regardless of whether a manual override is active. This is
     a display choice, not a calculation change: the number shown was
-    already being computed exactly this way before, only now it always
-    stays visible (with the small "Model recommendation: ..." note below
-    the dose making clear which regimen it refers to) instead of being
-    swapped out for a separate "MANUAL DOSE ACTIVE" badge.
+    already being computed exactly this way before, it just always stays
+    visible (with the small "Model recommendation: ..." note below the
+    dose making clear which regimen it refers to) instead of being swapped
+    out for a separate "MANUAL DOSE ACTIVE" badge.
 
     "Return to recommendation" is always rendered (never conditionally
     excluded), only ever hidden via inline display:none, because it's a
@@ -414,8 +414,14 @@ def make_induction_card(original, manual=None):
 
     dose_block_children = [
         html.Div("TOTAL DOSE", className="induction-dose-label"),
-        html.Div(f"{dose_mg:.0f} mg", className="induction-dose-value"),
-        html.Div(f"Weight-adjusted: {dose_mgkg:.2f} mg/kg", className="induction-dose-subtext"),
+        html.Div(
+            [
+                html.Span(f"{dose_mg:.0f}", className="induction-dose-number"),
+                html.Span(" mg", className="induction-dose-unit"),
+            ],
+            className="induction-dose-value",
+        ),
+        html.Div(f"{dose_mgkg:.2f} mg/kg", className="induction-dose-subtext"),
     ]
     if manual_active:
         dose_block_children.append(
@@ -454,6 +460,7 @@ def make_induction_card(original, manual=None):
         ),
     )
 
+    edit_btn_label = "Manual dose active" if manual_active else "Edit manual dose"
     edit_btn_class = "induction-edit-btn"
     if manual_active:
         edit_btn_class += " induction-edit-btn--active"
@@ -461,7 +468,7 @@ def make_induction_card(original, manual=None):
     buttons_row = html.Div(
         [
             html.Button(
-                [html.I(className="fa-solid fa-pen"), "Edit manual dose"],
+                [html.I(className="fa-solid fa-pen"), edit_btn_label],
                 id="override-dose-btn", n_clicks=0,
                 className=edit_btn_class,
             ),
