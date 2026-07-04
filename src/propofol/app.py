@@ -385,18 +385,17 @@ def make_induction_card(original, manual=None):
     Build the induction-dose recommendation card - a white card with a
     thin blue accent bar across the top, showing the total dose (the
     manual override's dose when one is active, otherwise the model's own
-    recommendation) side-by-side with the model confidence.
+    recommendation) side-by-side with either the model confidence (no
+    override) or a "MANUAL DOSE ACTIVE" status box (override active).
 
     Model confidence is computed only for the original (free-bolus)
     recommendation, never for a manual override (recommend_maintenance_
     for_fixed_propofol_bolus always sets confidence_skipped=True and never
-    calls simulate_confidence) - so the confidence block always reads from
-    `original`, regardless of whether a manual override is active. This is
-    a display choice, not a calculation change: the number shown was
-    already being computed exactly this way before, it just always stays
-    visible (with the small "Model recommendation: ..." note below the
-    dose making clear which regimen it refers to) instead of being swapped
-    out for a separate "MANUAL DOSE ACTIVE" badge.
+    calls simulate_confidence) - so while a manual override is active,
+    there is nothing confidence-shaped to show, and the right-hand column
+    shows the status box instead. This is a display choice, not a
+    calculation change: confidence_percent is still computed exactly the
+    same way as before, only its visibility changed.
 
     "Return to recommendation" is always rendered (never conditionally
     excluded), only ever hidden via inline display:none, because it's a
@@ -406,14 +405,16 @@ def make_induction_card(original, manual=None):
     manual_active = manual is not None
     prefill_value = manual.propofol_bolus_mg if manual_active else original.propofol_bolus_mg
 
-    tier = confidence_tier(original.confidence_percent)
-    tier_class = tier.lower()
-
     dose_mg = manual.propofol_bolus_mg if manual_active else original.propofol_bolus_mg
     dose_mgkg = manual.propofol_bolus_mgkg if manual_active else original.propofol_bolus_mgkg
 
+    dose_label_text = "MANUAL TOTAL DOSE" if manual_active else "TOTAL DOSE"
+    dose_label_class = "induction-dose-label"
+    if manual_active:
+        dose_label_class += " induction-dose-label--manual"
+
     dose_block_children = [
-        html.Div("TOTAL DOSE", className="induction-dose-label"),
+        html.Div(dose_label_text, className=dose_label_class),
         html.Div(
             [
                 html.Span(f"{dose_mg:.0f}", className="induction-dose-number"),
@@ -435,32 +436,27 @@ def make_induction_card(original, manual=None):
         )
     dose_block = html.Div(dose_block_children, className="induction-dose-block")
 
-    confidence_block = html.Div(
-        [
-            html.Div("MODEL CONFIDENCE", className="induction-confidence-label"),
-            html.Div(
-                f"{tier} CONFIDENCE",
-                className=f"induction-confidence-tier induction-confidence-tier--{tier_class}",
-            ),
-            html.Div(
-                f"{original.confidence_percent:.0f}%",
-                className=f"induction-confidence-value induction-confidence-value--{tier_class}",
-            ),
-        ],
-        className="induction-confidence-block",
-    )
+    if manual_active:
+        right_block = html.Div("MANUAL DOSE ACTIVE", className="induction-manual-active-box")
+    else:
+        tier = confidence_tier(original.confidence_percent)
+        tier_class = tier.lower()
+        right_block = html.Div(
+            [
+                html.Div("MODEL CONFIDENCE", className="induction-confidence-label"),
+                html.Div(
+                    f"{tier} CONFIDENCE",
+                    className=f"induction-confidence-tier induction-confidence-tier--{tier_class}",
+                ),
+                html.Div(
+                    f"{original.confidence_percent:.0f}%",
+                    className=f"induction-confidence-value induction-confidence-value--{tier_class}",
+                ),
+            ],
+            className="induction-confidence-block",
+        )
 
-    infeasible_warning = html.Div(
-        "⚠ This manual dose may not fully reach the target BIS/MAP range.",
-        className="induction-infeasible-warning",
-        style=(
-            None
-            if (manual_active and not (manual.feasible_bis and manual.feasible_map))
-            else {"display": "none"}
-        ),
-    )
-
-    edit_btn_label = "Manual dose active" if manual_active else "Edit manual dose"
+    edit_btn_label = "Edit dose" if manual_active else "Edit manual dose"
     edit_btn_class = "induction-edit-btn"
     if manual_active:
         edit_btn_class += " induction-edit-btn--active"
@@ -484,8 +480,7 @@ def make_induction_card(original, manual=None):
 
     card_children = [
         html.H4("Induction recommendation", className="induction-card-title"),
-        html.Div([dose_block, confidence_block], className="induction-card-body"),
-        infeasible_warning,
+        html.Div([dose_block, right_block], className="induction-card-body"),
         html.Div(
             [buttons_row, _override_popover(prefill_value)],
             className="override-dose-section",
@@ -495,42 +490,46 @@ def make_induction_card(original, manual=None):
     return html.Div(card_children, className="card induction-card")
 
 
-def _maintenance_section(rec, label: str | None = None, manual: bool = False):
+def _maintenance_section(rec, re_optimized=False):
     """
     Build one drug-schedule section (propofol + optional remifentanil) for
-    the maintenance card, optionally preceded by a scenario label
-    ("Original recommendation" / "Manual dose (re-optimized)"). Each drug
-    gets a colored bar-style header (Propofol in the app's blue accent,
-    Remifentanil in the same purple family as the patient-id icon - never
-    orange, which this app reserves for warnings/manual-override accents),
-    with a dashed divider separating the two when both are present.
+    the maintenance card. Each drug gets a colored bar-style header
+    (Propofol in the app's blue accent, Remifentanil in the same purple
+    family as the patient-id icon - never orange, which this app reserves
+    for warnings/manual-override accents), with a dashed divider
+    separating the two when both are present. When re_optimized is True
+    (i.e. a manual dose override is active), a small orange "Re-optimized"
+    badge is appended next to each drug header.
     """
-    children = []
-    if label is not None:
-        label_class = "maintenance-scenario-label"
-        if manual:
-            label_class += " maintenance-scenario-label--manual"
-        children.append(html.Div(label, className=label_class))
+    propofol_header_children = ["Propofol"]
+    if re_optimized:
+        propofol_header_children.append(
+            html.Span("Re-optimized", className="maintenance-reoptimized-badge")
+        )
 
-    table_class = "maintenance-table maintenance-table--manual" if manual else "maintenance-table"
-
-    children.append(
-        html.Div("Propofol", className="maintenance-drug-header maintenance-drug-header--propofol"),
-    )
+    children = [
+        html.Div(propofol_header_children, className="maintenance-drug-header maintenance-drug-header--propofol"),
+    ]
     prop_cells = _maintenance_rows(
         rec.propofol_inf_rates_ml_h, rec.propofol_inf_rates_mcgkgmin, "µg/kg/min",
     )
     children.append(
-        html.Div(prop_cells, className=table_class)
+        html.Div(prop_cells, className="maintenance-table")
         if prop_cells
         else html.Div("No maintenance", className="maintenance-empty")
     )
 
     if rec.remifentanil_selected:
+        remi_header_children = ["Remifentanil"]
+        if re_optimized:
+            remi_header_children.append(
+                html.Span("Re-optimized", className="maintenance-reoptimized-badge")
+            )
+
         children.append(html.Div(className="maintenance-divider"))
         children.append(
             html.Div(
-                "Remifentanil",
+                remi_header_children,
                 className="maintenance-drug-header maintenance-drug-header--remifentanil",
             ),
         )
@@ -538,7 +537,7 @@ def _maintenance_section(rec, label: str | None = None, manual: bool = False):
             rec.remifentanil_inf_rates_ml_h, rec.remifentanil_inf_rates_ngkgmin, "ng/kg/min",
         )
         children.append(
-            html.Div(remi_cells, className=table_class)
+            html.Div(remi_cells, className="maintenance-table")
             if remi_cells
             else html.Div("No maintenance", className="maintenance-empty")
         )
@@ -548,12 +547,17 @@ def _maintenance_section(rec, label: str | None = None, manual: bool = False):
 
 def make_maintenance_card(original, manual=None):
     """
-    Build the maintenance-regimen card. With no manual override, this is
-    just the original recommendation's schedule (unchanged from before
-    manual override existed). With a manual override active, the original
-    schedule remains visible (labeled, de-emphasized) with the manually
-    re-optimized schedule shown below it.
+    Build the maintenance-regimen card, showing whichever regimen is
+    currently active - the manual override's re-optimized schedule when
+    one is active, otherwise the model's own recommendation. Only ever one
+    regimen at a time (never original + manual side by side), so the card
+    always reflects exactly the dose currently in effect; returning to the
+    recommendation (manual=None) reverts this back to the original
+    schedule automatically, the same way make_induction_card's dose block
+    reverts.
     """
+    active_rec = manual if manual is not None else original
+
     children = [
         html.Div(
             [
@@ -563,14 +567,7 @@ def make_maintenance_card(original, manual=None):
             className="maintenance-card-title-row",
         ),
     ]
-
-    if manual is None:
-        children.extend(_maintenance_section(original))
-    else:
-        children.extend(_maintenance_section(original, label="Original recommendation"))
-        children.extend(
-            _maintenance_section(manual, label="Manual dose (re-optimized)", manual=True),
-        )
+    children.extend(_maintenance_section(active_rec, re_optimized=(manual is not None)))
 
     return html.Div(children, className="card maintenance-card")
 

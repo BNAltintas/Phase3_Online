@@ -726,6 +726,10 @@ body {
   color: var(--blue-accent);
 }
 
+.induction-dose-label--manual {
+  color: #c2680f;
+}
+
 .induction-dose-value {
   display: flex;
   align-items: baseline;
@@ -747,9 +751,10 @@ body {
 }
 
 .induction-dose-subtext {
-  font-size: 13px;
-  color: var(--text-primary);
-  margin-top: 2px;
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--navy-900);
+  margin-top: 4px;
 }
 
 .induction-confidence-block {
@@ -812,6 +817,24 @@ body {
   color: #d9362e;
 }
 
+.induction-manual-active-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 50%;
+  align-self: stretch;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #c2680f;
+  background-color: rgba(194, 104, 15, 0.08);
+  border: 1.5px solid #c2680f;
+  border-radius: 10px;
+  padding: 12px 16px;
+}
+
 /* ---------- Maintenance regimen card ---------- */
 
 .maintenance-card-title-row {
@@ -840,6 +863,9 @@ body {
    two drugs are visually distinct without reaching for orange, which this
    app reserves for warnings/manual-override accents. */
 .maintenance-drug-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 13px;
   font-weight: 700;
   border-left: 3px solid;
@@ -856,6 +882,17 @@ body {
 .maintenance-drug-header--remifentanil {
   border-color: #6b46c1;
   color: #6b46c1;
+}
+
+.maintenance-reoptimized-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #c2680f;
+  background-color: rgba(194, 104, 15, 0.12);
+  border-radius: 10px;
+  padding: 2px 8px;
 }
 
 .maintenance-divider {
@@ -912,51 +949,15 @@ body {
   color: var(--text-secondary);
 }
 
-/* Scenario labels + de-emphasized/secondary styling shown only while a
-   manual override is active, so the original recommendation stays visible
-   but reads as secondary next to the manual scenario. */
-
-.maintenance-scenario-label {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-  margin: 14px 0 8px 0;
-}
-
-.maintenance-scenario-label--manual {
-  color: var(--blue-accent);
-}
-
-.maintenance-table--manual .maintenance-interval,
-.maintenance-table--manual .maintenance-arrow,
-.maintenance-table--manual .maintenance-rate {
-  color: var(--text-primary);
-}
-
-.maintenance-table--manual .maintenance-rate {
-  font-weight: 700;
-}
-
 /* ---------- Manual dose override ---------- */
 
 .induction-dose-original-note {
-  font-size: 11px;
-  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f9254;
   margin-top: 6px;
   padding-top: 6px;
   border-top: 1px solid var(--border-color);
-}
-
-.induction-infeasible-warning {
-  font-size: 12px;
-  color: #c2680f;
-  background-color: rgba(194, 104, 15, 0.08);
-  border-left: 3px solid #c2680f;
-  border-radius: 0 6px 6px 0;
-  padding: 6px 10px;
-  margin-top: 14px;
 }
 
 .override-dose-section {
