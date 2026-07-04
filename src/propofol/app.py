@@ -1585,50 +1585,57 @@ def render_active_page(active_page):
 
 
 # ============================================================
-# "More Info" accordion (single section open at a time)
+# "More Info" accordion (multi-expand: any number of sections open at once)
 # ============================================================
 
 @app.callback(
-    Output("more-info-open-section", "data"),
+    Output("more-info-open-sections", "data"),
     Input({"type": "more-info-accordion-header", "section": ALL}, "n_clicks"),
-    State("more-info-open-section", "data"),
+    State("more-info-open-sections", "data"),
     prevent_initial_call=True,
 )
-def set_open_more_info_section(_all_n_clicks, current_open):
+def set_open_more_info_section(_all_n_clicks, current_open_sections):
     """
-    Track which section is open. Clicking the already-open section's
-    header closes it; clicking any other section's header opens it (and
-    implicitly closes whichever was open, since only one id is ever stored).
+    Toggle only the clicked section's own membership in the open-sections
+    list - opening one section never closes any other, so any number of
+    sections can be open at the same time.
     """
     triggered = ctx.triggered_id
     if triggered is None:
         return no_update
 
     clicked_section = triggered["section"]
-    return None if clicked_section == current_open else clicked_section
+    open_sections = list(current_open_sections or [])
+    if clicked_section in open_sections:
+        open_sections.remove(clicked_section)
+    else:
+        open_sections.append(clicked_section)
+    return open_sections
 
 
 @app.callback(
     Output({"type": "more-info-accordion-body", "section": ALL}, "className"),
     Output({"type": "more-info-accordion-chevron", "section": ALL}, "className"),
-    Input("more-info-open-section", "data"),
+    Input("more-info-open-sections", "data"),
     State({"type": "more-info-accordion-body", "section": ALL}, "id"),
     State({"type": "more-info-accordion-chevron", "section": ALL}, "id"),
 )
-def render_more_info_accordion(open_section, body_ids, chevron_ids):
+def render_more_info_accordion(open_sections, body_ids, chevron_ids):
     """
     Render the open/collapsed state for every section from a single source
-    of truth (more-info-open-section), so exactly one body is ever
-    expanded. Each body/chevron's own pattern-matching id already carries
-    its section, so no cross-referencing between the two is needed.
+    of truth (more-info-open-sections, a list of open ids) - any section
+    whose id is in the list is expanded, independently of the others. Each
+    body/chevron's own pattern-matching id already carries its section, so
+    no cross-referencing between the two is needed.
     """
+    open_sections = open_sections or []
     body_classes = [
-        "accordion-body" if body_id["section"] == open_section
+        "accordion-body" if body_id["section"] in open_sections
         else "accordion-body accordion-body--collapsed"
         for body_id in body_ids
     ]
     chevron_classes = [
-        "accordion-chevron accordion-chevron--open" if chevron_id["section"] == open_section
+        "accordion-chevron accordion-chevron--open" if chevron_id["section"] in open_sections
         else "accordion-chevron"
         for chevron_id in chevron_ids
     ]

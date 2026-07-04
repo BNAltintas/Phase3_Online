@@ -849,7 +849,7 @@ body {
 }
 
 .more-info-content {
-  max-width: 720px;
+  max-width: 760px;
   margin: 0 auto;
 }
 
@@ -873,15 +873,15 @@ body {
 }
 
 .more-info-subtitle {
-  font-size: 13px;
-  color: var(--text-secondary);
-  margin: 0 0 20px;
+  font-size: 14px;
+  color: var(--text-primary);
+  margin: 0 0 22px;
 }
 
 .accordion {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
 .accordion-section {
@@ -895,18 +895,18 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 14px 16px;
+  padding: 16px 20px;
   cursor: pointer;
 }
 
 .accordion-title {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--navy-900);
 }
 
 .accordion-chevron {
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 700;
   color: var(--text-secondary);
   transition: transform 0.15s ease;
@@ -918,7 +918,7 @@ body {
 }
 
 .accordion-body {
-  padding: 0 16px 16px;
+  padding: 0 20px 20px;
   border-top: 1px solid var(--border-color);
 }
 
@@ -926,23 +926,42 @@ body {
   display: none;
 }
 
+/* Darker (near-black) body text and looser spacing for comfortable reading
+   during a clinical review - the previous gray (--text-secondary) and
+   tighter spacing read as low-contrast and dense. */
 .accordion-body-text {
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--text-secondary);
-  padding-top: 14px;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  padding-top: 16px;
 }
 
 .accordion-body-text p {
-  margin: 0 0 10px;
+  margin: 0 0 14px;
 }
 
 .accordion-body-text ul,
 .accordion-body-text ol {
-  margin: 0 0 10px;
-  padding-left: 20px;
+  margin: 0 0 14px;
+  padding-left: 22px;
 }
 
 .accordion-body-text li {
-  margin-bottom: 4px;
+  margin-bottom: 7px;
+}
+
+/* Inline "Important" callout within a section body (a Markdown blockquote,
+   e.g. the BIS/MAP priority note) - visually distinct from regular
+   paragraphs so it isn't skimmed past like the rest of the text. */
+.accordion-body-text blockquote {
+  margin: 4px 0 14px;
+  padding: 12px 16px;
+  background-color: rgba(47, 111, 237, 0.08);
+  border-left: 3px solid var(--blue-accent);
+  border-radius: 0 6px 6px 0;
+  color: var(--text-primary);
+}
+
+.accordion-body-text blockquote p {
+  margin: 0;
 }

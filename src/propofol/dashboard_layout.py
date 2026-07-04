@@ -417,8 +417,8 @@ def _accordion_section(section_id: str, title: str, body_markdown: str, is_open:
 
     Only styling/visibility (className) is data-driven from `is_open` here
     and by `render_more_info_accordion` in app.py afterwards - the
-    single-open-at-a-time behavior is entirely presentational and never
-    touches MORE_INFO_SECTIONS' content.
+    multi-expand open/collapse behavior is entirely presentational and
+    never touches MORE_INFO_SECTIONS' content.
     """
     chevron_class = "accordion-chevron accordion-chevron--open" if is_open else "accordion-chevron"
     body_class = "accordion-body" if is_open else "accordion-body accordion-body--collapsed"
@@ -451,9 +451,14 @@ def _accordion_section(section_id: str, title: str, body_markdown: str, is_open:
 def build_more_info_view():
     """
     Build the "More Info" page: a "Back to recommendation" button, a
-    centered title/subtitle, and an accordion of explanatory sections
-    (content defined in more_info_content.py, not here). The first section
-    starts open, matching the reference design.
+    centered title/subtitle, and a multi-expand accordion of explanatory
+    sections (content defined in more_info_content.py, not here).
+
+    The accordion supports any number of sections open at once - each
+    header toggles only its own section's membership in
+    more-info-open-sections (a list of open ids), so opening one section
+    never closes another. The first section starts open, matching the
+    reference design.
     """
     sections = [
         _accordion_section(
@@ -466,9 +471,9 @@ def build_more_info_view():
     return html.Div(
         html.Div(
             [
-                # Which section id is open ("" for none) - the first section
+                # List of currently-open section ids - the first section
                 # starts open, matching the sections' own is_open above.
-                dcc.Store(id="more-info-open-section", data=MORE_INFO_SECTIONS[0]["id"]),
+                dcc.Store(id="more-info-open-sections", data=[MORE_INFO_SECTIONS[0]["id"]]),
                 html.Button(
                     "← Back to recommendation",
                     id="back-to-recommendation-btn",

@@ -3,9 +3,10 @@ Text content for the "More Info" page.
 
 Kept separate from the layout/rendering code (dashboard_layout.py) so the
 wording can be edited here without touching how the accordion is built or
-styled. Each section's body is Markdown (rendered via dcc.Markdown), which
-is the only formatting layer applied to the provided text - paragraph
-breaks and bullet/numbered lists render as-is, no wording was added.
+styled. Each section's body is Markdown (rendered via dcc.Markdown) -
+paragraphs and bullet/numbered lists render as-is; a leading "> " line
+renders as a highlighted callout box (see .accordion-body-text blockquote
+in style.css), used here for the BIS/MAP priority note.
 """
 
 MORE_INFO_TITLE = "Learn more about the model"
@@ -19,35 +20,49 @@ MORE_INFO_SECTIONS = [
         "id": "what-does-this-tool-do",
         "title": "What does this tool do?",
         "body": """
-This tool uses a pharmacokinetic–pharmacodynamic model to estimate an optimal patient-specific propofol induction and early maintenance regimen for the first 15 minutes.
+DosePilot estimates a patient-specific propofol induction dose and early maintenance regimen for the first 15 minutes of anaesthesia.
 
-The model combines patient characteristics with predicted propofol concentrations, depth of anaesthesia, and haemodynamic response.
+The recommendation is generated to achieve two clinical targets at the same time:
 
-The recommended dose is selected by balancing two clinical goals:
-
-- achieving an adequate hypnotic effect, expressed as a predicted BIS between 40 and 60
-- avoiding clinically relevant hypotension, expressed as a predicted MAP below the predefined safety threshold. With this threshold, a MAP below 65 mmHg and a MAP decrease of more than 30% from baseline are both avoided.
-
-For each candidate dose, the model predicts:
-
-- the propofol plasma and effect-site concentration over time
-- the expected BIS response over time
-- the expected MAP response over time
-
-The tool then assigns penalties when the predicted response deviates from the target, with the following priorities:
-
-1. Predicted BIS is above 60
-2. Predicted BIS is below 40
-3. Predicted MAP falls below the MAP safety threshold
+- an adequate hypnotic effect, reflected by a predicted BIS between 40 and 60
+- stable blood pressure, reflected by a predicted MAP that stays above a safety threshold
 """,
     },
     {
-        "id": "what-does-confidence-mean",
-        "title": "What does the confidence mean?",
+        "id": "how-are-bis-map-predicted",
+        "title": "How are BIS and MAP predicted?",
         "body": """
-To account for uncertainty in individual patient response, the model repeats the simulation 100 times for the recommended dose.
+BIS (depth of anaesthesia) is predicted from the simulated propofol concentration at the site of drug effect, using a validated pharmacodynamic model.
 
-The confidence estimate indicates how often the predefined treatment targets are met with the given dose when the simulation is repeated.
+MAP (blood pressure) is predicted using a haemodynamic model that accounts for the cardiovascular effects of propofol and, when used, remifentanil.
+
+Both predictions come from the same patient-specific simulation, so the BIS and MAP graphs you see always describe the same simulated patient response.
+""",
+    },
+    {
+        "id": "how-does-model-choose-dose",
+        "title": "How does the model choose the recommended dose?",
+        "body": """
+The model simulates many candidate doses and dosing schedules for the individual patient, and predicts the resulting BIS and MAP response for each one.
+
+The recommended dose is the candidate that best meets the following clinical priorities, in order:
+
+1. Avoid BIS rising above 60
+2. Avoid BIS falling below 40
+3. Avoid MAP falling below the safety threshold
+
+Only once all three are satisfied does the model use secondary preferences to choose between remaining options - such as keeping BIS closer to the centre of the target range, using less drug overall, or a smoother dosing schedule.
+
+> **Important:** When BIS and MAP targets conflict, the model prioritizes achieving the BIS target before optimizing MAP.
+""",
+    },
+    {
+        "id": "confidence",
+        "title": "Confidence",
+        "body": """
+To reflect natural variability between patients, the model repeats its simulation 100 times for the recommended dose.
+
+The confidence score shows how often the BIS and MAP targets were both met across these simulations. A higher confidence means the recommended dose is more consistently effective across likely variation in patient response.
 """,
     },
 ]
