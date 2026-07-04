@@ -70,6 +70,21 @@ def param_table_header(show_date: bool = True):
     return header
 
 
+def param_subsection_label(text: str, first: bool = False):
+    """
+    Build a full-width subsection label row (e.g. "Concentrations", "Target
+    BIS") for use inside a single shared `.param-table`, so several groups
+    of fields can share one PARAMETER/VALUE/SOURCE header instead of each
+    repeating it. `first=True` (the group directly under the header row)
+    omits the top border/margin the other groups use to separate
+    themselves from the group above.
+    """
+    class_name = "param-subsection-label"
+    if first:
+        class_name += " param-subsection-label--first"
+    return html.Div(text, className=class_name)
+
+
 def editable_field_row(
     label: str,
     field_id: str,
@@ -250,7 +265,17 @@ def _placeholder_card(text: str, card_id: str, stale: bool = False, hidden: bool
 
 def build_patient_parameters_card():
     """
-    Build the card containing patient, baseline vitals, and derived value inputs.
+    Build the card containing patient, baseline vitals, and derived value
+    inputs.
+
+    Patient parameters and Baseline vitals share a single
+    PARAMETER/VALUE/SOURCE/DATE-TIME table instead of each repeating that
+    header - param_subsection_label() rows mark where each group starts
+    within the one shared `.param-table` grid, mirroring the Model
+    Settings card's layout. Derived values (MAP, Baseline PP) are
+    calculated, read-only figures with no Source/Date-Time of their own,
+    so they keep their existing simpler label/value layout rather than
+    joining the grid.
     """
     return html.Div(
         [
@@ -258,6 +283,7 @@ def build_patient_parameters_card():
             html.Div(
                 [
                     *param_table_header(),
+                    param_subsection_label("Patient parameters", first=True),
                     *editable_field_row(
                         "Age (years)", "age", 35, 35, min_value=0, step=1,
                     ),
@@ -286,13 +312,7 @@ def build_patient_parameters_card():
                         timestamp_display(EHR_RECORD_DATE, EHR_RECORD_TIME),
                         className="param-date",
                     ),
-                ],
-                className="param-table",
-            ),
-            html.H4("Baseline vitals", className="card-subheading"),
-            html.Div(
-                [
-                    *param_table_header(),
+                    param_subsection_label("Baseline vitals"),
                     *editable_field_row(
                         "SBP (mmHg)", "baseline_sap", 120, 120, min_value=30, step=0.1,
                         source_label="Monitor",
@@ -327,7 +347,14 @@ def build_patient_parameters_card():
 
 def build_model_settings_card():
     """
-    Build the card containing opiate/concentration selection and read-only model targets.
+    Build the card containing opiate/concentration selection and read-only
+    model targets.
+
+    Concentrations, Target BIS, and Target MAP all share a single
+    PARAMETER/VALUE/SOURCE table instead of each repeating that header -
+    param_subsection_label() rows (spanning the full grid width, see
+    .param-subsection-label in style.css) mark where each group starts
+    within the one shared `.param-table` grid.
     """
     return html.Div(
         [
@@ -356,10 +383,10 @@ def build_model_settings_card():
                     style=DROPDOWN_STYLE,
                 ),
             ),
-            html.H4("Concentrations", className="card-subheading"),
             html.Div(
                 [
                     *param_table_header(show_date=False),
+                    param_subsection_label("Concentrations", first=True),
                     *editable_field_row(
                         "Propofol (mg/mL)", "propofol-concentration",
                         DEFAULT_PROPOFOL_CONC_MG_ML, DEFAULT_PROPOFOL_CONC_MG_ML,
@@ -370,13 +397,7 @@ def build_model_settings_card():
                         DEFAULT_REMI_CONC_MCG_ML, DEFAULT_REMI_CONC_MCG_ML,
                         min_value=0.1, step=0.1, source_label="Default", show_date=False,
                     ),
-                ],
-                className="param-table param-table--no-date",
-            ),
-            html.H4("Target BIS", className="card-subheading"),
-            html.Div(
-                [
-                    *param_table_header(show_date=False),
+                    param_subsection_label("Target BIS"),
                     *editable_field_row(
                         "Lower", "bis-target-low", TARGET_BIS_LOW, TARGET_BIS_LOW,
                         min_value=0, step=1, source_label="Default", show_date=False,
@@ -385,13 +406,7 @@ def build_model_settings_card():
                         "Upper", "bis-target-high", TARGET_BIS_HIGH, TARGET_BIS_HIGH,
                         min_value=0, step=1, source_label="Default", show_date=False,
                     ),
-                ],
-                className="param-table param-table--no-date",
-            ),
-            html.H4("Target MAP", className="card-subheading"),
-            html.Div(
-                [
-                    *param_table_header(show_date=False),
+                    param_subsection_label("Target MAP"),
                     *editable_field_row(
                         "Absolute (mmHg)", "map-target-abs",
                         MAP_ABS_MIN_TARGET, MAP_ABS_MIN_TARGET,
@@ -496,9 +511,12 @@ def build_sidebar():
     """
     Build the left navigation sidebar.
 
-    "Recommendation" and "More Info" switch between the two pages;
+    "Recommendation" and "Model Info" switch between the two pages;
     "Scenario Exploration" is still a placeholder for a page that does not
-    exist yet.
+    exist yet. Each item's icon is purely presentational (a Font Awesome
+    glyph + the existing label text) - none of the ids, n_clicks, or
+    className-driven active/disabled styling changed, so navigation and
+    active-page highlighting work exactly as before.
     """
     return html.Div(
         [
@@ -506,17 +524,26 @@ def build_sidebar():
             html.Div(
                 [
                     html.Div(
-                        "Recommendation",
+                        [
+                            html.I(className="fa-solid fa-syringe sidebar-nav-icon"),
+                            "Recommendation",
+                        ],
                         id="nav-recommendation-btn",
                         n_clicks=0,
                         className="sidebar-nav-item sidebar-nav-item--active",
                     ),
                     html.Div(
-                        "Scenario Exploration",
+                        [
+                            html.I(className="fa-solid fa-chart-line sidebar-nav-icon"),
+                            "Scenario Exploration",
+                        ],
                         className="sidebar-nav-item sidebar-nav-item--disabled",
                     ),
                     html.Div(
-                        "More Info",
+                        [
+                            html.I(className="fa-solid fa-circle-info sidebar-nav-icon"),
+                            "Model Info",
+                        ],
                         id="nav-more-info-btn",
                         n_clicks=0,
                         className="sidebar-nav-item",

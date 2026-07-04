@@ -59,7 +59,19 @@
       "PowerShell(Get-NetTCPConnection -LocalPort 8088 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8088/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })",
       "Bash(node drive_autofocus.js)",
       "Bash(sed -i \"s/127.0.0.1:808[0-9]/127.0.0.1:8089/\" drive.js drive_states.js drive_override_recheck.js)",
-      "PowerShell(Get-NetTCPConnection -LocalPort 8089 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8089/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })"
+      "PowerShell(Get-NetTCPConnection -LocalPort 8089 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8089/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })",
+      "Bash(node drive_model_settings.js)",
+      "Bash(node drive_model_settings2.js)",
+      "Bash(sed -i \"s/127.0.0.1:808[0-9]/127.0.0.1:8090/;s/127.0.0.1:809[0-9]/127.0.0.1:8090/\" drive.js drive_states.js drive_override_recheck.js)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8090 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8090/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })",
+      "Bash(node drive_patient_params.js)",
+      "Bash(sed -i \"s/127.0.0.1:809[0-9]/127.0.0.1:8091/\" drive.js drive_states.js drive_override_recheck.js)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8091 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8091/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })",
+      "Bash(grep -rli \"font-awesome\\\\|fontawesome\\\\|fa-solid\\\\|fa-regular\\\\|cdnjs\" src/ pyproject.toml requirements.txt)",
+      "Bash(find src/propofol/assets -type f)",
+      "Bash(node drive_sidebar_icons.js)",
+      "Bash(sed -i \"s/127.0.0.1:809[0-9]/127.0.0.1:8092/\" drive.js drive_states.js drive_override_recheck.js drive_graphs.js)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8092 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8092/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })"
     ]
   }
 }

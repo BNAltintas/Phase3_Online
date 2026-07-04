@@ -193,6 +193,25 @@ input[type=number] {
   grid-template-columns: auto 62px 54px;
 }
 
+/* Full-width subsection heading row (e.g. "Concentrations", "Target BIS")
+   inside a shared .param-table, so several field groups can sit under one
+   PARAMETER/VALUE/SOURCE header instead of each repeating it. */
+.param-subsection-label {
+  grid-column: 1 / -1;
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--text-primary);
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-color);
+}
+
+.param-subsection-label--first {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
 .param-table-header {
   font-size: 9px;
   font-weight: 700;
@@ -385,8 +404,8 @@ body {
 }
 
 .sidebar {
-  width: 190px;
-  flex: 0 0 190px;
+  width: 210px;
+  flex: 0 0 210px;
   background-color: var(--bg-card);
   border-right: 1px solid var(--border-color);
   display: flex;
@@ -409,6 +428,9 @@ body {
 }
 
 .sidebar-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 8px 10px;
   border-radius: 7px;
   font-weight: 600;
@@ -425,6 +447,23 @@ body {
 .sidebar-nav-item--disabled {
   color: #b5b9c5;
   cursor: default;
+}
+
+/* Fixed width keeps every label's text starting at the same x-position
+   regardless of each Font Awesome glyph's natural width. Blue accent gives
+   the icons a consistent, on-brand identity independent of the label's
+   own active/inactive text color; the disabled item's icon is muted to
+   match its greyed-out label instead. */
+.sidebar-nav-icon {
+  width: 16px;
+  flex: 0 0 auto;
+  text-align: center;
+  font-size: 13px;
+  color: var(--blue-accent);
+}
+
+.sidebar-nav-item--disabled .sidebar-nav-icon {
+  color: #b5b9c5;
 }
 
 .main-content {

@@ -37,7 +37,13 @@ from propofol.recommend_regimen2023 import (
 # App setup
 # ============================================================
 
-app = dash.Dash(__name__)
+# Font Awesome isn't a project dependency (no pip package, no local asset) -
+# this is the standard, lowest-friction way to get real FA glyphs (not
+# emoji) into a Dash app's sidebar icons: one CDN stylesheet, no new
+# Python dependency.
+FONT_AWESOME_CDN = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
+
+app = dash.Dash(__name__, external_stylesheets=[FONT_AWESOME_CDN])
 app.title = "Su2023 Propofol Dashboard"
 app.layout = build_layout()
 
