@@ -71,7 +71,12 @@
       "Bash(find src/propofol/assets -type f)",
       "Bash(node drive_sidebar_icons.js)",
       "Bash(sed -i \"s/127.0.0.1:809[0-9]/127.0.0.1:8092/\" drive.js drive_states.js drive_override_recheck.js drive_graphs.js)",
-      "PowerShell(Get-NetTCPConnection -LocalPort 8092 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8092/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })"
+      "PowerShell(Get-NetTCPConnection -LocalPort 8092 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8092/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })",
+      "Bash(node drive_input_restyle.js)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8093 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; \"stopped\")",
+      "Bash(./.venv/Scripts/python.exe /tmp/run_server14.py)",
+      "Bash(sed -i \"s/127.0.0.1:80[0-9][0-9]/127.0.0.1:8093/\" drive.js drive_states.js drive_override_recheck.js drive_graphs.js drive_sidebar_icons.js drive_autofocus.js)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8093 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { Invoke-WebRequest -Uri http://127.0.0.1:8093/ -TimeoutSec 3 -UseBasicParsing | Out-Null; \"still up\" } catch { \"server down\" })"
     ]
   }
 }

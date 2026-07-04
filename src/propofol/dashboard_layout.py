@@ -270,12 +270,14 @@ def build_patient_parameters_card():
 
     Patient parameters and Baseline vitals share a single
     PARAMETER/VALUE/SOURCE/DATE-TIME table instead of each repeating that
-    header - param_subsection_label() rows mark where each group starts
-    within the one shared `.param-table` grid, mirroring the Model
-    Settings card's layout. Derived values (MAP, Baseline PP) are
-    calculated, read-only figures with no Source/Date-Time of their own,
-    so they keep their existing simpler label/value layout rather than
-    joining the grid.
+    header. The Age/Height/Weight/Sex rows sit directly under the header
+    (no subsection label - "Patient parameters" is already the card's own
+    title just above), and a single param_subsection_label("Baseline
+    vitals") row marks where that second group starts within the same
+    shared `.param-table` grid, mirroring the Model Settings card's
+    layout. Derived values (MAP, Baseline PP) are calculated, read-only
+    figures with no Source/Date-Time of their own, so they keep their
+    existing simpler label/value layout rather than joining the grid.
     """
     return html.Div(
         [
@@ -283,7 +285,6 @@ def build_patient_parameters_card():
             html.Div(
                 [
                     *param_table_header(),
-                    param_subsection_label("Patient parameters", first=True),
                     *editable_field_row(
                         "Age (years)", "age", 35, 35, min_value=0, step=1,
                     ),
@@ -328,7 +329,7 @@ def build_patient_parameters_card():
                 ],
                 className="param-table",
             ),
-            html.H4("Derived values", className="card-subheading"),
+            html.H4("Derived values", className="card-subheading card-subheading--divider"),
             html.Div(
                 [
                     derived_value_row(
@@ -361,26 +362,29 @@ def build_model_settings_card():
             html.H4("Model settings", className="card-subheading"),
             field_block(
                 "Select opiate",
-                dcc.Dropdown(
-                    id="opiate-dropdown",
-                    options=[
-                        {"label": "No opiate / propofol only", "value": "none"},
-                        {"label": "Remifentanil", "value": "remifentanil"},
-                        {
-                            "label": "Sufentanil (upcoming)",
-                            "value": "sufentanil",
-                            "disabled": True,
-                        },
-                        {
-                            "label": "Fentanyl (upcoming)",
-                            "value": "fentanyl",
-                            "disabled": True,
-                        },
-                    ],
-                    value="none",
-                    clearable=False,
-                    placeholder="Select opiate",
-                    style=DROPDOWN_STYLE,
+                html.Div(
+                    dcc.Dropdown(
+                        id="opiate-dropdown",
+                        options=[
+                            {"label": "No opiate / propofol only", "value": "none"},
+                            {"label": "Remifentanil", "value": "remifentanil"},
+                            {
+                                "label": "Sufentanil (upcoming)",
+                                "value": "sufentanil",
+                                "disabled": True,
+                            },
+                            {
+                                "label": "Fentanyl (upcoming)",
+                                "value": "fentanyl",
+                                "disabled": True,
+                            },
+                        ],
+                        value="none",
+                        clearable=False,
+                        placeholder="Select opiate",
+                        style=DROPDOWN_STYLE,
+                    ),
+                    className="opiate-dropdown-wrapper",
                 ),
             ),
             html.Div(
@@ -561,11 +565,13 @@ def build_patient_id_card():
     Build the small patient-identification card shown above Input Parameters.
 
     Static placeholder content only (hardcoded "Test Patient" / "TEST-001") -
-    no ids, no callbacks, no effect on model inputs or data flow.
+    no ids, no callbacks, no effect on model inputs or data flow. Uses a
+    Font Awesome glyph (already loaded for the sidebar icons) instead of
+    an emoji so it can be recolored via CSS.
     """
     return html.Div(
         [
-            html.Span("👤", className="patient-id-icon"),
+            html.I(className="fa-solid fa-circle-user patient-id-icon"),
             html.Div(
                 [
                     html.Div("Test Patient", className="patient-id-name"),
@@ -593,17 +599,7 @@ def build_input_column():
                 "Run recommendation",
                 id="run-btn",
                 n_clicks=0,
-                style={
-                    "width": "100%",
-                    "padding": "12px 20px",
-                    "fontSize": "15px",
-                    "fontWeight": "700",
-                    "borderRadius": "10px",
-                    "border": "none",
-                    "backgroundColor": "#1f77b4",
-                    "color": "white",
-                    "cursor": "pointer",
-                },
+                className="run-recommendation-btn",
             ),
         ],
         className="input-column",

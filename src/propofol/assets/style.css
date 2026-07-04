@@ -64,31 +64,32 @@ input[type=number] {
 .patient-id-card {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 12px;
+  padding: 14px 16px;
 }
 
 .patient-id-icon {
-  font-size: 20px;
+  font-size: 22px;
   line-height: 1;
   flex-shrink: 0;
+  color: #6b46c1;
 }
 
 .patient-id-info {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
 }
 
 .patient-id-name {
   font-weight: 700;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-primary);
 }
 
 .patient-id-label {
-  font-size: 11px;
-  color: var(--text-secondary);
+  font-size: 12px;
+  color: var(--text-primary);
 }
 
 .card-subheading {
@@ -96,6 +97,15 @@ input[type=number] {
   font-size: 13px;
   margin: 0 0 6px 0;
   color: var(--text-primary);
+}
+
+/* Subtle divider above a card-subheading that follows another section
+   within the same card (e.g. "Derived values" after Baseline vitals),
+   matching the divider .param-subsection-label uses between its own groups. */
+.card-subheading--divider {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
 }
 
 .field-block {
@@ -138,7 +148,7 @@ input[type=number] {
 .derived-values {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 8px;
   margin-bottom: 4px;
 }
 
@@ -150,7 +160,7 @@ input[type=number] {
 }
 
 .derived-label {
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-weight: 600;
 }
 
@@ -181,16 +191,16 @@ input[type=number] {
 
 .param-table {
   display: grid;
-  grid-template-columns: auto 62px 54px 70px;
-  column-gap: 6px;
-  row-gap: 5px;
+  grid-template-columns: auto 70px 58px 74px;
+  column-gap: 8px;
+  row-gap: 9px;
   align-items: center;
   margin-bottom: 8px;
 }
 
 /* Parameter / Value / Source only, no Date/Time column (e.g. BIS/MAP targets). */
 .param-table--no-date {
-  grid-template-columns: auto 62px 54px;
+  grid-template-columns: auto 70px 58px;
 }
 
 /* Full-width subsection heading row (e.g. "Concentrations", "Target BIS")
@@ -201,8 +211,8 @@ input[type=number] {
   font-weight: 700;
   font-size: 12px;
   color: var(--text-primary);
-  margin-top: 6px;
-  padding-top: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
   border-top: 1px solid var(--border-color);
 }
 
@@ -245,11 +255,11 @@ input[type=number] {
   display: flex;
 }
 
-/* Compact the Sex dropdown to fit the same 62px Value column every other
+/* Compact the Sex dropdown to fit the same narrow Value column every other
    patient-parameter row uses, so Source/Date-Time stay in their own
    columns instead of being covered by a wider control. Dash's default
    dropdown sizing (16px font, 12px side padding, 15px arrow) needs far
-   more than 62px to show "Female" without clipping it down to a single
+   more than that to show "Female" without clipping it down to a single
    letter - this only trims that chrome, the dropdown itself is unchanged. */
 .param-value-dropdown .dash-dropdown {
   font-size: 11px;
@@ -266,13 +276,30 @@ input[type=number] {
   flex: 0 0 auto;
 }
 
+/* Same blue-tinted "editable value" look as .value-badge below, applied to
+   both dcc.Dropdown controls (Sex, Select opiate) so numeric inputs and
+   dropdowns read as one consistent visual language instead of dropdowns
+   looking like plain white browser controls. */
+.param-value-dropdown .dash-dropdown,
+.opiate-dropdown-wrapper .dash-dropdown {
+  background-color: #eef3ff;
+  border: 1.5px solid #a9c2f5;
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.opiate-dropdown-wrapper {
+  width: 100%;
+}
+
 .value-badge-wrapper {
   cursor: pointer;
 }
 
 .value-badge {
   width: 100%;
-  padding: 3px 4px;
+  padding: 6px 6px;
   border: 1.5px solid #a9c2f5;
   border-radius: 6px;
   background-color: #eef3ff;
@@ -493,9 +520,18 @@ body {
 }
 
 .input-column {
-  flex: 1 1 300px;
-  max-width: 340px;
-  min-width: 270px;
+  flex: 1 1 340px;
+  max-width: 380px;
+  min-width: 300px;
+}
+
+/* Extra breathing room inside the Input Parameters panel's own cards -
+   scoped to this column only so it doesn't affect Recommendation/graph
+   cards, which keep the base .card padding. Excludes .patient-id-card,
+   which already sets its own (different) padding below - :not() avoids a
+   specificity fight between two equally-specific two-class selectors. */
+.input-column .card:not(.patient-id-card) {
+  padding: 18px 18px 14px;
 }
 
 .recommendation-column {
@@ -1042,4 +1078,23 @@ body {
 
 .accordion-body-text blockquote p {
   margin: 0;
+}
+
+/* ---------- Run recommendation button ---------- */
+
+.run-recommendation-btn {
+  width: 100%;
+  padding: 14px 20px;
+  font-size: 15px;
+  font-weight: 700;
+  border-radius: 10px;
+  border: none;
+  background-color: var(--blue-accent);
+  color: #ffffff;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.run-recommendation-btn:hover {
+  background-color: var(--navy-700);
 }
