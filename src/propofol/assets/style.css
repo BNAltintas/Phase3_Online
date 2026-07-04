@@ -797,23 +797,86 @@ body {
 
 /* ---------- Maintenance regimen card ---------- */
 
-.maintenance-subheading {
-  margin-top: 10px;
+.maintenance-card-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.maintenance-card-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.maintenance-card-subtitle {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+/* Colored bar-style header (a border-left doubles as the "▌" bar), one per
+   drug - blue for propofol matching the rest of DosePilot's accent color,
+   purple for remifentanil (the same family as the patient-id icon) so the
+   two drugs are visually distinct without reaching for orange, which this
+   app reserves for warnings/manual-override accents. */
+.maintenance-drug-header {
+  font-size: 13px;
+  font-weight: 700;
+  border-left: 3px solid;
+  padding-left: 9px;
+  margin-bottom: 10px;
+  line-height: 1.1;
+}
+
+.maintenance-drug-header--propofol {
+  border-color: var(--blue-accent);
+  color: var(--blue-accent);
+}
+
+.maintenance-drug-header--remifentanil {
+  border-color: #6b46c1;
+  color: #6b46c1;
+}
+
+.maintenance-divider {
+  border-top: 1px dashed var(--border-color);
+  margin: 16px 0;
 }
 
 .maintenance-table {
   display: grid;
-  grid-template-columns: auto 1fr;
-  row-gap: 7px;
-  column-gap: 18px;
+  grid-template-columns: auto auto 1fr;
+  row-gap: 4px;
+  column-gap: 14px;
   font-size: 13px;
-  align-items: baseline;
+  align-items: center;
+}
+
+.maintenance-interval,
+.maintenance-arrow,
+.maintenance-rate {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+/* No separator under the last row. */
+.maintenance-table > *:nth-last-child(-n + 3) {
+  border-bottom: none;
+  padding-bottom: 0;
 }
 
 .maintenance-interval {
   font-weight: 600;
   color: var(--text-secondary);
   white-space: nowrap;
+}
+
+.maintenance-arrow {
+  color: var(--text-secondary);
+  text-align: center;
 }
 
 .maintenance-rate {
@@ -842,7 +905,7 @@ body {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-secondary);
-  margin: 10px 0 4px 0;
+  margin: 14px 0 8px 0;
 }
 
 .maintenance-scenario-label--manual {
@@ -850,6 +913,7 @@ body {
 }
 
 .maintenance-table--manual .maintenance-interval,
+.maintenance-table--manual .maintenance-arrow,
 .maintenance-table--manual .maintenance-rate {
   color: var(--text-primary);
 }

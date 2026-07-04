@@ -300,9 +300,12 @@ def confidence_tier(confidence_percent: float) -> str:
 
 def _maintenance_rows(rate_ml_h, rate_secondary, secondary_label: str) -> list:
     """
-    Build alternating interval/rate grid-cell components for one drug's
+    Build interval/arrow/rate grid-cell components for one drug's
     compressed maintenance schedule. A near-zero rate is shown as "Pause"
-    instead of "0 mL/h (0 x/kg/min)".
+    instead of "0 mL/h (0 x/kg/min)". The values, units, and time intervals
+    themselves come from compress_minute_schedule() exactly as before -
+    only the extra centered arrow cell between them is new, purely
+    presentational.
     """
     ml_rows = compress_minute_schedule(rate_ml_h)
     secondary_rows = compress_minute_schedule(rate_secondary)
@@ -320,6 +323,7 @@ def _maintenance_rows(rate_ml_h, rate_secondary, secondary_label: str) -> list:
             rate_class = "maintenance-rate"
 
         cells.append(html.Div(interval_text, className="maintenance-interval"))
+        cells.append(html.Div("→", className="maintenance-arrow"))
         cells.append(html.Div(rate_text, className=rate_class))
 
     return cells
@@ -488,7 +492,11 @@ def _maintenance_section(rec, label: str | None = None, manual: bool = False):
     """
     Build one drug-schedule section (propofol + optional remifentanil) for
     the maintenance card, optionally preceded by a scenario label
-    ("Original recommendation" / "Manual dose (re-optimized)").
+    ("Original recommendation" / "Manual dose (re-optimized)"). Each drug
+    gets a colored bar-style header (Propofol in the app's blue accent,
+    Remifentanil in the same purple family as the patient-id icon - never
+    orange, which this app reserves for warnings/manual-override accents),
+    with a dashed divider separating the two when both are present.
     """
     children = []
     if label is not None:
@@ -499,6 +507,9 @@ def _maintenance_section(rec, label: str | None = None, manual: bool = False):
 
     table_class = "maintenance-table maintenance-table--manual" if manual else "maintenance-table"
 
+    children.append(
+        html.Div("Propofol", className="maintenance-drug-header maintenance-drug-header--propofol"),
+    )
     prop_cells = _maintenance_rows(
         rec.propofol_inf_rates_ml_h, rec.propofol_inf_rates_mcgkgmin, "µg/kg/min",
     )
@@ -509,8 +520,12 @@ def _maintenance_section(rec, label: str | None = None, manual: bool = False):
     )
 
     if rec.remifentanil_selected:
+        children.append(html.Div(className="maintenance-divider"))
         children.append(
-            html.H4("Remifentanil", className="card-subheading maintenance-subheading"),
+            html.Div(
+                "Remifentanil",
+                className="maintenance-drug-header maintenance-drug-header--remifentanil",
+            ),
         )
         remi_cells = _maintenance_rows(
             rec.remifentanil_inf_rates_ml_h, rec.remifentanil_inf_rates_ngkgmin, "ng/kg/min",
@@ -532,7 +547,15 @@ def make_maintenance_card(original, manual=None):
     schedule remains visible (labeled, de-emphasized) with the manually
     re-optimized schedule shown below it.
     """
-    children = [html.H4("Maintenance regimen", className="card-subheading")]
+    children = [
+        html.Div(
+            [
+                html.H4("Early maintenance regimen", className="maintenance-card-title"),
+                html.Span("relative to induction", className="maintenance-card-subtitle"),
+            ],
+            className="maintenance-card-title-row",
+        ),
+    ]
 
     if manual is None:
         children.extend(_maintenance_section(original))
