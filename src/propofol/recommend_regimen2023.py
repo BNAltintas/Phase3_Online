@@ -627,6 +627,7 @@ class Su2023PropofolRemifentanilRecommender:
         map_abs_min_target: float = MAP_ABS_MIN_TARGET,
         map_rel_frac_target: float = MAP_REL_FRAC_TARGET,
         fixed_bolus_mgkg: Optional[float] = None,
+        fixed_remi_rate_mcgkgmin: Optional[float] = None,
         map_output_index: int = SU2023_MAP_OUTPUT_INDEX,
         remi_a1_output_index: int = SU2023_REMI_A1_OUTPUT_INDEX,
         seed: int = OPTIMIZATION_BASE_SEED,
@@ -637,6 +638,16 @@ class Su2023PropofolRemifentanilRecommender:
         # used by every existing call site.
         self.fixed_bolus_mgkg = (
             float(fixed_bolus_mgkg) if fixed_bolus_mgkg is not None else None
+        )
+
+        # When set (and use_remifentanil is True), the remifentanil
+        # maintenance rate is pinned to this single constant value (mcg/kg/
+        # min, no pause, one rate for the full 15 minutes) and only the
+        # propofol bolus + propofol maintenance are optimized - see
+        # build_bounds(). None (the default) preserves the original, fully
+        # free remifentanil-schedule search used by every existing call site.
+        self.fixed_remi_rate_mcgkgmin = (
+            float(fixed_remi_rate_mcgkgmin) if fixed_remi_rate_mcgkgmin is not None else None
         )
 
         self.use_remifentanil = bool(use_remifentanil)
@@ -714,11 +725,15 @@ class Su2023PropofolRemifentanilRecommender:
         Build the bounds for the optimization parameters.
 
         When self.fixed_bolus_mgkg is set, the bolus bound collapses to a
-        single point. clip_x_to_bounds() (used by every downstream consumer
-        of the parameter vector: _split_x, initial_vectors, the Powell
-        search itself) then pins that parameter to the fixed value on every
-        iteration, so only the maintenance-schedule parameters are actually
-        searched.
+        single point. When self.fixed_remi_rate_mcgkgmin is set, the
+        remifentanil pause bound collapses to 0 (no pause - a single
+        constant rate from t=0) and both remifentanil rate bounds collapse
+        to that same point (so rate_1 == rate_2, a flat rate for the whole
+        window regardless of the free "switch" time). clip_x_to_bounds()
+        (used by every downstream consumer of the parameter vector:
+        _split_x, initial_vectors, the Powell search itself) then pins
+        those parameters to their fixed values on every iteration, so only
+        the remaining free parameters are actually searched.
         """
         bolus_bounds = (
             (self.fixed_bolus_mgkg, self.fixed_bolus_mgkg)
@@ -735,12 +750,21 @@ class Su2023PropofolRemifentanilRecommender:
         ]
 
         if self.use_remifentanil:
-            bounds += [
-                (0.0, MAX_INITIAL_PAUSE_MIN),
-                (MIN_SWITCH_MIN, MAX_SWITCH_MIN),
-                REMI_INFUSION_MCGKGMIN_BOUNDS,
-                REMI_INFUSION_MCGKGMIN_BOUNDS,
-            ]
+            if self.fixed_remi_rate_mcgkgmin is not None:
+                remi_rate_bounds = (self.fixed_remi_rate_mcgkgmin, self.fixed_remi_rate_mcgkgmin)
+                bounds += [
+                    (0.0, 0.0),
+                    (MIN_SWITCH_MIN, MAX_SWITCH_MIN),
+                    remi_rate_bounds,
+                    remi_rate_bounds,
+                ]
+            else:
+                bounds += [
+                    (0.0, MAX_INITIAL_PAUSE_MIN),
+                    (MIN_SWITCH_MIN, MAX_SWITCH_MIN),
+                    REMI_INFUSION_MCGKGMIN_BOUNDS,
+                    REMI_INFUSION_MCGKGMIN_BOUNDS,
+                ]
 
         return bounds
 
@@ -1615,6 +1639,60 @@ def recommend_maintenance_for_fixed_propofol_bolus(
     )
 
     return recommender.optimize(skip_confidence=True)
+
+
+def recommend_propofol_for_fixed_remifentanil_rate(
+    patient: Patient,
+    fixed_remi_rate_mcgkgmin: float,
+    propofol_conc_mg_ml: float = DEFAULT_PROPOFOL_CONC_MG_ML,
+    remifentanil_conc_mcg_ml: float = DEFAULT_REMI_CONC_MCG_ML,
+    target_bis_low: float = TARGET_BIS_LOW,
+    target_bis_high: float = TARGET_BIS_HIGH,
+    map_abs_min_target: float = MAP_ABS_MIN_TARGET,
+    map_rel_frac_target: float = MAP_REL_FRAC_TARGET,
+    mode: str = OPTIMIZATION_MODE,
+    seed: int = OPTIMIZATION_BASE_SEED,
+) -> RecommendationResult:
+    """
+    Re-optimize the propofol induction bolus AND its own maintenance
+    schedule for a fixed, user-chosen remifentanil maintenance rate
+    (mcg/kg/min, held constant for the full 15-minute window - no pause,
+    one rate throughout). This is the inverse of
+    recommend_maintenance_for_fixed_propofol_bolus: here remifentanil is
+    the fixed input and propofol is the free output, for pages where the
+    opioid strategy is what the user manipulates and the propofol
+    recommendation is what the model produces in response.
+
+    Confidence IS computed (unlike the manual-override path above, which
+    intentionally skips it) - this is meant to stand in as a page's own
+    full baseline recommendation, not a cheap live-preview overlay, so it
+    pays the same Powell-search + 100-simulation-confidence cost as
+    recommend_su2023_regimen itself.
+    """
+    weight_kg = float(patient.weight)
+    if not np.isfinite(weight_kg) or weight_kg <= 0:
+        raise ValueError("Patient weight must be positive.")
+
+    fixed_remi_rate_mcgkgmin = float(fixed_remi_rate_mcgkgmin)
+    if not np.isfinite(fixed_remi_rate_mcgkgmin) or fixed_remi_rate_mcgkgmin < 0:
+        raise ValueError("fixed_remi_rate_mcgkgmin must be non-negative.")
+
+    recommender = Su2023PropofolRemifentanilRecommender(
+        patient=patient,
+        use_remifentanil=True,
+        use_bsv=False,
+        mode=mode,
+        propofol_conc_mg_ml=propofol_conc_mg_ml,
+        remifentanil_conc_mcg_ml=remifentanil_conc_mcg_ml,
+        target_bis_low=target_bis_low,
+        target_bis_high=target_bis_high,
+        map_abs_min_target=map_abs_min_target,
+        map_rel_frac_target=map_rel_frac_target,
+        fixed_remi_rate_mcgkgmin=fixed_remi_rate_mcgkgmin,
+        seed=seed,
+    )
+
+    return recommender.optimize()
 
 
 def compress_minute_schedule(rates: Optional[Sequence[float]]) -> list[dict[str, float]]:

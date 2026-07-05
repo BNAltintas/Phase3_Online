@@ -7,7 +7,7 @@ from typing import Optional
 import dash
 import numpy as np
 import plotly.graph_objects as go
-from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html, no_update
+from dash import ALL, MATCH, ClientsideFunction, Input, Output, State, ctx, dcc, html, no_update
 from plotly.subplots import make_subplots
 
 from propofol.config import BOLUS_MGKG_BOUNDS
@@ -15,8 +15,8 @@ from propofol.dashboard_layout import (
     EHR_RECORD_DATE,
     EHR_RECORD_TIME,
     SCENARIO_DEFAULT_PATIENT,
-    SCENARIO_DEFAULT_PROPOFOL_MGKG,
     SCENARIO_DEFAULT_REMI_MCGKGMIN,
+    TEST_EXPLORATION_DEFAULT_PATIENT,
     build_layout,
     timestamp_display,
 )
@@ -35,6 +35,7 @@ from propofol.recommend_regimen2023 import (
     Su2023PropofolRemifentanilRecommender,
     compress_minute_schedule,
     recommend_maintenance_for_fixed_propofol_bolus,
+    recommend_propofol_for_fixed_remifentanil_rate,
     recommend_su2023_regimen,
     remi_mcgkgmin_to_ml_h,
     remi_mcgkgmin_to_ngkgmin,
@@ -1644,23 +1645,31 @@ def toggle_graph_visibility(checked_values, current_class_name):
     Output("active-page-store", "data"),
     Input("nav-recommendation-btn", "n_clicks"),
     Input("nav-scenario-btn", "n_clicks"),
+    Input("nav-test-exploration-btn", "n_clicks"),
     Input("nav-more-info-btn", "n_clicks"),
     Input("back-to-recommendation-btn", "n_clicks"),
     Input("learn-more-link-btn", "n_clicks"),
+    Input("te-learn-more-link", "n_clicks"),
     prevent_initial_call=True,
 )
-def set_active_page(rec_nav_clicks, scenario_nav_clicks, more_info_nav_clicks, back_clicks, learn_more_clicks):
+def set_active_page(
+    rec_nav_clicks, scenario_nav_clicks, test_exploration_nav_clicks, more_info_nav_clicks,
+    back_clicks, learn_more_clicks, te_learn_more_clicks,
+):
     """
     Track which top-level page is active based on which nav/back control was
-    clicked. learn-more-link-btn (the dashboard's own "Learn more about the
-    model" link) is just a second entry point to the same "more-info" page
-    the sidebar's "More Info" item already switches to.
+    clicked. learn-more-link-btn and te-learn-more-link (the Recommendation
+    and Test Exploration pages' own "Learn more about the model" links) are
+    just extra entry points to the same "more-info" page the sidebar's
+    "More Info" item already switches to.
     """
     triggered = ctx.triggered_id
-    if triggered in ("nav-more-info-btn", "learn-more-link-btn"):
+    if triggered in ("nav-more-info-btn", "learn-more-link-btn", "te-learn-more-link"):
         return "more-info"
     if triggered == "nav-scenario-btn":
         return "scenario-exploration"
+    if triggered == "nav-test-exploration-btn":
+        return "test-exploration"
     if triggered in ("nav-recommendation-btn", "back-to-recommendation-btn"):
         return "recommendation"
     return no_update
@@ -1669,19 +1678,22 @@ def set_active_page(rec_nav_clicks, scenario_nav_clicks, more_info_nav_clicks, b
 @app.callback(
     Output("main-content", "style"),
     Output("scenario-exploration-view", "style"),
+    Output("test-exploration-view", "style"),
     Output("more-info-view", "style"),
     Output("nav-recommendation-btn", "className"),
     Output("nav-scenario-btn", "className"),
+    Output("nav-test-exploration-btn", "className"),
     Output("nav-more-info-btn", "className"),
     Input("active-page-store", "data"),
 )
 def render_active_page(active_page):
     """
-    Show exactly one of the three pages, and keep the sidebar's active
+    Show exactly one of the four pages, and keep the sidebar's active
     highlight in sync with it.
     """
-    is_recommendation = active_page not in ("more-info", "scenario-exploration")
+    is_recommendation = active_page not in ("more-info", "scenario-exploration", "test-exploration")
     is_scenario = active_page == "scenario-exploration"
+    is_test_exploration = active_page == "test-exploration"
     is_more_info = active_page == "more-info"
     hidden = {"display": "none"}
 
@@ -1691,9 +1703,11 @@ def render_active_page(active_page):
     return (
         None if is_recommendation else hidden,
         None if is_scenario else hidden,
+        None if is_test_exploration else hidden,
         None if is_more_info else hidden,
         cls(is_recommendation),
         cls(is_scenario),
+        cls(is_test_exploration),
         cls(is_more_info),
     )
 
@@ -1754,6 +1768,198 @@ def render_more_info_accordion(open_sections, body_ids, chevron_ids):
         for chevron_id in chevron_ids
     ]
     return body_classes, chevron_classes
+
+
+# ============================================================
+# Test Exploration (fully independent UI sandbox - no model logic)
+#
+# Every callback below is scoped only to te-* ids. None of them read or
+# write recommendation-store, se-baseline-store, or any other page's
+# state, and none of them call into recommend_regimen2023 or any other
+# PK/PD/optimization module - MAP/PP are the only "calculations" here,
+# and they're the same plain arithmetic (compute_map/compute_pp) already
+# used for the Recommendation page's own derived-pressure display.
+# ============================================================
+
+def _register_te_slider_sync(slider_id: str, input_id: str, bounds: tuple[float, float]):
+    """
+    Keep one Test Exploration slider and its numeric input in sync in both
+    directions - a standalone copy of the same pattern used elsewhere in
+    this app for dose/rate sliders, deliberately duplicated (not shared)
+    so this sandbox page can never be affected by, or accidentally affect,
+    any other page's slider-sync callbacks.
+    """
+    @app.callback(
+        Output(input_id, "value"),
+        Input(slider_id, "value"),
+    )
+    def _te_slider_to_input(slider_value):
+        return f"{float(slider_value):.0f}"
+
+    @app.callback(
+        Output(slider_id, "value", allow_duplicate=True),
+        Input(input_id, "value"),
+        State(slider_id, "value"),
+        prevent_initial_call=True,
+    )
+    def _te_input_to_slider(input_value, current_slider_value):
+        try:
+            value = float(input_value)
+        except (TypeError, ValueError):
+            return no_update
+        value = max(bounds[0], min(bounds[1], value))
+        if current_slider_value is not None and abs(value - float(current_slider_value)) < 1e-9:
+            return no_update
+        return value
+
+    _te_slider_to_input.__name__ = f"sync_{slider_id.replace('-', '_')}_to_input"
+    _te_input_to_slider.__name__ = f"sync_{input_id.replace('-', '_')}_to_slider"
+
+
+_register_te_slider_sync("te-age-slider", "te-age-input", (18, 100))
+_register_te_slider_sync("te-height-slider", "te-height-input", (140, 220))
+_register_te_slider_sync("te-weight-slider", "te-weight-input", (40, 200))
+_register_te_slider_sync("te-sbp-slider", "te-sbp-input", (80, 220))
+_register_te_slider_sync("te-dbp-slider", "te-dbp-input", (40, 140))
+
+
+@app.callback(
+    Output("te-derived-map", "children"),
+    Output("te-derived-pp", "children"),
+    Input("te-sbp-input", "value"),
+    Input("te-dbp-input", "value"),
+)
+def update_te_derived_values(sbp, dbp):
+    """Plain-arithmetic MAP/PP display for the Test Exploration sandbox - never touches any model code."""
+    try:
+        sbp = float(sbp)
+        dbp = float(dbp)
+        return f"{compute_map(sbp, dbp):.1f}", f"{compute_pp(sbp, dbp):.1f}"
+    except (TypeError, ValueError):
+        return "-", "-"
+
+
+@app.callback(
+    Output("te-age-slider", "value", allow_duplicate=True),
+    Output("te-sex", "value"),
+    Output("te-height-slider", "value", allow_duplicate=True),
+    Output("te-weight-slider", "value", allow_duplicate=True),
+    Output("te-sbp-slider", "value", allow_duplicate=True),
+    Output("te-dbp-slider", "value", allow_duplicate=True),
+    Input("te-restore-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+def restore_te_patient(_n_clicks):
+    """Reset every Test Exploration patient field back to TEST_EXPLORATION_DEFAULT_PATIENT."""
+    d = TEST_EXPLORATION_DEFAULT_PATIENT
+    return d["age"], d["sex"], d["height"], d["weight"], d["sbp"], d["dbp"]
+
+
+# The Baseline Recommendation, Scenario Result, and all 5 figures below
+# are computed entirely in the browser (window.dash_clientside.
+# testExploration in assets/test_exploration.js) - no server round-trip,
+# no model code, so every field on this page updates the instant a
+# slider/dropdown changes, with no loading state at all.
+_TE_PATIENT_TARGET_OPIOID_INPUTS = (
+    Input("te-age-slider", "value"),
+    Input("te-sex", "value"),
+    Input("te-height-slider", "value"),
+    Input("te-weight-slider", "value"),
+    Input("te-sbp-slider", "value"),
+    Input("te-dbp-slider", "value"),
+    Input("te-opioid-dropdown", "value"),
+    Input("te-bis-target-low", "value"),
+    Input("te-bis-target-high", "value"),
+    Input("te-map-target-mode", "value"),
+    Input("te-map-target-value", "value"),
+)
+
+app.clientside_callback(
+    ClientsideFunction(namespace="testExploration", function_name="updateBaseline"),
+    Output("te-induction-dose", "children"),
+    Output("te-induction-total", "children"),
+    Output("te-propofol-maintenance-table", "children"),
+    Output("te-opioid-maintenance-section", "style"),
+    Output("te-opioid-maintenance-title", "children"),
+    Output("te-opioid-maintenance-table", "children"),
+    *_TE_PATIENT_TARGET_OPIOID_INPUTS,
+)
+
+# Resets the "Explore opioid strategy" slider's bounds/unit/label (and the
+# committed te-explored-rate-store) to the newly-selected opioid's own
+# defaults - the slider's min/max/step/unit are meaningless carried over
+# from a different drug (e.g. remifentanil's 0.02-0.20 µg/kg/min vs.
+# fentanyl's 30-150 µg/h). Also shows/hides the whole opioid-exploration
+# workflow (Explore/Result/Dose-Response) when "None" is selected.
+app.clientside_callback(
+    ClientsideFunction(namespace="testExploration", function_name="updateExploreControls"),
+    Output("te-explore-rate-slider", "min"),
+    Output("te-explore-rate-slider", "max"),
+    Output("te-explore-rate-slider", "step"),
+    Output("te-explore-rate-slider", "value"),
+    Output("te-explore-rate-slider", "marks"),
+    Output("te-explore-rate-title", "children"),
+    Output("te-explore-rate-label", "children", allow_duplicate=True),
+    Output("te-explored-rate-store", "data", allow_duplicate=True),
+    Output("te-opioid-explore-content", "style"),
+    Output("te-opioid-explore-placeholder", "style"),
+    Input("te-opioid-dropdown", "value"),
+    prevent_initial_call=True,
+)
+
+# Live label above the slider - fires on every drag tick (cheap string
+# formatting only), independent of the committed te-explored-rate-store,
+# which Run Scenario alone updates.
+app.clientside_callback(
+    ClientsideFunction(namespace="testExploration", function_name="updateExploreLiveLabel"),
+    Output("te-explore-rate-label", "children", allow_duplicate=True),
+    Input("te-explore-rate-slider", "value"),
+    State("te-opioid-dropdown", "value"),
+    prevent_initial_call=True,
+)
+
+# The only place the slider's value is actually committed to
+# te-explored-rate-store - by design, dragging the slider alone never
+# recomputes Scenario Result or the Dose-Response graph's "Explored" line.
+app.clientside_callback(
+    ClientsideFunction(namespace="testExploration", function_name="runScenario"),
+    Output("te-explored-rate-store", "data", allow_duplicate=True),
+    Input("te-run-scenario-btn", "n_clicks"),
+    State("te-explore-rate-slider", "value"),
+    prevent_initial_call=True,
+)
+
+app.clientside_callback(
+    ClientsideFunction(namespace="testExploration", function_name="updateScenarioResult"),
+    Output("te-result-baseline-induction", "children"),
+    Output("te-result-baseline-maintenance", "children"),
+    Output("te-result-baseline-opioid-label", "children"),
+    Output("te-result-baseline-opioid", "children"),
+    Output("te-result-explored-induction", "children"),
+    Output("te-result-explored-maintenance", "children"),
+    Output("te-result-explored-opioid-label", "children"),
+    Output("te-result-explored-opioid", "children"),
+    Output("te-result-delta-propofol", "children"),
+    Output("te-result-delta-propofol", "className"),
+    Output("te-result-delta-opioid-label", "children"),
+    Output("te-result-delta-opioid", "children"),
+    Output("te-result-delta-opioid", "className"),
+    *_TE_PATIENT_TARGET_OPIOID_INPUTS,
+    Input("te-explored-rate-store", "data"),
+)
+
+app.clientside_callback(
+    ClientsideFunction(namespace="testExploration", function_name="updateGraphs"),
+    Output("te-dose-response-graph", "figure"),
+    Output("te-dose-response-subtitle", "children"),
+    Output("te-bis-graph", "figure"),
+    Output("te-map-graph", "figure"),
+    Output("te-propofol-pk-graph", "figure"),
+    Output("te-opioid-pk-graph", "figure"),
+    Output("te-opioid-pk-card-wrapper", "style"),
+    *_TE_PATIENT_TARGET_OPIOID_INPUTS,
+    Input("te-explored-rate-store", "data"),
+)
 
 
 # ============================================================
@@ -3012,7 +3218,7 @@ def _register_scenario_slider_sync(slider_id: str, input_id: str, bounds: tuple[
         return f"{float(slider_value):.2f}"
 
     @app.callback(
-        Output(slider_id, "value"),
+        Output(slider_id, "value", allow_duplicate=True),
         Input(input_id, "value"),
         State(slider_id, "value"),
         prevent_initial_call=True,
@@ -3038,7 +3244,6 @@ def _register_scenario_slider_sync(slider_id: str, input_id: str, bounds: tuple[
     _input_to_slider.__name__ = f"sync_{input_id.replace('-', '_')}_to_slider"
 
 
-_register_scenario_slider_sync("se-propofol-dose-slider", "se-propofol-dose-input", BOLUS_MGKG_BOUNDS)
 _register_scenario_slider_sync("se-remi-rate-slider", "se-remi-rate-input", REMI_INFUSION_MCGKGMIN_BOUNDS)
 
 
@@ -3052,6 +3257,7 @@ _register_scenario_slider_sync("se-remi-rate-slider", "se-remi-rate-input", REMI
     Input("se-sbp", "value"),
     Input("se-dbp", "value"),
     Input("se-opioid-dropdown", "value"),
+    Input("se-remi-rate-slider", "value"),
     Input("se-bis-target-low", "value"),
     Input("se-bis-target-high", "value"),
     Input("se-map-target-mode", "value"),
@@ -3059,13 +3265,21 @@ _register_scenario_slider_sync("se-remi-rate-slider", "se-remi-rate-input", REMI
     prevent_initial_call=True,
 )
 def compute_scenario_baseline(
-    _nav_clicks, age, sex, height, weight, sbp, dbp, opioid, bis_low, bis_high, map_mode, map_value,
+    _nav_clicks, age, sex, height, weight, sbp, dbp, opioid, remi_rate_mcgkgmin,
+    bis_low, bis_high, map_mode, map_value,
 ):
     """
     Run the full Powell-optimized recommendation for the Scenario
-    Exploration page's own (independent) patient/targets/opioid choice -
-    this is the "Scenario recommendation" reference line/marker and the
-    source of the 90% prediction interval band.
+    Exploration page's own (independent) patient/targets/opioid choice.
+
+    Opioid strategy is the input here, propofol is the output: when
+    remifentanil is selected, its rate is PINNED at the slider's current
+    value (recommend_propofol_for_fixed_remifentanil_rate) and only the
+    propofol bolus + propofol maintenance are re-optimized in response -
+    this is the entire "change the opioid, watch the propofol
+    recommendation update" interaction. When no opioid is selected, this
+    falls back to the original fully-free recommend_su2023_regimen (there
+    is no remifentanil rate to pin).
 
     Deliberately prevent_initial_call=True with nav-scenario-btn.n_clicks as
     one of the triggers (rather than firing automatically on every app
@@ -3073,9 +3287,11 @@ def compute_scenario_baseline(
     without this guard it would re-run on every single page load for every
     visitor even if they never open Scenario Exploration. Clicking into the
     page the first time is what computes its initial baseline; every
-    subsequent patient/target/opioid edit re-triggers it the normal way.
-    Every text field feeding this is debounce=True so it never fires
-    mid-keystroke.
+    subsequent patient/target/opioid/rate edit re-triggers it the normal
+    way. Every text field feeding this is debounce=True, and the
+    remifentanil slider is updatemode="mouseup" (see
+    build_scenario_medication_card), so this never fires mid-keystroke or
+    mid-drag.
     """
     try:
         age = float(age)
@@ -3115,16 +3331,32 @@ def compute_scenario_baseline(
             raise ValueError("Only remifentanil is currently supported.")
 
         patient = _scenario_patient_from_fields(age, height, weight, sex, sbp, dbp)
-        rec = recommend_su2023_regimen(
-            patient=patient,
-            opiate=opioid,
-            propofol_conc_mg_ml=DEFAULT_PROPOFOL_CONC_MG_ML,
-            remifentanil_conc_mcg_ml=DEFAULT_REMI_CONC_MCG_ML,
-            target_bis_low=bis_low,
-            target_bis_high=bis_high,
-            map_abs_min_target=map_abs,
-            map_rel_frac_target=map_rel_frac,
-        )
+
+        if opioid == "remifentanil":
+            remi_rate_mcgkgmin = float(remi_rate_mcgkgmin)
+            if remi_rate_mcgkgmin < 0:
+                raise ValueError("Remifentanil infusion rate must be non-negative.")
+            rec = recommend_propofol_for_fixed_remifentanil_rate(
+                patient=patient,
+                fixed_remi_rate_mcgkgmin=remi_rate_mcgkgmin,
+                propofol_conc_mg_ml=DEFAULT_PROPOFOL_CONC_MG_ML,
+                remifentanil_conc_mcg_ml=DEFAULT_REMI_CONC_MCG_ML,
+                target_bis_low=bis_low,
+                target_bis_high=bis_high,
+                map_abs_min_target=map_abs,
+                map_rel_frac_target=map_rel_frac,
+            )
+        else:
+            rec = recommend_su2023_regimen(
+                patient=patient,
+                opiate="none",
+                propofol_conc_mg_ml=DEFAULT_PROPOFOL_CONC_MG_ML,
+                remifentanil_conc_mcg_ml=DEFAULT_REMI_CONC_MCG_ML,
+                target_bis_low=bis_low,
+                target_bis_high=bis_high,
+                map_abs_min_target=map_abs,
+                map_rel_frac_target=map_rel_frac,
+            )
 
         normalized_opioid = "remifentanil" if opioid == "remifentanil" else "none"
 
@@ -3167,25 +3399,71 @@ def _baseline_representative_remi_rate(remi_rates) -> float:
 
 
 @app.callback(
-    Output("se-propofol-dose-slider", "value"),
-    Output("se-remi-rate-slider", "value"),
+    Output("se-remi-rate-slider", "value", allow_duplicate=True),
     Input("se-reset-medication-btn", "n_clicks"),
-    State("se-baseline-store", "data"),
+    State("se-age", "value"),
+    State("se-sex", "value"),
+    State("se-height", "value"),
+    State("se-weight", "value"),
+    State("se-sbp", "value"),
+    State("se-dbp", "value"),
+    State("se-opioid-dropdown", "value"),
+    State("se-bis-target-low", "value"),
+    State("se-bis-target-high", "value"),
+    State("se-map-target-mode", "value"),
+    State("se-map-target-value", "value"),
     prevent_initial_call=True,
 )
-def reset_scenario_medication(_n_clicks, baseline_store):
+def reset_scenario_medication(
+    _n_clicks, age, sex, height, weight, sbp, dbp, opioid, bis_low, bis_high, map_mode, map_value,
+):
     """
-    Reset the propofol dose / remifentanil rate sliders to whatever the
-    current scenario recommendation actually is.
+    Reset the remifentanil rate slider to what the model would recommend
+    with NEITHER drug pinned - a fresh, fully free recommend_su2023_regimen
+    call (the same joint optimization the main Recommendation page uses),
+    not simply the current se-baseline-store (which, since
+    compute_scenario_baseline now always pins remifentanil at whatever the
+    slider already holds, would just echo the slider's current value back
+    at itself). This is the one place Scenario Exploration asks "what does
+    the model recommend with everything free?" - it's an expensive Powell
+    + confidence call, same cost as compute_scenario_baseline, but only
+    runs on this explicit button click.
     """
-    if not baseline_store or baseline_store.get("error") or not baseline_store.get("result"):
-        return no_update, no_update
+    if opioid != "remifentanil":
+        return no_update
 
-    result = baseline_store["result"]
-    propofol_mgkg = result["propofol_bolus_mgkg"]
-    remi_rate = _baseline_representative_remi_rate(result.get("remifentanil_inf_rates_mcgkgmin"))
+    try:
+        age = float(age)
+        height = float(height)
+        weight = float(weight)
+        sbp = float(sbp)
+        dbp = float(dbp)
+        bis_low = float(bis_low)
+        bis_high = float(bis_high)
+        map_value = float(map_value)
 
-    return propofol_mgkg, remi_rate
+        if map_mode == "rel":
+            map_abs = float(MAP_ABS_MIN_TARGET)
+            map_rel_pct = map_value
+        else:
+            map_abs = map_value
+            map_rel_pct = float(MAP_REL_FRAC_TARGET) * 100.0
+
+        patient = _scenario_patient_from_fields(age, height, weight, sex, sbp, dbp)
+        rec = recommend_su2023_regimen(
+            patient=patient,
+            opiate="remifentanil",
+            propofol_conc_mg_ml=DEFAULT_PROPOFOL_CONC_MG_ML,
+            remifentanil_conc_mcg_ml=DEFAULT_REMI_CONC_MCG_ML,
+            target_bis_low=bis_low,
+            target_bis_high=bis_high,
+            map_abs_min_target=map_abs,
+            map_rel_frac_target=map_rel_pct / 100.0,
+        )
+        return _baseline_representative_remi_rate(rec.remifentanil_inf_rates_mcgkgmin)
+
+    except Exception:
+        return no_update
 
 
 @app.callback(
@@ -3236,163 +3514,54 @@ def render_scenario_recommendation_summary(baseline_store):
     Output("se-propofol-pk-graph", "figure"),
     Output("se-remifentanil-pk-graph", "figure"),
     Input("se-baseline-store", "data"),
-    Input("se-propofol-dose-slider", "value"),
-    Input("se-remi-rate-slider", "value"),
 )
-def render_scenario_page(baseline_store, propofol_mgkg, remi_rate_mcgkgmin):
+def render_scenario_page(baseline_store):
     """
-    Render everything driven by the current scenario: the dose-response
-    sweep and the 4 prediction graphs. (The "Explored scenario" card's own
-    text is rendered separately by render_scenario_recommendation_summary,
-    since it depends only on the baseline, not these sliders.)
+    Render the dose-response sweep and the 4 prediction graphs straight
+    from se-baseline-store. (The "Explored scenario" card's own text is
+    rendered separately by render_scenario_recommendation_summary.)
 
-    The 4 prediction graphs are built on a lightweight object that mixes
-    the baseline recommendation's confidence band + targets (expensive,
-    computed once by compute_scenario_baseline) with a freshly-simulated
-    trajectory for whatever the sliders are currently set to (cheap, one
-    simulate_regimen call - never the Powell optimizer) - this is what lets
-    the sliders feel live while still showing a real 90% prediction
-    interval.
-
-    When the current scenario (propofol dose + remifentanil rate) matches
-    the recommendation, each graph shows only the single "Recommended"
-    curve (make_bis_figure/make_map_figure/make_propofol_pk_figure/
-    make_remifentanil_pk_figure, unchanged). When it differs, each graph
-    also overlays the scenario's own curve in orange, via the exact same
-    _dual figure functions and MANUAL_OVERRIDE_COLOR the Recommendation
-    page's manual-dose overlay uses - only the legend wording differs
-    ("Scenario X" instead of "Manual X"), via each _dual function's new
-    optional manual_name/manual_cp_name/manual_ce_name parameter (default
-    unchanged, so the Recommendation page's own call sites are unaffected).
+    Propofol is purely an output of this page now (see
+    compute_scenario_baseline, which re-optimizes it for whatever
+    remifentanil rate is set) - there is no separate "current scenario"
+    trajectory to simulate or compare against a recommendation anymore, so
+    every graph is built directly from the one stored recommendation via
+    the exact same single-curve functions (make_bis_figure/make_map_figure/
+    make_propofol_pk_figure/make_remifentanil_pk_figure) used when no
+    manual override is active on the Recommendation page - unchanged,
+    reused as-is.
     """
     empty = make_empty_figure()
 
     if (
         not baseline_store or baseline_store.get("error")
         or not baseline_store.get("context") or not baseline_store.get("result")
-        or propofol_mgkg is None or remi_rate_mcgkgmin is None
     ):
         return empty, empty, empty, empty, empty
 
     context = baseline_store["context"]
     baseline = _store_dict_to_namespace(baseline_store["result"])
 
-    propofol_mgkg = float(propofol_mgkg)
-    remi_rate_mcgkgmin = float(remi_rate_mcgkgmin)
-    weight = float(context["weight"])
-    opiate = context["opiate"]
-    remifentanil_selected = opiate == "remifentanil"
-
     patient = _scenario_patient_from_fields(
         context["age"], context["height"], context["weight"], context["sex"],
         context["sbp"], context["dbp"],
     )
 
-    runner = Su2023PropofolRemifentanilRecommender(
-        patient=patient,
-        use_remifentanil=remifentanil_selected,
-        use_bsv=False,
-        propofol_conc_mg_ml=context["propofol_conc_mg_ml"],
-        remifentanil_conc_mcg_ml=context["remifentanil_conc_mcg_ml"],
-        target_bis_low=context["target_bis_low"],
-        target_bis_high=context["target_bis_high"],
-        map_abs_min_target=context["map_abs_min_target"],
-        map_rel_frac_target=context["map_rel_frac_target"],
-    )
-
-    if remifentanil_selected:
-        remi_rates_mcgkgmin = np.full(N_INTERVALS, remi_rate_mcgkgmin)
-        remi_rates_ml_h = remi_mcgkgmin_to_ml_h(
-            remi_rates_mcgkgmin, weight, context["remifentanil_conc_mcg_ml"],
-        )
-        remi_rates_ngkgmin = remi_mcgkgmin_to_ngkgmin(remi_rates_mcgkgmin)
-    else:
-        remi_rates_mcgkgmin = remi_rates_ml_h = remi_rates_ngkgmin = None
-
-    current_regimen = DecodedRegimen(
-        propofol_bolus_mg=propofol_mgkg * weight,
-        propofol_bolus_mgkg=propofol_mgkg,
-        propofol_rates_mgkgh=np.asarray(baseline.propofol_inf_rates_mgkgh, dtype=float).copy(),
-        propofol_rates_ml_h=np.asarray(baseline.propofol_inf_rates_ml_h, dtype=float).copy(),
-        propofol_rates_mcgkgmin=np.asarray(baseline.propofol_inf_rates_mcgkgmin, dtype=float).copy(),
-        remifentanil_selected=remifentanil_selected,
-        remifentanil_bolus_mcg=0.0,
-        remifentanil_bolus_mcgkg=0.0,
-        remifentanil_rates_mcgkgmin=remi_rates_mcgkgmin,
-        remifentanil_rates_ml_h=remi_rates_ml_h,
-        remifentanil_rates_ngkgmin=remi_rates_ngkgmin,
-    )
-
-    t, cp_prop, ce_prop, cp_remi, bis, map_mmhg = runner.simulate_regimen(current_regimen)
-
-    live = SimpleNamespace(
-        confidence=baseline.confidence,
-        time_min=t,
-        bis=bis,
-        map_mmhg=map_mmhg,
-        cp_propofol=cp_prop,
-        ce_propofol=ce_prop,
-        cp_remifentanil=cp_remi,
-        remifentanil_selected=remifentanil_selected,
-        target_bis_low=baseline.target_bis_low,
-        target_bis_high=baseline.target_bis_high,
-        map_lower_bound_mmhg=baseline.map_lower_bound_mmhg,
-    )
-
     dose_response_fig = make_induction_dose_rationale_figure(
         patient=patient,
         rec=baseline,
-        opiate=opiate,
+        opiate=context["opiate"],
         propofol_conc_mg_ml=context["propofol_conc_mg_ml"],
         remifentanil_conc_mcg_ml=context["remifentanil_conc_mcg_ml"],
-        manual_dose_mgkg=propofol_mgkg,
-        remifentanil_rate_override_mcgkgmin=(remi_rate_mcgkgmin if remifentanil_selected else None),
         compact=True,
     )
 
-    # "Matches the recommendation" uses the same tolerance-free comparison
-    # as reset_scenario_medication's own values, so right after clicking
-    # "Reset to recommended" (which sets the sliders to these exact same
-    # numbers) this is guaranteed to match and the scenario/manual overlay
-    # disappears - showing only the recommendation curve, per spec.
-    #
-    # Compare rounded-to-2-decimals rather than exact/tolerance equality:
-    # the slider <-> compact-input sync (_register_scenario_slider_sync)
-    # round-trips every value through "%.2f" text once, e.g. a
-    # full-precision 1.293478... settles to exactly 1.29 - so right after
-    # "Reset to recommended" the slider's settled value only matches
-    # baseline's full-precision value to 2 decimal places, not bit-for-bit.
-    # Rounding both sides the same way before comparing sidesteps any
-    # floating-point boundary edge case a fixed tolerance could hit.
-    propofol_matches = round(propofol_mgkg, 2) == round(float(baseline.propofol_bolus_mgkg), 2)
-    if remifentanil_selected:
-        baseline_remi_rate = _baseline_representative_remi_rate(
-            getattr(baseline, "remifentanil_inf_rates_mcgkgmin", None),
-        )
-        remi_matches = round(remi_rate_mcgkgmin, 2) == round(baseline_remi_rate, 2)
-    else:
-        remi_matches = True
-    scenario_matches_recommendation = propofol_matches and remi_matches
-
-    if scenario_matches_recommendation:
-        bis_fig = make_bis_figure(baseline)
-        map_fig = make_map_figure(baseline)
-        propofol_fig = make_propofol_pk_figure(baseline)
-        remifentanil_fig = make_remifentanil_pk_figure(baseline)
-    else:
-        bis_fig = make_bis_figure_dual(baseline, live, manual_name="Scenario BIS")
-        map_fig = make_map_figure_dual(baseline, live, manual_name="Scenario MAP")
-        propofol_fig = make_propofol_pk_figure_dual(
-            baseline, live, manual_cp_name="Scenario Cp", manual_ce_name="Scenario Ce",
-        )
-        remifentanil_fig = make_remifentanil_pk_figure_dual(baseline, live, manual_name="Scenario Cp")
-
     return (
         dose_response_fig,
-        bis_fig,
-        map_fig,
-        propofol_fig,
-        remifentanil_fig,
+        make_bis_figure(baseline),
+        make_map_figure(baseline),
+        make_propofol_pk_figure(baseline),
+        make_remifentanil_pk_figure(baseline),
     )
 
 

@@ -1523,3 +1523,305 @@ body {
 #se-dose-response-card-wrapper .graph-card-plot {
   min-height: 210px;
 }
+
+/* ---------- Test Exploration page ---------- */
+/* A standalone UI sandbox: reuses .card, .field-label, .scenario-slider,
+   .scenario-compact-input, .scenario-secondary-btn, .scenario-range-*,
+   .param-subsection-label, .info-icon, .derived-value-row,
+   .content-grid/.input-column/.recommendation-column/.predictions-column,
+   .predictions-header-row/.learn-more-link, and graph_card()'s own CSS
+   completely unchanged. Only this page's own card header, compact
+   label|slider|box rows, and Scenario Summary rows/tables get new rules
+   below. */
+
+.te-card {
+  padding: 20px 20px 16px;
+  border-radius: 14px;
+  margin-bottom: 20px;
+}
+
+.te-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.te-card-icon {
+  color: var(--blue-accent);
+  font-size: 15px;
+}
+
+.te-card-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--navy-900);
+}
+
+.te-field-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.te-field-row:last-child {
+  margin-bottom: 0;
+}
+
+.te-field-label {
+  flex: 0 0 130px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.te-field-slider {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 4px;
+}
+
+.te-field-input {
+  flex: 0 0 64px;
+  text-align: center;
+}
+
+.te-field-dropdown {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.te-bis-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 4px;
+}
+
+.te-bis-field {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+}
+
+.te-bis-field .scenario-compact-input {
+  width: 100%;
+}
+
+.te-helper-text {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-style: italic;
+  margin: 10px 0 0 0;
+}
+
+/* ---------- Test Exploration: Scenario Summary (fake logic) ---------- */
+
+.te-summary-card {
+  padding-bottom: 18px;
+}
+
+.te-summary-induction-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.te-summary-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.te-summary-value {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--navy-900);
+}
+
+.te-summary-induction-total {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.te-summary-divider {
+  border-top: 1px solid var(--border-color);
+  margin: 14px 0 12px;
+}
+
+.te-maint-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.te-maint-subtitle {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.te-maint-table {
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+
+.te-maint-table .te-maint-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  padding: 3px 0;
+}
+
+.te-maint-table .te-maint-time {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.te-maint-table .te-maint-value {
+  color: var(--text-primary);
+  font-weight: 700;
+  text-align: right;
+}
+
+/* ---------- Test Exploration: Explore opioid strategy ---------- */
+
+.te-card-subtitle {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0 0 14px 0;
+  line-height: 1.4;
+}
+
+.te-explore-rate-value {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--navy-900);
+  margin-bottom: 6px;
+}
+
+.te-run-scenario-btn {
+  margin-top: 16px;
+}
+
+/* ---------- Test Exploration: Scenario result ---------- */
+
+.te-result-columns {
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+}
+
+.te-result-column {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.te-result-column--explored {
+  padding: 8px 10px;
+  margin: -8px -10px;
+  border-radius: 8px;
+  background-color: rgba(47, 111, 237, 0.06);
+}
+
+.te-result-column-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.te-result-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  padding: 3px 0;
+}
+
+.te-result-row-label {
+  color: var(--text-secondary);
+}
+
+.te-result-row-value {
+  font-weight: 700;
+  color: var(--text-primary);
+  text-align: right;
+}
+
+.te-result-arrow {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.te-delta-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.te-delta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.te-delta-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.te-delta-value {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.te-delta-good {
+  color: #1f9254;
+}
+
+.te-delta-bad {
+  color: #d9362e;
+}
+
+.te-delta-neutral {
+  color: var(--text-secondary);
+}
+
+.te-opioid-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: 100px;
+  padding: 20px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* ---------- Test Exploration: Predictions header ---------- */
+
+.te-predictions-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
