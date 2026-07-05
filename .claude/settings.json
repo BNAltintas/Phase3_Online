@@ -142,7 +142,24 @@
       "Bash(.venv/Scripts/python.exe /tmp/run_server_rationale.py)",
       "Bash(node -e ' *)",
       "Bash(.venv/Scripts/python.exe -c \"import plotly; print\\(plotly.__version__\\)\")",
-      "Bash(sed -i 's#127\\\\.0\\\\.0\\\\.1:[0-9]\\\\+#127.0.0.1:8102#g' drive_rationale_layout.js)"
+      "Bash(sed -i 's#127\\\\.0\\\\.0\\\\.1:[0-9]\\\\+#127.0.0.1:8102#g' drive_rationale_layout.js)",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://127.0.0.1:8103/)",
+      "Bash(timeout 50 node drive_graph_colors.js)",
+      "Bash(curl -s \"http://127.0.0.1:8103/assets/style.css\")",
+      "Bash(timeout 60 node drive_scenario_exploration.js)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://127.0.0.1:8104/)",
+      "Bash(.venv/Scripts/python.exe /tmp/run_server_scenario2.py)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8104 -ErrorAction SilentlyContinue)",
+      "PowerShell(Stop-Process -Force -Confirm:$false -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8100,8101,8102,8103,8104,8105 -ErrorAction SilentlyContinue)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://127.0.0.1:8105/)",
+      "Bash(.venv/Scripts/python.exe /tmp/run_server_fresh.py)",
+      "Bash(timeout 60 node drive_scenario_compact.js)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://127.0.0.1:8105/ --max-time 5)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://127.0.0.1:8106/)",
+      "Bash(timeout 60 node drive_scenario_dual.js)",
+      "Bash(.venv/Scripts/python.exe /tmp/run_server_dual.py)"
     ]
   }
 }

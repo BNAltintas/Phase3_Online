@@ -2,15 +2,28 @@ from __future__ import annotations
 
 from dash import dcc, html
 
+from propofol.config import BOLUS_MGKG_BOUNDS
 from propofol.more_info_content import MORE_INFO_SECTIONS, MORE_INFO_SUBTITLE, MORE_INFO_TITLE
 from propofol.recommend_regimen2023 import (
     DEFAULT_PROPOFOL_CONC_MG_ML,
     DEFAULT_REMI_CONC_MCG_ML,
     MAP_ABS_MIN_TARGET,
     MAP_REL_FRAC_TARGET,
+    REMI_INFUSION_MCGKGMIN_BOUNDS,
     TARGET_BIS_HIGH,
     TARGET_BIS_LOW,
 )
+
+# Default patient/medication scenario used the first time the Scenario
+# Exploration page loads, and restored by "Restore original patient" -
+# intentionally the same defaults as the Recommendation page's Input
+# Parameters, since this page is a fully independent, self-contained
+# what-if sandbox (its own patient, never the Recommendation page's).
+SCENARIO_DEFAULT_PATIENT = {
+    "age": 35, "sex": "male", "height": 170, "weight": 70, "sbp": 120, "dbp": 70,
+}
+SCENARIO_DEFAULT_PROPOFOL_MGKG = 1.5
+SCENARIO_DEFAULT_REMI_MCGKGMIN = 0.10
 
 # Static placeholder date/time shown next to fields whose value still matches
 # the original EHR/Monitor-sourced default (cosmetic only - there is no real
@@ -528,12 +541,11 @@ def build_sidebar():
     """
     Build the left navigation sidebar.
 
-    "Recommendation" and "Model Info" switch between the two pages;
-    "Scenario Exploration" is still a placeholder for a page that does not
-    exist yet. Each item's icon is purely presentational (a Font Awesome
-    glyph + the existing label text) - none of the ids, n_clicks, or
-    className-driven active/disabled styling changed, so navigation and
-    active-page highlighting work exactly as before.
+    "Recommendation", "Scenario Exploration", and "Model Info" switch
+    between the three pages. Each item's icon is purely presentational (a
+    Font Awesome glyph + the existing label text) - none of the ids,
+    n_clicks, or className-driven active/disabled styling changed, so
+    navigation and active-page highlighting work exactly as before.
     """
     return html.Div(
         [
@@ -554,7 +566,9 @@ def build_sidebar():
                             html.I(className="fa-solid fa-chart-line sidebar-nav-icon"),
                             "Scenario Exploration",
                         ],
-                        className="sidebar-nav-item sidebar-nav-item--disabled",
+                        id="nav-scenario-btn",
+                        n_clicks=0,
+                        className="sidebar-nav-item",
                     ),
                     html.Div(
                         [
@@ -733,12 +747,389 @@ def build_predictions_column():
     )
 
 
+# ============================================================
+# Scenario Exploration page
+#
+# A fully independent, self-contained "what-if" sandbox: its own patient,
+# own targets, own opioid/dose scenario, never the Recommendation page's
+# recommendation-store/manual-scenario-store. It reuses the same `.card`,
+# `graph_card()`, `field_block()`, and `derived_value_row()` building
+# blocks the Recommendation page uses, so the two pages share a visual
+# language without sharing any data or callback wiring.
+# ============================================================
+
+def _scenario_summary_row(label: str, value_id: str, color_class: str):
+    """
+    Build one "Explored scenario" summary row - the same unboxed
+    label/value layout as derived_value_row(), minus the info-icon tooltip
+    (these are live scenario inputs/outputs, not derivation formulas), with
+    a color class so propofol/remifentanil/recommendation values are each
+    visually distinct.
+    """
+    return html.Div(
+        [
+            html.Span(label, className="derived-label"),
+            html.Span(id=value_id, children="-", className=f"derived-value {color_class}"),
+        ],
+        className="derived-value-row",
+    )
+
+
+def _compact_row(label_children, component, extra_class: str = ""):
+    """
+    Build one compact "label left, small control right" row for the
+    Scenario Exploration page. Unlike field_block() (label stacked above a
+    full-width control, used by the Recommendation page's patient fields),
+    this keeps every Patient/Targets row to a single short line so the
+    whole left column stays compact - no sliders, no stepper buttons.
+    """
+    class_name = "scenario-compact-row"
+    if extra_class:
+        class_name += f" {extra_class}"
+    return html.Div(
+        [html.Div(label_children, className="scenario-compact-label"), component],
+        className=class_name,
+    )
+
+
+def _compact_input(input_id: str, value, extra_class: str = ""):
+    """
+    A small, right-aligned text input for one compact row. type="text" (not
+    "number") deliberately avoids the browser/Dash-rendered +/- stepper
+    buttons - values are still parsed as floats server-side in app.py,
+    exactly like every other text-typed draft input in this app already.
+    """
+    class_name = "scenario-compact-input"
+    if extra_class:
+        class_name += f" {extra_class}"
+    return dcc.Input(id=input_id, type="text", value=value, debounce=True, className=class_name)
+
+
+def _compact_derived_row(label: str, value_id: str, tooltip: str):
+    """
+    A compact, read-only derived-value row - same info-icon markup/style as
+    derived_value_row() on the Recommendation page, just laid out as a
+    label-left/value-right row (a small shaded box) instead of an unboxed
+    label/value pair, to match this page's compact row rhythm.
+    """
+    return _compact_row(
+        html.Span([label, html.Span("i", title=tooltip, className="info-icon")], className="derived-label"),
+        html.Div(id=value_id, children="-", className="scenario-compact-input scenario-compact-input--readonly"),
+    )
+
+
+def build_scenario_patient_card():
+    """
+    Build the "Patient scenario" card: age/sex/height/weight, SBP/DBP
+    baseline vitals, and derived MAP/PP - a simplified, always-editable
+    version of the Recommendation page's Patient Parameters card (compact
+    label-left/value-right rows instead of click-to-edit popovers or
+    stacked full-width fields, no Source/Date-Time columns), since this
+    page has no EHR-sourced values to distinguish from manual edits.
+    `debounce=True` on every input defers firing its `value` change until
+    blur/Enter, so the (expensive, Powell-optimized) scenario
+    recommendation isn't recomputed on every keystroke.
+    """
+    defaults = SCENARIO_DEFAULT_PATIENT
+    return html.Div(
+        [
+            html.H4("Patient scenario", className="card-subheading"),
+            param_subsection_label("Patient characteristics", first=True),
+            _compact_row("Age (years)", _compact_input("se-age", defaults["age"])),
+            _compact_row(
+                "Sex",
+                dcc.Dropdown(
+                    id="se-sex",
+                    options=[
+                        {"label": "Male", "value": "male"},
+                        {"label": "Female", "value": "female"},
+                    ],
+                    value=defaults["sex"], clearable=False, searchable=False,
+                    className="scenario-compact-dropdown",
+                ),
+            ),
+            _compact_row("Height (cm)", _compact_input("se-height", defaults["height"])),
+            _compact_row("Weight (kg)", _compact_input("se-weight", defaults["weight"])),
+            html.Div("Baseline vitals", className="param-subsection-label"),
+            _compact_row("SBP (mmHg)", _compact_input("se-sbp", defaults["sbp"])),
+            _compact_row("DBP (mmHg)", _compact_input("se-dbp", defaults["dbp"])),
+            html.Div("Derived values", className="param-subsection-label"),
+            _compact_derived_row("MAP (mmHg)", "se-derived-map", "MAP = DBP + (SBP − DBP) / 3"),
+            _compact_derived_row("Baseline PP (mmHg)", "se-derived-pp", "Baseline PP = SBP − DBP"),
+            html.Button(
+                [html.I(className="fa-solid fa-rotate-left"), "Restore original patient"],
+                id="se-restore-patient-btn", n_clicks=0,
+                className="scenario-secondary-btn",
+            ),
+        ],
+        className="card",
+    )
+
+
+def _compact_slider_control(
+    label: str,
+    value_input_id: str,
+    slider_id: str,
+    value,
+    unit: str,
+    bounds: tuple[float, float],
+    step: float,
+    drug: str,
+    wrapper_id: str | None = None,
+):
+    """
+    Build one compact dose/rate control: a label, a small editable numeric
+    field (kept in sync with the slider by _register_scenario_slider_sync
+    in app.py) plus its unit suffix centered above a slim slider with
+    min/max marks. Propofol and remifentanil both use this exact same
+    structure - only `drug` ("propofol"/"remifentanil", which selects blue
+    vs. purple) and bounds/unit differ - so "compact styling" is shared by
+    construction, not just visually similar.
+    """
+    value_class = f"scenario-slider-value--{drug}"
+    slider_class = f"scenario-slider scenario-slider--{drug}"
+    control = html.Div(
+        [
+            html.Div(
+                [
+                    dcc.Input(
+                        id=value_input_id, type="text", value=f"{value:.2f}", debounce=True,
+                        className=f"scenario-slider-value-input {value_class}",
+                    ),
+                    html.Span(unit, className=f"scenario-slider-unit {value_class}"),
+                ],
+                className="scenario-slider-value-row",
+            ),
+            dcc.Slider(
+                id=slider_id,
+                min=bounds[0], max=bounds[1], step=step, value=value,
+                marks={bounds[0]: f"{bounds[0]:.2f}", bounds[1]: f"{bounds[1]:.2f}"},
+                tooltip={"placement": "bottom", "always_visible": False},
+                updatemode="drag",
+                allow_direct_input=False,
+                className=slider_class,
+            ),
+        ],
+        className="scenario-slider-block",
+    )
+    field = field_block(label, control)
+    return html.Div(field, id=wrapper_id) if wrapper_id else field
+
+
+def build_scenario_medication_card():
+    """
+    Build the "Medication scenario" card: opioid choice, propofol induction
+    dose, and (when an opioid is selected) its infusion rate - the two
+    dose/rate sliders (and their synced numeric inputs) drive a cheap
+    single simulate_regimen() call per change (see render_scenario_page in
+    app.py), never the Powell optimizer, so they can update live while
+    dragging or typing.
+    """
+    return html.Div(
+        [
+            html.H4("Medication scenario", className="card-subheading"),
+            field_block(
+                "Opioid",
+                html.Div(
+                    dcc.Dropdown(
+                        id="se-opioid-dropdown",
+                        options=[
+                            {"label": "No opiate / propofol only", "value": "none"},
+                            {"label": "Remifentanil", "value": "remifentanil"},
+                            {"label": "Sufentanil (upcoming)", "value": "sufentanil", "disabled": True},
+                            {"label": "Fentanyl (upcoming)", "value": "fentanyl", "disabled": True},
+                        ],
+                        value="remifentanil", clearable=False, searchable=False,
+                        style=DROPDOWN_STYLE,
+                    ),
+                    className="opiate-dropdown-wrapper",
+                ),
+            ),
+            _compact_slider_control(
+                "Infusion rate (µg/kg/min)",
+                "se-remi-rate-input", "se-remi-rate-slider",
+                SCENARIO_DEFAULT_REMI_MCGKGMIN, "µg/kg/min",
+                REMI_INFUSION_MCGKGMIN_BOUNDS, 0.01,
+                "remifentanil",
+                wrapper_id="se-remi-rate-block",
+            ),
+            _compact_slider_control(
+                "Propofol induction dose (mg/kg)",
+                "se-propofol-dose-input", "se-propofol-dose-slider",
+                SCENARIO_DEFAULT_PROPOFOL_MGKG, "mg/kg",
+                BOLUS_MGKG_BOUNDS, 0.05,
+                "propofol",
+            ),
+            html.Button(
+                [html.I(className="fa-solid fa-rotate-left"), "Reset to recommended"],
+                id="se-reset-medication-btn", n_clicks=0,
+                className="scenario-secondary-btn",
+            ),
+        ],
+        className="card",
+    )
+
+
+def build_scenario_targets_card():
+    """
+    Build the "Targets" card - the same BIS/MAP target clinical validation
+    rules as the Recommendation page's Model Settings card (see
+    FIELD_RULES in app.py, reused unchanged for these fields), laid out
+    compactly: BIS lower/upper share one row, and MAP target is a single
+    mode dropdown (Absolute/Relative) + one value, rather than two
+    always-shown fields - simpler for a quick what-if scenario, still
+    backed by the exact same target math (see compute_scenario_baseline).
+    """
+    return html.Div(
+        [
+            html.H4("Targets", className="card-subheading"),
+            html.Div("Target BIS", className="param-subsection-label param-subsection-label--first"),
+            html.Div(
+                [
+                    _compact_input("se-bis-target-low", TARGET_BIS_LOW, extra_class="scenario-range-input"),
+                    html.Span("-", className="scenario-range-sep"),
+                    _compact_input("se-bis-target-high", TARGET_BIS_HIGH, extra_class="scenario-range-input"),
+                ],
+                className="scenario-range-row",
+            ),
+            html.Div(id="se-bis-target-message", className="field-message"),
+            html.Div("Target MAP", className="param-subsection-label"),
+            html.Div(
+                [
+                    dcc.Dropdown(
+                        id="se-map-target-mode",
+                        options=[
+                            {"label": "Absolute (mmHg)", "value": "abs"},
+                            {"label": "Relative (% baseline)", "value": "rel"},
+                        ],
+                        value="abs", clearable=False, searchable=False,
+                        className="scenario-map-mode-dropdown",
+                    ),
+                    _compact_input("se-map-target-value", MAP_ABS_MIN_TARGET, extra_class="scenario-range-input"),
+                ],
+                className="scenario-range-row",
+            ),
+            html.Div(id="se-map-target-message", className="field-message"),
+        ],
+        className="card",
+    )
+
+
+def build_scenario_input_column():
+    """Build the Scenario Exploration page's left column."""
+    return html.Div(
+        [
+            html.Div("PATIENT SCENARIO", className="section-label"),
+            build_scenario_patient_card(),
+            html.Div("MEDICATION SCENARIO", className="section-label"),
+            build_scenario_medication_card(),
+            html.Div("TARGETS", className="section-label"),
+            build_scenario_targets_card(),
+        ],
+        className="input-column",
+    )
+
+
+def build_scenario_summary_card():
+    """Build the "Explored scenario" summary card at the top of the center column."""
+    return html.Div(
+        [
+            html.H4("Explored scenario", className="card-subheading"),
+            html.Div(
+                [
+                    _scenario_summary_row(
+                        "Propofol induction dose", "se-summary-propofol", "scenario-value--propofol",
+                    ),
+                    _scenario_summary_row(
+                        "Remifentanil infusion rate", "se-summary-remi", "scenario-value--remifentanil",
+                    ),
+                    _scenario_summary_row(
+                        "Scenario recommendation", "se-summary-recommendation", "scenario-value--recommended",
+                    ),
+                ],
+                className="derived-values",
+            ),
+        ],
+        className="card",
+    )
+
+
+def build_scenario_center_column():
+    """
+    Build the Scenario Exploration page's center column: the summary card
+    plus the dose-response interaction graph (a relabeled reuse of the
+    Recommendation page's induction-dose-rationale sweep - same function,
+    same styling, see make_induction_dose_rationale_figure in app.py).
+    """
+    return html.Div(
+        [
+            html.Div("EXPLORED SCENARIO", className="section-label"),
+            build_scenario_summary_card(),
+            graph_card(
+                "Dose-response interaction",
+                "se-dose-response-graph",
+                note="How propofol dose affects MAP and BIS - with remifentanil",
+                tall=True,
+            ),
+        ],
+        className="recommendation-column",
+    )
+
+
+def build_scenario_predictions_column():
+    """
+    Build the Scenario Exploration page's right column: the same 4
+    prediction graph cards as the Recommendation page's Predictions column
+    (BIS, MAP, Propofol PK/PD, Remifentanil PK), all expanded by default.
+    Each card's "Show" checkbox is handled by the same generic
+    toggle_graph_visibility pattern-matching callback in app.py that
+    already drives every other graph card - no new visibility code needed.
+    """
+    return html.Div(
+        [
+            html.Div("PREDICTIONS", className="section-label"),
+            graph_card("Predicted BIS", "se-bis-graph", default_visible=True),
+            graph_card("Predicted MAP", "se-map-graph", default_visible=True),
+            graph_card("Propofol PK/PD", "se-propofol-pk-graph", default_visible=True),
+            graph_card("Remifentanil PK", "se-remifentanil-pk-graph", default_visible=True),
+        ],
+        className="predictions-column",
+    )
+
+
+def build_scenario_exploration_page():
+    """
+    Build the Scenario Exploration page - a sibling of main-content and
+    more-info-view, shown/hidden the same way (display:none toggling owned
+    by render_active_page in app.py).
+    """
+    return html.Div(
+        html.Div(
+            [
+                build_scenario_input_column(),
+                html.Div(
+                    [
+                        build_scenario_center_column(),
+                        build_scenario_predictions_column(),
+                    ],
+                    className="content-grid",
+                ),
+            ],
+            className="content-grid",
+        ),
+        id="scenario-exploration-view",
+        className="main-content",
+        style={"display": "none"},
+    )
+
+
 def build_layout():
     """
     Build the main layout of the dashboard: a navigation sidebar plus a
-    three-column input/recommendation/predictions dashboard, or the "More
-    Info" page - the two views are siblings, and only one is ever visible
-    at a time (Output("main-content", "style") /
+    three-column input/recommendation/predictions dashboard, the Scenario
+    Exploration page, or the "More Info" page - the three views are
+    siblings, and only one is ever visible at a time (Output("main-content",
+    "style") / Output("scenario-exploration-view", "style") /
     Output("more-info-view", "style"), driven by active-page-store and
     owned by render_active_page in app.py).
 
@@ -770,8 +1161,14 @@ def build_layout():
             # Set/cleared by two clientside callbacks in app.py so the
             # "start" transition has zero server round-trip latency.
             dcc.Store(id="recommendation-loading-store", data=False),
-            # "recommendation" or "more-info" - which top-level page is shown.
+            # "recommendation", "scenario-exploration", or "more-info" - which
+            # top-level page is shown.
             dcc.Store(id="active-page-store", data="recommendation"),
+            # Holds the Scenario Exploration page's own computed baseline
+            # recommendation (context + result) - entirely separate from
+            # recommendation-store, since this page never touches the
+            # Recommendation page's patient/model state.
+            dcc.Store(id="se-baseline-store", data=None),
 
             build_sidebar(),
 
@@ -802,6 +1199,7 @@ def build_layout():
                 className="main-content",
             ),
 
+            build_scenario_exploration_page(),
             build_more_info_view(),
         ],
         className="app-shell",

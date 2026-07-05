@@ -1306,3 +1306,185 @@ body {
 .run-recommendation-btn--loading .run-btn-spinner {
   display: inline-block;
 }
+
+/* ---------- Scenario Exploration page ---------- */
+/* Reuses .card, .field-block, .field-input, .field-message, .param-*,
+   .derived-value-row, .content-grid/.input-column/.recommendation-column/
+   .predictions-column, and graph_card()'s own CSS completely unchanged -
+   only the handful of controls unique to this page (secondary buttons,
+   sliders, summary value colors) get new rules here. */
+
+.scenario-secondary-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 10px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background-color: #eaf0fe;
+  color: var(--blue-accent);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.scenario-secondary-btn:hover {
+  background-color: #dbe6fd;
+}
+
+/* Compact "label left, small control right" rows - Patient/Targets cards
+   use these instead of field_block()'s stacked label-above-full-width-
+   control layout, so the whole left column reads as a tight, dense list
+   rather than a series of large form fields. */
+.scenario-compact-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.scenario-compact-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.scenario-compact-input {
+  flex: 0 0 auto;
+  width: 84px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 13px;
+  text-align: right;
+  color: var(--text-primary);
+  box-sizing: border-box;
+}
+
+.scenario-compact-input--readonly {
+  background-color: var(--bg-page);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* Two-class selectors (higher specificity than the single-class
+   .scenario-compact-input border rule above, and than the shared
+   .field-input--error/--warning rules) so validation coloring always wins
+   regardless of stylesheet order, while keeping this page's own compact
+   sizing intact. */
+.scenario-compact-input.field-input--error {
+  border-color: #d9362e;
+}
+
+.scenario-compact-input.field-input--warning {
+  border-color: #c2680f;
+}
+
+/* dcc.Dropdown's className lands on its inner trigger <button>, not on the
+   .dash-dropdown-wrapper div that is the actual flex item here - so the
+   flex sizing has to target that wrapper directly via a descendant
+   selector instead of relying on the className prop. */
+.scenario-compact-row .dash-dropdown-wrapper {
+  flex: 0 0 140px;
+}
+
+.scenario-range-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.scenario-range-input {
+  width: 68px;
+  flex: 0 0 auto;
+}
+
+.scenario-range-sep {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.scenario-range-row .dash-dropdown-wrapper {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.scenario-slider-block {
+  padding-top: 4px;
+}
+
+.scenario-slider-value-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.scenario-slider-value-input {
+  border: none;
+  background: transparent;
+  padding: 0;
+  width: 60px;
+  text-align: right;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.scenario-slider-value-input:focus {
+  outline: none;
+  border-bottom: 1.5px solid currentColor;
+}
+
+.scenario-slider-unit {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.scenario-slider-value--propofol {
+  color: var(--blue-accent);
+}
+
+.scenario-slider-value--remifentanil {
+  color: #6b46c1;
+}
+
+.scenario-slider .dash-slider-range {
+  background-color: var(--blue-accent) !important;
+}
+
+.scenario-slider .dash-slider-thumb {
+  border-color: var(--blue-accent) !important;
+  background-color: var(--blue-accent) !important;
+}
+
+.scenario-slider--remifentanil .dash-slider-range {
+  background-color: #6b46c1 !important;
+}
+
+.scenario-slider--remifentanil .dash-slider-thumb {
+  border-color: #6b46c1 !important;
+  background-color: #6b46c1 !important;
+}
+
+.scenario-value--propofol {
+  color: var(--blue-accent);
+}
+
+.scenario-value--remifentanil {
+  color: #6b46c1;
+}
+
+.scenario-value--recommended {
+  color: #1f9254;
+}
