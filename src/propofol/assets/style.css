@@ -14,6 +14,9 @@
   --text-primary: #1f2330;
   --text-secondary: #6b7280;
   --text-on-navy: #ffffff;
+  --sidebar-bg: #001F6B;
+  --sidebar-active-bg: #2E5BFF;
+  --sidebar-text: rgba(255, 255, 255, 0.85);
 }
 
 input[type=number]::-webkit-outer-spin-button,
@@ -472,64 +475,79 @@ body {
 .sidebar {
   width: 210px;
   flex: 0 0 210px;
-  background-color: var(--bg-card);
-  border-right: 1px solid var(--border-color);
+  background-color: var(--sidebar-bg);
   display: flex;
   flex-direction: column;
-  padding: 16px 12px;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  padding: 24px 14px;
 }
 
 .sidebar-brand {
-  font-size: 17px;
-  font-weight: 700;
-  color: var(--navy-900);
-  margin-bottom: 18px;
-  padding-left: 4px;
+  font-size: 30px;
+  font-weight: 800;
+  color: #ffffff;
+  margin-bottom: 28px;
+  padding-left: 6px;
 }
 
 .sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
 }
 
 .sidebar-nav-item {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 10px;
-  border-radius: 7px;
-  font-weight: 600;
-  font-size: 13px;
-  color: var(--text-secondary);
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--sidebar-text);
   cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+/* Semi-transparent blue, never grey, per the dark theme - excludes the
+   active item (it already has its own solid pill) and the disabled item
+   (not interactive) so hovering them doesn't visually flicker. */
+.sidebar-nav-item:not(.sidebar-nav-item--active):not(.sidebar-nav-item--disabled):hover {
+  background-color: rgba(46, 91, 255, 0.25);
 }
 
 .sidebar-nav-item--active {
-  background-color: #eaf0fe;
-  color: var(--navy-900);
+  background-color: var(--sidebar-active-bg);
+  color: #ffffff;
 }
 
 .sidebar-nav-item--disabled {
-  color: #b5b9c5;
+  color: rgba(255, 255, 255, 0.4);
   cursor: default;
 }
 
 /* Fixed width keeps every label's text starting at the same x-position
-   regardless of each Font Awesome glyph's natural width. Blue accent gives
-   the icons a consistent, on-brand identity independent of the label's
-   own active/inactive text color; the disabled item's icon is muted to
-   match its greyed-out label instead. */
+   regardless of each Font Awesome glyph's natural width. Icons match the
+   item's own text color (active = white, default = the same translucent
+   white as the label, disabled = muted) instead of the old light-theme's
+   separate blue-accent icon color, which would clash with the dark
+   navy background. */
 .sidebar-nav-icon {
   width: 16px;
   flex: 0 0 auto;
   text-align: center;
   font-size: 13px;
-  color: var(--blue-accent);
+  color: var(--sidebar-text);
+}
+
+.sidebar-nav-item--active .sidebar-nav-icon {
+  color: #ffffff;
 }
 
 .sidebar-nav-item--disabled .sidebar-nav-icon {
-  color: #b5b9c5;
+  color: rgba(255, 255, 255, 0.4);
 }
 
 .main-content {
