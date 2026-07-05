@@ -1019,6 +1019,7 @@ def make_induction_dose_rationale_figure(
     remifentanil_conc_mcg_ml: float,
     manual_dose_mgkg: float | None = None,
     remifentanil_rate_override_mcgkgmin: float | None = None,
+    compact: bool = False,
 ):
     """
     Vary only the propofol induction bolus while keeping the recommended
@@ -1057,6 +1058,17 @@ def make_induction_dose_rationale_figure(
     something the optimizer picked. Defaults to None, which reproduces the
     exact previous behavior (rec's own schedule, unchanged) - the
     Recommendation page's call site never passes this argument.
+
+    compact=True widens the paper-y spacing between the stacked "target
+    range" / "Recommendation" / "Manual dose" annotations and the legend
+    (and their containing margins) so they stay legible in a much shorter
+    card - Scenario Exploration's own dose-response card is roughly 35-40%
+    shorter than the Recommendation page's induction-dose-rationale card,
+    so the same absolute-pixel margins would otherwise leave far less
+    vertical room per stacked row and the two dose annotations would
+    overlap. Defaults to False, reproducing the exact previous
+    spacing/margins - the Recommendation page's call site never passes
+    this argument.
     """
     selected_dose_mgkg = float(rec.propofol_bolus_mgkg)
     baseline_map = float(patient.base_map)
@@ -1400,9 +1412,11 @@ def make_induction_dose_rationale_figure(
         line=dict(color="green", width=3, dash="dash"),
         layer="above",
     )
+    rec_annotation_y = 1.125 if compact else 1.07
+
     fig.add_annotation(
         x=selected_dose_mgkg,
-        y=1.07,
+        y=rec_annotation_y,
         xref="x",
         yref="paper",
         text=f"<b>Recommendation {selected_dose_mgkg:.2f} mg/kg</b>",
@@ -1449,7 +1463,7 @@ def make_induction_dose_rationale_figure(
         )
         fig.add_annotation(
             x=manual_dose_mgkg,
-            y=1.14,
+            y=1.24 if compact else 1.14,
             xref="x",
             yref="paper",
             text=f"<b>Manual dose {manual_dose_mgkg:.2f} mg/kg</b>",
@@ -1459,11 +1473,21 @@ def make_induction_dose_rationale_figure(
         )
 
     # The legend sits above the plot, stacked above the "Recommendation"/
-    # "Manual dose" annotations (themselves at paper y=1.07/1.14) rather
-    # than below the plot - this reclaims the large bottom margin that
-    # previously existed only to hold it, which is what let the card shrink
-    # below without losing any label.
-    legend_y = 1.26 if manual_dose_mgkg is not None else 1.19
+    # "Manual dose" annotations rather than below the plot - this reclaims
+    # the large bottom margin that previously existed only to hold it,
+    # which is what let the card shrink below without losing any label.
+    # In compact mode the rows are spaced further apart in paper-y (see
+    # rec_annotation_y/manual_dose's y above) and margin.t is enlarged to
+    # match, so a much shorter card still has enough absolute pixels
+    # between each stacked row to stay legible.
+    if compact:
+        legend_y = 1.355 if manual_dose_mgkg is not None else 1.19
+        margin_t = 75 if manual_dose_mgkg is not None else 55
+        margin_b = 35
+    else:
+        legend_y = 1.26 if manual_dose_mgkg is not None else 1.19
+        margin_t = 90 if manual_dose_mgkg is not None else 70
+        margin_b = 42
 
     fig.update_layout(
         # No in-plot title text - the card header ("Induction-dose rationale")
@@ -1481,8 +1505,8 @@ def make_induction_dose_rationale_figure(
             tracegroupgap=2,
         ),
         margin=dict(
-            t=90 if manual_dose_mgkg is not None else 70,
-            b=42,
+            t=margin_t,
+            b=margin_b,
             l=48,
             r=38,
         ),
@@ -3165,9 +3189,47 @@ def reset_scenario_medication(_n_clicks, baseline_store):
 
 
 @app.callback(
-    Output("se-summary-propofol", "children"),
-    Output("se-summary-remi", "children"),
-    Output("se-summary-recommendation", "children"),
+    Output("se-summary-opioid-strategy", "children"),
+    Output("se-summary-rec-propofol-induction", "children"),
+    Output("se-summary-rec-opioid-maintenance", "children"),
+    Output("se-summary-rec-propofol-maintenance", "children"),
+    Input("se-baseline-store", "data"),
+)
+def render_scenario_recommendation_summary(baseline_store):
+    """
+    Fill in the "Explored scenario" card's 4 recommendation-reference
+    values. Depends only on se-baseline-store (never the dose/rate
+    sliders) since none of these values come from the live scenario -
+    they describe what the model recommends, not what the user is
+    currently exploring.
+    """
+    if not baseline_store or baseline_store.get("error") or not baseline_store.get("result"):
+        return "-", "-", "-", "-"
+
+    context = baseline_store["context"]
+    result = baseline_store["result"]
+    opioid_selected = context["opiate"] == "remifentanil"
+
+    opioid_strategy = "Remifentanil" if opioid_selected else "None"
+    propofol_induction = f"{float(result['propofol_bolus_mgkg']):.2f} mg/kg"
+
+    if opioid_selected:
+        remi_rate = _baseline_representative_remi_rate(result.get("remifentanil_inf_rates_mcgkgmin"))
+        opioid_maintenance = f"{remi_rate:.2f} µg/kg/min"
+    else:
+        opioid_maintenance = "-"
+
+    prop_maint_rates = result.get("propofol_inf_rates_mcgkgmin")
+    if prop_maint_rates:
+        prop_maint_rate = float(np.max(np.asarray(prop_maint_rates, dtype=float)))
+        propofol_maintenance = f"{prop_maint_rate:.0f} µg/kg/min"
+    else:
+        propofol_maintenance = "-"
+
+    return opioid_strategy, propofol_induction, opioid_maintenance, propofol_maintenance
+
+
+@app.callback(
     Output("se-dose-response-graph", "figure"),
     Output("se-bis-graph", "figure"),
     Output("se-map-graph", "figure"),
@@ -3179,8 +3241,10 @@ def reset_scenario_medication(_n_clicks, baseline_store):
 )
 def render_scenario_page(baseline_store, propofol_mgkg, remi_rate_mcgkgmin):
     """
-    Render everything driven by the current scenario: the summary card, the
-    dose-response sweep, and the 4 prediction graphs.
+    Render everything driven by the current scenario: the dose-response
+    sweep and the 4 prediction graphs. (The "Explored scenario" card's own
+    text is rendered separately by render_scenario_recommendation_summary,
+    since it depends only on the baseline, not these sliders.)
 
     The 4 prediction graphs are built on a lightweight object that mixes
     the baseline recommendation's confidence band + targets (expensive,
@@ -3208,7 +3272,7 @@ def render_scenario_page(baseline_store, propofol_mgkg, remi_rate_mcgkgmin):
         or not baseline_store.get("context") or not baseline_store.get("result")
         or propofol_mgkg is None or remi_rate_mcgkgmin is None
     ):
-        return "-", "-", "-", empty, empty, empty, empty, empty
+        return empty, empty, empty, empty, empty
 
     context = baseline_store["context"]
     baseline = _store_dict_to_namespace(baseline_store["result"])
@@ -3283,11 +3347,8 @@ def render_scenario_page(baseline_store, propofol_mgkg, remi_rate_mcgkgmin):
         remifentanil_conc_mcg_ml=context["remifentanil_conc_mcg_ml"],
         manual_dose_mgkg=propofol_mgkg,
         remifentanil_rate_override_mcgkgmin=(remi_rate_mcgkgmin if remifentanil_selected else None),
+        compact=True,
     )
-
-    summary_propofol = f"{propofol_mgkg:.2f} mg/kg"
-    summary_remi = f"{remi_rate_mcgkgmin:.2f} µg/kg/min" if remifentanil_selected else "-"
-    summary_recommendation = f"{float(baseline.propofol_bolus_mgkg):.2f} mg/kg"
 
     # "Matches the recommendation" uses the same tolerance-free comparison
     # as reset_scenario_medication's own values, so right after clicking
@@ -3327,9 +3388,6 @@ def render_scenario_page(baseline_store, propofol_mgkg, remi_rate_mcgkgmin):
         remifentanil_fig = make_remifentanil_pk_figure_dual(baseline, live, manual_name="Scenario Cp")
 
     return (
-        summary_propofol,
-        summary_remi,
-        summary_recommendation,
         dose_response_fig,
         bis_fig,
         map_fig,

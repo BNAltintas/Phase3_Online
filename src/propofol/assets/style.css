@@ -1488,3 +1488,20 @@ body {
 .scenario-value--recommended {
   color: #1f9254;
 }
+
+/* Dose-response interaction is now a secondary, explanatory graph (the
+   BIS/MAP/PK predictions in the right column are the primary output) -
+   scoped to this one card (not the shared .graph-card--tall, which the
+   Recommendation page's own induction-dose-rationale card also uses at
+   its own 400px height) so shrinking it here can't affect that card. */
+#se-dose-response-card-wrapper .graph-card--tall {
+  height: 320px;
+}
+
+#se-dose-response-card-wrapper .graph-card-note {
+  margin-bottom: 2px;
+}
+
+#se-dose-response-card-wrapper .graph-card-plot {
+  min-height: 210px;
+}

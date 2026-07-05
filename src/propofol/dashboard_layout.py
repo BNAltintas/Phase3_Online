@@ -1031,20 +1031,35 @@ def build_scenario_input_column():
 
 
 def build_scenario_summary_card():
-    """Build the "Explored scenario" summary card at the top of the center column."""
+    """
+    Build the "Explored scenario" card - the recommendation's own reference
+    values only (opioid strategy, recommended propofol induction dose,
+    recommended opioid maintenance, recommended propofol maintenance), not
+    graphs and not the live slider values (those are already visible on
+    the sliders/inputs in the left column). Populated by
+    render_scenario_recommendation_summary in app.py, which only depends
+    on se-baseline-store - it never needs to re-run when the dose/rate
+    sliders move, since none of these four values come from them.
+    """
     return html.Div(
         [
             html.H4("Explored scenario", className="card-subheading"),
             html.Div(
                 [
                     _scenario_summary_row(
-                        "Propofol induction dose", "se-summary-propofol", "scenario-value--propofol",
+                        "Current opioid strategy", "se-summary-opioid-strategy", "",
                     ),
                     _scenario_summary_row(
-                        "Remifentanil infusion rate", "se-summary-remi", "scenario-value--remifentanil",
+                        "Recommended propofol induction dose",
+                        "se-summary-rec-propofol-induction", "scenario-value--recommended",
                     ),
                     _scenario_summary_row(
-                        "Scenario recommendation", "se-summary-recommendation", "scenario-value--recommended",
+                        "Recommended opioid maintenance",
+                        "se-summary-rec-opioid-maintenance", "scenario-value--recommended",
+                    ),
+                    _scenario_summary_row(
+                        "Recommended propofol maintenance",
+                        "se-summary-rec-propofol-maintenance", "scenario-value--recommended",
                     ),
                 ],
                 className="derived-values",
@@ -1056,20 +1071,28 @@ def build_scenario_summary_card():
 
 def build_scenario_center_column():
     """
-    Build the Scenario Exploration page's center column: the summary card
-    plus the dose-response interaction graph (a relabeled reuse of the
-    Recommendation page's induction-dose-rationale sweep - same function,
-    same styling, see make_induction_dose_rationale_figure in app.py).
+    Build the Scenario Exploration page's center column: the "Explored
+    scenario" recommendation-reference card, plus the dose-response
+    interaction graph underneath (a relabeled reuse of the Recommendation
+    page's induction-dose-rationale sweep - same function, same styling,
+    see make_induction_dose_rationale_figure in app.py) at a reduced,
+    secondary height - this column explains *why* the recommendation is
+    what it is; the right column's BIS/MAP/PK predictions are the primary,
+    decision-support output and always start at the same height as this
+    column, never pushed down by it.
     """
     return html.Div(
         [
             html.Div("EXPLORED SCENARIO", className="section-label"),
             build_scenario_summary_card(),
-            graph_card(
-                "Dose-response interaction",
-                "se-dose-response-graph",
-                note="How propofol dose affects MAP and BIS - with remifentanil",
-                tall=True,
+            html.Div(
+                graph_card(
+                    "Dose-response interaction",
+                    "se-dose-response-graph",
+                    note="How propofol dose affects MAP and BIS - with remifentanil",
+                    tall=True,
+                ),
+                id="se-dose-response-card-wrapper",
             ),
         ],
         className="recommendation-column",
@@ -1102,17 +1125,27 @@ def build_scenario_exploration_page():
     Build the Scenario Exploration page - a sibling of main-content and
     more-info-view, shown/hidden the same way (display:none toggling owned
     by render_active_page in app.py).
+
+    The center+predictions wrapper uses "output-column" (the same class
+    the Recommendation page's own center+predictions wrapper uses) - its
+    flex:1 1 0%; min-width:0 is what lets that inner content-grid shrink to
+    fit the remaining width instead of forcing the predictions column to
+    wrap onto a second row below the center column, which is what a bare
+    content-grid div (flex:0 1 auto, no min-width:0) was doing here.
     """
     return html.Div(
         html.Div(
             [
                 build_scenario_input_column(),
                 html.Div(
-                    [
-                        build_scenario_center_column(),
-                        build_scenario_predictions_column(),
-                    ],
-                    className="content-grid",
+                    html.Div(
+                        [
+                            build_scenario_center_column(),
+                            build_scenario_predictions_column(),
+                        ],
+                        className="content-grid",
+                    ),
+                    className="output-column",
                 ),
             ],
             className="content-grid",
