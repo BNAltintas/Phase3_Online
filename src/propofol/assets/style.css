@@ -1623,40 +1623,12 @@ body {
   margin: 10px 0 0 0;
 }
 
-/* ---------- Test Exploration: Scenario Summary (fake logic) ---------- */
-
-.te-summary-card {
-  padding-bottom: 18px;
-}
-
-.te-summary-induction-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-}
+/* ---------- Test Exploration: shared small-heading styles ---------- */
 
 .te-summary-label {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
-}
-
-.te-summary-value {
-  font-size: 17px;
-  font-weight: 800;
-  color: var(--navy-900);
-}
-
-.te-summary-induction-total {
-  font-size: 11px;
-  color: var(--text-secondary);
-  margin-top: 2px;
-}
-
-.te-summary-divider {
-  border-top: 1px solid var(--border-color);
-  margin: 14px 0 12px;
 }
 
 .te-maint-title {
@@ -1669,31 +1641,7 @@ body {
 .te-maint-subtitle {
   font-size: 11px;
   color: var(--text-secondary);
-  margin-bottom: 8px;
-}
-
-.te-maint-table {
-  font-family: "Segoe UI", Arial, sans-serif;
-}
-
-.te-maint-table .te-maint-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 12px;
-  padding: 3px 0;
-}
-
-.te-maint-table .te-maint-time {
-  color: var(--text-secondary);
-  font-weight: 600;
-}
-
-.te-maint-table .te-maint-value {
-  color: var(--text-primary);
-  font-weight: 700;
-  text-align: right;
+  margin-bottom: 2px;
 }
 
 /* ---------- Test Exploration: Explore opioid strategy ---------- */
@@ -1708,7 +1656,7 @@ body {
 .te-explore-rate-value {
   font-size: 22px;
   font-weight: 800;
-  color: var(--navy-900);
+  color: #c2680f;
   margin-bottom: 6px;
 }
 
@@ -1716,106 +1664,174 @@ body {
   margin-top: 16px;
 }
 
-/* ---------- Test Exploration: Scenario result ---------- */
-
-.te-result-columns {
-  display: flex;
-  align-items: stretch;
-  gap: 14px;
+/* Scoped to ONLY the Explore-strategy slider - .scenario-slider itself
+   (its base blue look) is shared with the Scenario Exploration page's
+   own remifentanil-rate slider and must not change. */
+.te-explore-slider .dash-slider-range {
+  background-color: #c2680f !important;
 }
 
-.te-result-column {
-  flex: 1 1 0;
+.te-explore-slider .dash-slider-thumb {
+  border-color: #c2680f !important;
+  background-color: #c2680f !important;
+}
+
+/* ---------- Test Exploration: Scenario result (merged baseline / explored / change grid) ---------- */
+
+/* Wider than the shared .recommendation-column (used unchanged by the
+   Recommendation and Scenario Exploration pages) - the Scenario Result
+   grid's 5 columns need more room than that class's default flex-basis
+   gives it. Scoped to this one extra class only. */
+.te-center-column {
+  flex: 3 1 460px;
+}
+
+.te-result-card {
+  padding-bottom: 16px;
+}
+
+.te-result-grid {
+  display: grid;
+  /* Pure fr tracks (plus two narrow fixed ones) rather than minmax()
+     floors - a large combined minimum would force the grid wider than
+     this card's actual column width and clip the rightmost cells; fr
+     units instead always divide up whatever space is actually available,
+     wrapping text onto a second line in a narrow cell rather than
+     overflowing the card. */
+  grid-template-columns: 1.5fr 1fr 12px 1fr 38px;
+  column-gap: 6px;
+  row-gap: 7px;
+  align-items: center;
+  font-size: 12px;
+}
+
+/* These wrapper divs exist only for DOM grouping (conditional
+   visibility, semantic clarity) - "display: contents" makes them
+   transparent to the grid, so their children become the actual aligned
+   grid cells (nesting correctly even inside te-opioid-maintenance-section,
+   itself a te-result-grid-section). */
+.te-result-row,
+.te-result-grid-section {
+  display: contents;
+}
+
+.te-result-cell {
   min-width: 0;
+  padding: 2px 0;
 }
 
-.te-result-column--explored {
-  padding: 8px 10px;
-  margin: -8px -10px;
-  border-radius: 8px;
-  background-color: rgba(47, 111, 237, 0.06);
+.te-result-row--header .te-result-cell {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-color);
 }
 
-.te-result-column-label {
+.te-result-col-heading {
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--text-secondary);
-  margin-bottom: 8px;
 }
 
-.te-result-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 12px;
-  padding: 3px 0;
+.te-result-col-heading--baseline {
+  color: var(--blue-accent);
+}
+
+.te-result-col-heading--explored {
+  color: #c2680f;
+}
+
+.te-result-col-heading--change {
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+.te-result-arrow-cell {
+  color: var(--text-secondary);
+  text-align: center;
 }
 
 .te-result-row-label {
   color: var(--text-secondary);
-}
-
-.te-result-row-value {
-  font-weight: 700;
-  color: var(--text-primary);
-  text-align: right;
-}
-
-.te-result-arrow {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  color: var(--text-secondary);
-  font-size: 14px;
-}
-
-.te-delta-block {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.te-delta-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.te-delta-label {
-  font-size: 12px;
   font-weight: 600;
-  color: var(--text-primary);
 }
 
-.te-delta-value {
-  font-size: 14px;
+.te-result-section-header {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+}
+
+.te-result-baseline-value {
+  color: var(--blue-accent);
+  font-weight: 700;
+}
+
+.te-result-baseline-induction-value {
+  font-size: 15px;
   font-weight: 800;
+  color: var(--blue-accent);
 }
 
-.te-delta-good {
+.te-result-baseline-induction-total {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-top: 1px;
+}
+
+.te-result-explored-value {
+  color: #c2680f;
+  font-weight: 700;
+  background-color: rgba(194, 104, 15, 0.08);
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+
+.te-result-explored-value--placeholder {
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-style: italic;
+}
+
+.te-result-explored-induction-value {
+  font-size: 13px;
+  font-weight: 800;
+  color: #c2680f;
+}
+
+.te-result-explored-induction-value.te-result-explored-value--placeholder {
+  font-size: 12px;
+  font-weight: 500;
+  font-style: italic;
+  color: var(--text-secondary);
+}
+
+.te-result-explored-induction-total {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-top: 1px;
+}
+
+.te-result-change-value {
+  font-weight: 800;
+  text-align: right;
+  color: var(--text-secondary);
+}
+
+.te-result-change-value.te-delta-good {
   color: #1f9254;
 }
 
-.te-delta-bad {
+.te-result-change-value.te-delta-bad {
   color: #d9362e;
 }
 
-.te-delta-neutral {
-  color: var(--text-secondary);
-}
-
-.te-opioid-placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  min-height: 100px;
-  padding: 20px;
-  font-size: 13px;
-  color: var(--text-secondary);
+.te-result-footnote {
+  margin: 12px 2px 0;
 }
 
 /* ---------- Test Exploration: Predictions header ---------- */
