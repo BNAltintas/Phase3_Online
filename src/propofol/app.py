@@ -1781,46 +1781,37 @@ def render_more_info_accordion(open_sections, body_ids, chevron_ids):
 # used for the Recommendation page's own derived-pressure display.
 # ============================================================
 
-def _register_te_slider_sync(slider_id: str, input_id: str, bounds: tuple[float, float]):
+def _register_te_input_clamp(input_id: str, bounds: tuple[float, float]):
     """
-    Keep one Test Exploration slider and its numeric input in sync in both
-    directions - a standalone copy of the same pattern used elsewhere in
-    this app for dose/rate sliders, deliberately duplicated (not shared)
-    so this sandbox page can never be affected by, or accidentally affect,
-    any other page's slider-sync callbacks.
+    Clamp a Test Exploration patient-field text input to its valid range
+    on blur/Enter (debounce=True on the input already defers firing until
+    then) - the same range-limiting behavior the old slider<->input sync
+    used to provide, now standalone since there is no slider to enforce
+    it (the input is the sole control for this field).
     """
     @app.callback(
-        Output(input_id, "value"),
-        Input(slider_id, "value"),
-    )
-    def _te_slider_to_input(slider_value):
-        return f"{float(slider_value):.0f}"
-
-    @app.callback(
-        Output(slider_id, "value", allow_duplicate=True),
+        Output(input_id, "value", allow_duplicate=True),
         Input(input_id, "value"),
-        State(slider_id, "value"),
         prevent_initial_call=True,
     )
-    def _te_input_to_slider(input_value, current_slider_value):
+    def _te_clamp_input(value):
         try:
-            value = float(input_value)
+            parsed = float(value)
         except (TypeError, ValueError):
             return no_update
-        value = max(bounds[0], min(bounds[1], value))
-        if current_slider_value is not None and abs(value - float(current_slider_value)) < 1e-9:
+        clamped = max(bounds[0], min(bounds[1], parsed))
+        if abs(clamped - parsed) < 1e-9:
             return no_update
-        return value
+        return f"{clamped:.0f}"
 
-    _te_slider_to_input.__name__ = f"sync_{slider_id.replace('-', '_')}_to_input"
-    _te_input_to_slider.__name__ = f"sync_{input_id.replace('-', '_')}_to_slider"
+    _te_clamp_input.__name__ = f"clamp_{input_id.replace('-', '_')}"
 
 
-_register_te_slider_sync("te-age-slider", "te-age-input", (18, 100))
-_register_te_slider_sync("te-height-slider", "te-height-input", (140, 220))
-_register_te_slider_sync("te-weight-slider", "te-weight-input", (40, 200))
-_register_te_slider_sync("te-sbp-slider", "te-sbp-input", (80, 220))
-_register_te_slider_sync("te-dbp-slider", "te-dbp-input", (40, 140))
+_register_te_input_clamp("te-age-input", (18, 100))
+_register_te_input_clamp("te-height-input", (140, 220))
+_register_te_input_clamp("te-weight-input", (40, 200))
+_register_te_input_clamp("te-sbp-input", (80, 220))
+_register_te_input_clamp("te-dbp-input", (40, 140))
 
 
 @app.callback(
@@ -1840,12 +1831,12 @@ def update_te_derived_values(sbp, dbp):
 
 
 @app.callback(
-    Output("te-age-slider", "value", allow_duplicate=True),
+    Output("te-age-input", "value", allow_duplicate=True),
     Output("te-sex", "value"),
-    Output("te-height-slider", "value", allow_duplicate=True),
-    Output("te-weight-slider", "value", allow_duplicate=True),
-    Output("te-sbp-slider", "value", allow_duplicate=True),
-    Output("te-dbp-slider", "value", allow_duplicate=True),
+    Output("te-height-input", "value", allow_duplicate=True),
+    Output("te-weight-input", "value", allow_duplicate=True),
+    Output("te-sbp-input", "value", allow_duplicate=True),
+    Output("te-dbp-input", "value", allow_duplicate=True),
     Input("te-restore-btn", "n_clicks"),
     prevent_initial_call=True,
 )
@@ -1866,12 +1857,12 @@ def restore_te_patient(_n_clicks):
 # form fields directly. All in window.dash_clientside.testExploration in
 # assets/test_exploration.js - no server round-trip, no model code.
 _TE_LEFT_COLUMN_FIELDS = (
-    ("te-age-slider", "value"),
+    ("te-age-input", "value"),
     ("te-sex", "value"),
-    ("te-height-slider", "value"),
-    ("te-weight-slider", "value"),
-    ("te-sbp-slider", "value"),
-    ("te-dbp-slider", "value"),
+    ("te-height-input", "value"),
+    ("te-weight-input", "value"),
+    ("te-sbp-input", "value"),
+    ("te-dbp-input", "value"),
     ("te-opioid-dropdown", "value"),
     ("te-bis-target-low", "value"),
     ("te-bis-target-high", "value"),

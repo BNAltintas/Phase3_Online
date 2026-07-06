@@ -1531,13 +1531,21 @@ body {
    .content-grid/.input-column/.recommendation-column/.predictions-column,
    .predictions-header-row/.learn-more-link, and graph_card()'s own CSS
    completely unchanged. Only this page's own card header, compact
-   label|slider|box rows, and Scenario Summary rows/tables get new rules
+   label|input rows, and Scenario Summary rows/tables get new rules
    below. */
 
 .te-card {
   padding: 20px 20px 16px;
   border-radius: 14px;
   margin-bottom: 20px;
+}
+
+/* Tighter card-to-card spacing, scoped to the left column only (via the
+   shared .input-column ancestor) - the middle column's own .te-card
+   cards (Scenario Result, Explore Opioid Strategy) keep the default
+   20px above untouched. */
+.input-column .te-card {
+  margin-bottom: 8px;
 }
 
 .te-card-header {
@@ -1565,8 +1573,9 @@ body {
 .te-field-row {
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-bottom: 20px;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
 }
 
 .te-field-row:last-child {
@@ -1574,26 +1583,61 @@ body {
 }
 
 .te-field-label {
-  flex: 0 0 130px;
+  flex: 0 0 auto;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
-.te-field-slider {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 0 4px;
+/* Compact, editable, light-blue-filled numeric input - Age/Height/
+   Weight/SBP/DBP now have no slider, just this box. */
+.te-field-input-plain {
+  flex: 0 0 84px;
+  padding: 6px 8px;
+  border: 1px solid rgba(47, 111, 237, 0.25);
+  border-radius: 6px;
+  background-color: #eaf3ff;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: right;
+  color: var(--text-primary);
+  box-sizing: border-box;
 }
 
-.te-field-input {
-  flex: 0 0 64px;
-  text-align: center;
+.te-field-input-plain:focus {
+  outline: none;
+  border-color: var(--blue-accent);
 }
 
 .te-field-dropdown {
   flex: 1 1 auto;
   min-width: 0;
+  margin-left: 12px;
+}
+
+/* Derived MAP/Baseline PP - plain text, no box/border/background, so
+   they read as read-only output rather than another editable field. */
+.te-derived-plain-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.te-derived-plain-row:last-child {
+  margin-bottom: 0;
+}
+
+.te-derived-plain-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.te-derived-plain-value {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
 }
 
 .te-bis-row {
@@ -1661,7 +1705,7 @@ body {
 }
 
 .te-run-scenario-btn {
-  margin-top: 16px;
+  margin-top: 4px;
 }
 
 /* Scoped to ONLY the Explore-strategy slider - .scenario-slider itself

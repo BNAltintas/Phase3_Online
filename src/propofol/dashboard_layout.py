@@ -1193,39 +1193,43 @@ TEST_EXPLORATION_OPIOID_DEFAULTS = {
 }
 
 
-def _te_slider_field(label: str, slider_id: str, input_id: str, value, bounds: tuple[float, float], step: float):
+def _te_input_field(label: str, input_id: str, value):
     """
-    Build one "label | slider | numeric box" row - reuses the
-    .scenario-slider CSS class purely for its blue track/thumb look (a
-    presentational-only class with no callback attached to it here), kept
-    in sync by _register_te_slider_sync in app.py.
+    Build one compact "label | numeric input" row - label on the left,
+    a small light-blue-filled text input on the right, no slider. Range
+    clamping is enforced standalone by _register_te_input_clamp in
+    app.py (there is no slider left to provide it).
     """
     return html.Div(
         [
             html.Div(label, className="te-field-label"),
-            html.Div(
-                dcc.Slider(
-                    id=slider_id,
-                    min=bounds[0], max=bounds[1], step=step, value=value,
-                    marks={bounds[0]: str(bounds[0]), bounds[1]: str(bounds[1])},
-                    tooltip={"placement": "bottom", "always_visible": False},
-                    updatemode="mouseup",
-                    allow_direct_input=False,
-                    className="scenario-slider",
-                ),
-                className="te-field-slider",
-            ),
             dcc.Input(
                 id=input_id, type="text", value=value, debounce=True,
-                className="scenario-compact-input te-field-input",
+                className="te-field-input-plain",
             ),
         ],
         className="te-field-row",
     )
 
 
+def _te_derived_plain_row(label: str, value_id: str, tooltip: str):
+    """
+    A Test-Exploration-only derived-value row: plain text, no input-style
+    box/border/background - deliberately NOT _compact_derived_row (shared
+    with the Scenario Exploration page, which keeps its own shaded
+    read-only box look unchanged).
+    """
+    return html.Div(
+        [
+            html.Span([label, html.Span("i", title=tooltip, className="info-icon")], className="te-derived-plain-label"),
+            html.Span(id=value_id, children="-", className="te-derived-plain-value"),
+        ],
+        className="te-derived-plain-row",
+    )
+
+
 def _te_dropdown_field(label: str, dropdown_id: str, options: list, value):
-    """Build a "label | dropdown" row, column-aligned with _te_slider_field's rows."""
+    """Build a "label | dropdown" row, column-aligned with _te_input_field's rows."""
     return html.Div(
         [
             html.Div(label, className="te-field-label"),
@@ -1250,26 +1254,32 @@ def _te_card_header(icon_class: str, title: str):
 
 
 def build_te_patient_card():
-    """Build the Test Exploration page's "Patient scenario" card - patient characteristics, baseline vitals, derived MAP/PP, and a restore button."""
+    """
+    Build the Test Exploration page's "Patient scenario" card - patient
+    characteristics, baseline vitals, derived MAP/PP, and a restore
+    button. Every numeric field is a plain light-blue text input (no
+    slider) - range clamping is enforced standalone by
+    _register_te_input_clamp in app.py.
+    """
     defaults = TEST_EXPLORATION_DEFAULT_PATIENT
     return html.Div(
         [
             _te_card_header("fa-user", "Patient scenario"),
             param_subsection_label("Patient characteristics", first=True),
-            _te_slider_field("Age (years)", "te-age-slider", "te-age-input", defaults["age"], (18, 100), 1),
+            _te_input_field("Age (years)", "te-age-input", defaults["age"]),
             _te_dropdown_field(
                 "Sex", "te-sex",
                 [{"label": "Male", "value": "male"}, {"label": "Female", "value": "female"}],
                 defaults["sex"],
             ),
-            _te_slider_field("Height (cm)", "te-height-slider", "te-height-input", defaults["height"], (140, 220), 1),
-            _te_slider_field("Weight (kg)", "te-weight-slider", "te-weight-input", defaults["weight"], (40, 200), 1),
+            _te_input_field("Height (cm)", "te-height-input", defaults["height"]),
+            _te_input_field("Weight (kg)", "te-weight-input", defaults["weight"]),
             html.Div("Baseline vitals", className="param-subsection-label"),
-            _te_slider_field("SBP (mmHg)", "te-sbp-slider", "te-sbp-input", defaults["sbp"], (80, 220), 1),
-            _te_slider_field("DBP (mmHg)", "te-dbp-slider", "te-dbp-input", defaults["dbp"], (40, 140), 1),
+            _te_input_field("SBP (mmHg)", "te-sbp-input", defaults["sbp"]),
+            _te_input_field("DBP (mmHg)", "te-dbp-input", defaults["dbp"]),
             html.Div("Derived values", className="param-subsection-label"),
-            _compact_derived_row("MAP (mmHg)", "te-derived-map", "MAP = DBP + (SBP − DBP) / 3"),
-            _compact_derived_row("Baseline PP (mmHg)", "te-derived-pp", "Baseline PP = SBP − DBP"),
+            _te_derived_plain_row("MAP (mmHg)", "te-derived-map", "MAP = DBP + (SBP − DBP) / 3"),
+            _te_derived_plain_row("Baseline PP (mmHg)", "te-derived-pp", "Baseline PP = SBP − DBP"),
             html.Button(
                 [html.I(className="fa-solid fa-rotate-left"), "Restore Original Patient"],
                 id="te-restore-btn", n_clicks=0,
