@@ -16,6 +16,8 @@ from propofol.dashboard_layout import (
     EHR_RECORD_TIME,
     SCENARIO_DEFAULT_PATIENT,
     SCENARIO_DEFAULT_REMI_MCGKGMIN,
+    TEST_EXPLORATION_DEFAULT_MAP_ABS,
+    TEST_EXPLORATION_DEFAULT_MAP_REL,
     TEST_EXPLORATION_DEFAULT_PATIENT,
     build_layout,
     timestamp_display,
@@ -1828,6 +1830,26 @@ def update_te_derived_values(sbp, dbp):
         return f"{compute_map(sbp, dbp):.1f}", f"{compute_pp(sbp, dbp):.1f}"
     except (TypeError, ValueError):
         return "-", "-"
+
+
+@app.callback(
+    Output("te-map-target-value", "value"),
+    Input("te-map-target-mode", "value"),
+    prevent_initial_call=True,
+)
+def reset_te_map_target_value(mode):
+    """
+    Switching Target MAP mode shows that mode's own default value, rather
+    than leaving (say) 65 on screen after switching to "Relative (%
+    baseline)", where 65 would be a nonsensical percentage - the same
+    presentation-only behavior the Scenario Exploration page's own
+    reset_scenario_map_target_value already has, just against this
+    page's own TEST_EXPLORATION_DEFAULT_MAP_ABS/REL constants instead of
+    the real model's MAP_ABS_MIN_TARGET/MAP_REL_FRAC_TARGET. Purely a
+    displayed-default swap - no recommendation/graph/MAP-target
+    calculation is touched here.
+    """
+    return TEST_EXPLORATION_DEFAULT_MAP_REL if mode == "rel" else TEST_EXPLORATION_DEFAULT_MAP_ABS
 
 
 @app.callback(

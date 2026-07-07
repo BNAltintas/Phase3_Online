@@ -242,7 +242,8 @@
       "Bash(node verify_density.js)",
       "Bash(node verify_density2.js)",
       "Bash(node verify_disabled.js)",
-      "Bash(node verify_banner.js)"
+      "Bash(node verify_banner.js)",
+      "Bash(curl -s \"http://127.0.0.1:8109/assets/style.css\")"
     ]
   }
 }

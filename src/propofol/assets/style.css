@@ -1627,8 +1627,48 @@ body {
   border-color: var(--blue-accent);
 }
 
+/* Targets card's BIS/MAP numeric inputs - additive on top of the shared
+   .scenario-compact-input/.scenario-range-input classes (which stay
+   untouched, since the Scenario Exploration page's own se-bis-target
+   fields and se-map-target-value reuse them too), overriding only the
+   color properties that differed from Patient Scenario's
+   .te-field-input-plain look above (width/height/padding/radius already
+   matched). Not simply reusing .te-field-input-plain itself, since its
+   fixed 84px flex-basis is sized for Patient Scenario's own row layout
+   and would break the Targets card's full-width BIS/MAP column layout. */
+.te-target-input {
+  background-color: #eaf3ff;
+  border-color: rgba(47, 111, 237, 0.25);
+  font-weight: 600;
+}
+
+.te-target-input:focus {
+  outline: none;
+  border-color: var(--blue-accent);
+}
+
+/* Dropdowns (Sex, Select opioid, Target MAP mode) deliberately keep the
+   shared .dash-dropdown component's own plain white/neutral look -
+   dropdowns are selection controls, not editable numeric cells, and
+   should read as visually distinct from the blue .te-field-input-plain/
+   .te-target-input boxes above. No override needed here; this comment
+   only documents that the omission is intentional. */
+
 .te-field-dropdown {
   flex: 1 1 auto;
+  min-width: 0;
+  margin-left: 12px;
+}
+
+/* Sex only (see _te_dropdown_field's narrow= param) - same fixed width
+   as the numeric input cells (.te-field-input-plain's 84px) instead of
+   filling the rest of the row, so it reads as a compact form field
+   aligned with Age/Height/Weight/SBP/DBP rather than a full-width
+   control. The row's own .te-field-row { justify-content: space-between }
+   does the rest, flush-aligning it to the same right edge those inputs
+   already share. */
+.te-field-dropdown--narrow {
+  flex: 0 0 84px;
   min-width: 0;
   margin-left: 12px;
 }

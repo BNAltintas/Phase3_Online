@@ -1181,6 +1181,7 @@ TEST_EXPLORATION_DEFAULT_PATIENT = {
 TEST_EXPLORATION_DEFAULT_BIS_LOW = 40
 TEST_EXPLORATION_DEFAULT_BIS_HIGH = 60
 TEST_EXPLORATION_DEFAULT_MAP_ABS = 65
+TEST_EXPLORATION_DEFAULT_MAP_REL = 70
 
 # Per-opioid slider bounds/units for the "Explore opioid strategy" card -
 # mirrored in test_exploration.js's own TE_OPIOID_CONFIG (the source of
@@ -1228,14 +1229,23 @@ def _te_derived_plain_row(label: str, value_id: str, tooltip: str):
     )
 
 
-def _te_dropdown_field(label: str, dropdown_id: str, options: list, value):
-    """Build a "label | dropdown" row, column-aligned with _te_input_field's rows."""
+def _te_dropdown_field(label: str, dropdown_id: str, options: list, value, narrow: bool = False):
+    """
+    Build a "label | dropdown" row, column-aligned with _te_input_field's
+    rows. `narrow=True` (Sex only) shrinks the dropdown to the same
+    fixed width as the numeric input cells instead of its normal
+    fill-the-row width, so it reads as a compact form field rather than
+    a full-width control - the row's own justify-content:space-between
+    then places it flush against the same right edge the numeric inputs
+    already share, without needing any other layout change.
+    """
+    wrapper_class = "te-field-dropdown te-field-dropdown--narrow" if narrow else "te-field-dropdown"
     return html.Div(
         [
             html.Div(label, className="te-field-label"),
             html.Div(
                 dcc.Dropdown(id=dropdown_id, options=options, value=value, clearable=False, searchable=False),
-                className="te-field-dropdown",
+                className=wrapper_class,
             ),
         ],
         className="te-field-row",
@@ -1270,7 +1280,7 @@ def build_te_patient_card():
             _te_dropdown_field(
                 "Sex", "te-sex",
                 [{"label": "Male", "value": "male"}, {"label": "Female", "value": "female"}],
-                defaults["sex"],
+                defaults["sex"], narrow=True,
             ),
             _te_input_field("Height (cm)", "te-height-input", defaults["height"]),
             _te_input_field("Weight (kg)", "te-weight-input", defaults["weight"]),
@@ -1316,7 +1326,21 @@ def build_te_medication_card():
 
 
 def build_te_targets_card():
-    """Build the Test Exploration page's "Targets" card - static BIS/MAP target fields, no validation, no callback."""
+    """
+    Build the Test Exploration page's "Targets" card - BIS/MAP target
+    fields, no validation. Reuses the Scenario Exploration page's own
+    .scenario-compact-input/.scenario-range-*/.scenario-map-mode-dropdown
+    layout classes unchanged (row/column sizing, spacing, dropdown's own
+    neutral white look), adding only the TE-only "te-target-input" class
+    on top of the two numeric inputs (BIS low/high, MAP value) so they
+    pick up the same light-blue "editable" look Patient Scenario's own
+    inputs use - the Target MAP dropdown deliberately keeps its plain
+    white styling, same as Sex/Select opioid, so dropdowns (selection
+    controls) stay visually distinct from blue editable numeric cells.
+    Switching te-map-target-mode resets te-map-target-value to that
+    mode's own default (reset_te_map_target_value in app.py) - the same
+    behavior the Scenario Exploration page's own Target MAP already has.
+    """
     return html.Div(
         [
             _te_card_header("fa-bullseye", "Targets"),
@@ -1329,7 +1353,7 @@ def build_te_targets_card():
                             dcc.Input(
                                 id="te-bis-target-low", type="text",
                                 value=TEST_EXPLORATION_DEFAULT_BIS_LOW, debounce=True,
-                                className="scenario-compact-input",
+                                className="scenario-compact-input te-target-input",
                             ),
                         ],
                         className="te-bis-field",
@@ -1340,7 +1364,7 @@ def build_te_targets_card():
                             dcc.Input(
                                 id="te-bis-target-high", type="text",
                                 value=TEST_EXPLORATION_DEFAULT_BIS_HIGH, debounce=True,
-                                className="scenario-compact-input",
+                                className="scenario-compact-input te-target-input",
                             ),
                         ],
                         className="te-bis-field",
@@ -1360,7 +1384,10 @@ def build_te_targets_card():
                         value="abs", clearable=False, searchable=False,
                         className="scenario-map-mode-dropdown",
                     ),
-                    _compact_input("te-map-target-value", TEST_EXPLORATION_DEFAULT_MAP_ABS, extra_class="scenario-range-input"),
+                    _compact_input(
+                        "te-map-target-value", TEST_EXPLORATION_DEFAULT_MAP_ABS,
+                        extra_class="scenario-range-input te-target-input",
+                    ),
                 ],
                 className="scenario-range-row",
             ),
