@@ -480,9 +480,17 @@
       margin: { t: 26, r: 16, b: 34, l: 46 },
     };
 
+    // Cp and Ce each get their own line (solid vs dashed) so both curves
+    // stay visually distinguishable, but share one legend entry per
+    // scenario (legendgroup + showlegend:false on the Ce trace) - 3
+    // legend entries total, same count/pattern as every other prediction
+    // graph on this page. 5 separately-named entries wrapped onto 2 lines
+    // here and Plotly fell back to its own scrollable-legend widget
+    // instead of just showing both lines, however much top margin was
+    // given - merging them is the reliable fix, not a margin tweak.
     var data = [
-      { x: t, y: base.cp, mode: "lines", name: "Baseline Recommendation (Cp)", line: { color: GREEN, width: 2 } },
-      { x: t, y: base.ce, mode: "lines", name: "Baseline Recommendation (Ce)", line: { color: GREEN, width: 2, dash: "dash" } },
+      { x: t, y: base.cp, mode: "lines", name: "Baseline Recommendation", legendgroup: "te-baseline", line: { color: GREEN, width: 2 } },
+      { x: t, y: base.ce, mode: "lines", name: "Baseline Recommendation", legendgroup: "te-baseline", showlegend: false, line: { color: GREEN, width: 2, dash: "dash" } },
     ];
 
     if (sExp) {
@@ -497,8 +505,8 @@
         teBand(t, cpLow, cpHigh, "90% Prediction Interval", ORANGE_BAND),
         data[0],
         data[1],
-        { x: t, y: exp.cp, mode: "lines", name: "Explored Scenario (Cp)", line: { color: ORANGE, width: 2.5 } },
-        { x: t, y: exp.ce, mode: "lines", name: "Explored Scenario (Ce)", line: { color: ORANGE, width: 2.5, dash: "dash" } },
+        { x: t, y: exp.cp, mode: "lines", name: "Explored Scenario", legendgroup: "te-explored", line: { color: ORANGE, width: 2.5 } },
+        { x: t, y: exp.ce, mode: "lines", name: "Explored Scenario", legendgroup: "te-explored", showlegend: false, line: { color: ORANGE, width: 2.5, dash: "dash" } },
       ];
     }
 
@@ -681,6 +689,7 @@
 
       var expInductionText, expInductionClass, expTotalText, expPropRate1Text, expPropRate2Text, expRemiRateText;
       var propofolDeltaText, propofolDeltaClass, opioidDeltaText, opioidDeltaClass;
+      var propRate1DeltaText, propRate1DeltaClass, propRate2DeltaText, propRate2DeltaClass;
 
       if (sExp) {
         expInductionText = sExp.induction.toFixed(2) + " mg/kg";
@@ -693,6 +702,16 @@
         var propofolDeltaPct = ((sExp.induction - sBase.induction) / sBase.induction) * 100;
         propofolDeltaText = teDeltaText(propofolDeltaPct);
         propofolDeltaClass = teDeltaClass(propofolDeltaPct);
+
+        // Propofol early-maintenance rows track the same induction-driven
+        // rate (see teComputeState) - both are real numbers whenever
+        // sExp exists, so these always get a percent change, never "–".
+        var propRate1DeltaPct = ((sExp.propRate1MlH - sBase.propRate1MlH) / sBase.propRate1MlH) * 100;
+        propRate1DeltaText = teDeltaText(propRate1DeltaPct);
+        propRate1DeltaClass = teDeltaClass(propRate1DeltaPct);
+        var propRate2DeltaPct = ((sExp.propRate2MlH - sBase.propRate2MlH) / sBase.propRate2MlH) * 100;
+        propRate2DeltaText = teDeltaText(propRate2DeltaPct);
+        propRate2DeltaClass = teDeltaClass(propRate2DeltaPct);
 
         if (baseVisible && baseOpioid === exploreOpioid) {
           var opioidDeltaPct = baselineRate === 0 ? 0 : ((exploredRateRaw - baselineRate) / baselineRate) * 100;
@@ -717,6 +736,10 @@
         expRemiRateText = "–";
         propofolDeltaText = "–";
         propofolDeltaClass = "te-result-cell te-result-change-value";
+        propRate1DeltaText = "–";
+        propRate1DeltaClass = "te-result-cell te-result-change-value";
+        propRate2DeltaText = "–";
+        propRate2DeltaClass = "te-result-cell te-result-change-value";
         opioidDeltaText = "–";
         opioidDeltaClass = "te-result-cell te-result-change-value";
       }
@@ -747,6 +770,8 @@
         expInductionText, expInductionClass, expTotalText,
         "Pause", expPropRate1Text, expPropRate2Text, "Pause", expRemiRateText,
         propofolDeltaText, propofolDeltaClass,
+        propRate1DeltaText, propRate1DeltaClass,
+        propRate2DeltaText, propRate2DeltaClass,
         opioidDeltaText, opioidDeltaClass,
         doseResponseFig,
         teBisFigure(sBase, sExp), teMapFigure(sBase, sExp), tePropofolPkFigure(sBase, sExp), teOpioidPkFigure(sBase, sExp),

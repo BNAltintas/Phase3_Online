@@ -240,7 +240,9 @@
       "Bash(node verify_te4.js)",
       "Bash(node verify_te5.js)",
       "Bash(node verify_density.js)",
-      "Bash(node verify_density2.js)"
+      "Bash(node verify_density2.js)",
+      "Bash(node verify_disabled.js)",
+      "Bash(node verify_banner.js)"
     ]
   }
 }

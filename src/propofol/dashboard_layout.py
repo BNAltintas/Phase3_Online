@@ -1305,8 +1305,8 @@ def build_te_medication_card():
                 [
                     {"label": "None", "value": "none"},
                     {"label": "Remifentanil", "value": "remifentanil"},
-                    {"label": "Sufentanil", "value": "sufentanil"},
-                    {"label": "Fentanyl", "value": "fentanyl"},
+                    {"label": "Sufentanil (future extension)", "value": "sufentanil", "disabled": True},
+                    {"label": "Fentanyl (future extension)", "value": "fentanyl", "disabled": True},
                 ],
                 "none",
             ),
@@ -1418,8 +1418,8 @@ def build_te_explore_card():
                 [
                     {"label": "None", "value": "none"},
                     {"label": "Remifentanil", "value": "remifentanil"},
-                    {"label": "Sufentanil", "value": "sufentanil"},
-                    {"label": "Fentanyl", "value": "fentanyl"},
+                    {"label": "Sufentanil (future extension)", "value": "sufentanil", "disabled": True},
+                    {"label": "Fentanyl (future extension)", "value": "fentanyl", "disabled": True},
                 ],
                 "none",
             ),
@@ -1510,7 +1510,9 @@ def build_te_scenario_result_card():
     maintenance, always visible, computed at the opioid's fixed baseline
     rate) side by side with the "Explored scenario" column (placeholder
     text/dashes until "Run Scenario" is pressed) and a "Change" column
-    (delta indicators on the induction and active-opioid-rate rows only).
+    (delta indicators on every row with a real baseline/explored number -
+    induction, both propofol maintenance rate rows, and the active-opioid-
+    rate row - "Pause" rows have no rate to compare, so stay a plain "–").
 
     Every cell here starts as a plain "-"/"–" placeholder and is only
     ever filled in by runScenario in test_exploration.js, which fires
@@ -1530,19 +1532,20 @@ def build_te_scenario_result_card():
                     html.Div(
                         [
                             html.Span("Baseline Strategy", className="te-strategy-label"),
-                            html.Span("No opioid", id="te-strategy-baseline-value", className="te-strategy-value te-strategy-value--baseline"),
+                            html.Span("No opioid", id="te-strategy-baseline-value", className="te-strategy-value"),
                         ],
-                        className="te-strategy-row",
+                        className="te-strategy-card te-strategy-card--baseline",
                     ),
+                    html.Div(html.I(className="fa-solid fa-arrow-right"), className="te-strategy-arrow"),
                     html.Div(
                         [
                             html.Span("Explored Strategy", className="te-strategy-label"),
-                            html.Span("Not selected", id="te-strategy-explored-value", className="te-strategy-value te-strategy-value--explored"),
+                            html.Span("Not selected", id="te-strategy-explored-value", className="te-strategy-value"),
                         ],
-                        className="te-strategy-row",
+                        className="te-strategy-card te-strategy-card--explored",
                     ),
                 ],
-                className="te-strategy-summary",
+                className="te-strategy-banner",
             ),
             html.Div(
                 [
@@ -1577,8 +1580,14 @@ def build_te_scenario_result_card():
                         "Propofol – Early maintenance (0–15 min)", "Infusion regimen relative to induction",
                     ),
                     _te_result_data_row("0–1 min", "Pause", "te-explored-prop-pause"),
-                    _te_result_data_row("1–8 min", {"id": "te-baseline-prop-rate1"}, "te-explored-prop-rate1"),
-                    _te_result_data_row("8–15 min", {"id": "te-baseline-prop-rate2"}, "te-explored-prop-rate2"),
+                    _te_result_data_row(
+                        "1–8 min", {"id": "te-baseline-prop-rate1"}, "te-explored-prop-rate1",
+                        change_id="te-result-delta-prop-rate1",
+                    ),
+                    _te_result_data_row(
+                        "8–15 min", {"id": "te-baseline-prop-rate2"}, "te-explored-prop-rate2",
+                        change_id="te-result-delta-prop-rate2",
+                    ),
                     html.Div(
                         [
                             _te_result_section_header(
