@@ -1350,6 +1350,14 @@ body {
   transition: background-color 0.15s ease;
 }
 
+/* Scoped tightening for the Test Exploration page's own "Restore Original
+   Patient" button - not the shared rule above, which the Scenario
+   Exploration page's own restore button also uses at its default 10px. */
+.te-card .scenario-secondary-btn {
+  margin-top: 6px;
+  padding: 6px 16px;
+}
+
 .scenario-secondary-btn:hover {
   background-color: #dbe6fd;
 }
@@ -1535,15 +1543,15 @@ body {
    below. */
 
 .te-card {
-  padding: 20px 20px 16px;
+  padding: 14px 16px 12px;
   border-radius: 14px;
-  margin-bottom: 20px;
+  margin-bottom: 12px;
 }
 
 /* Tighter card-to-card spacing, scoped to the left column only (via the
    shared .input-column ancestor) - the middle column's own .te-card
-   cards (Scenario Result, Explore Opioid Strategy) keep the default
-   20px above untouched. */
+   cards (Scenario Result, Explore Opioid Strategy) keep the 12px above
+   untouched. */
 .input-column .te-card {
   margin-bottom: 8px;
 }
@@ -1551,10 +1559,20 @@ body {
 .te-card-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 18px;
-  padding-bottom: 14px;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
   border-bottom: 1px solid var(--border-color);
+}
+
+/* Compact every param_subsection_label ("Baseline vitals", "Derived
+   values", "Target BIS", ...) inside a Test Exploration card - scoped
+   here (not the shared .param-subsection-label rule itself, which the
+   Recommendation page's own param_subsection_label() calls also use) so
+   only this page's denser layout shrinks. */
+.te-card .param-subsection-label {
+  margin-top: 6px;
+  padding-top: 6px;
 }
 
 .te-card-icon {
@@ -1575,7 +1593,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 4px;
 }
 
 .te-field-row:last-child {
@@ -1621,7 +1639,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .te-derived-plain-row:last-child {
@@ -1657,15 +1675,6 @@ body {
   width: 100%;
 }
 
-.te-helper-text {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  font-style: italic;
-  margin: 10px 0 0 0;
-}
 
 /* ---------- Test Exploration: shared small-heading styles ---------- */
 
@@ -1693,15 +1702,54 @@ body {
 .te-card-subtitle {
   font-size: 12px;
   color: var(--text-secondary);
-  margin: 0 0 14px 0;
+  margin: 0 0 8px 0;
   line-height: 1.4;
 }
 
 .te-explore-rate-value {
-  font-size: 22px;
+  font-size: 19px;
   font-weight: 800;
   color: #c2680f;
-  margin-bottom: 6px;
+  margin-bottom: 2px;
+}
+
+#te-explore-slider-wrapper {
+  margin-top: 4px;
+}
+
+/* ---------- Test Exploration: Scenario result strategy summary ---------- */
+
+.te-strategy-summary {
+  display: flex;
+  gap: 28px;
+  margin: 2px 2px 8px;
+}
+
+.te-strategy-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.te-strategy-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.te-strategy-value {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.te-strategy-value--baseline {
+  color: #1f9254;
+}
+
+.te-strategy-value--explored {
+  color: #c2680f;
 }
 
 .te-run-scenario-btn {
@@ -1731,7 +1779,7 @@ body {
 }
 
 .te-result-card {
-  padding-bottom: 16px;
+  padding-bottom: 10px;
 }
 
 .te-result-grid {
@@ -1744,7 +1792,7 @@ body {
      overflowing the card. */
   grid-template-columns: 1.5fr 1fr 12px 1fr 38px;
   column-gap: 6px;
-  row-gap: 7px;
+  row-gap: 4px;
   align-items: center;
   font-size: 12px;
 }
@@ -1761,11 +1809,11 @@ body {
 
 .te-result-cell {
   min-width: 0;
-  padding: 2px 0;
+  padding: 1px 0;
 }
 
 .te-result-row--header .te-result-cell {
-  padding-bottom: 6px;
+  padding-bottom: 4px;
   border-bottom: 1px solid var(--border-color);
 }
 
@@ -1801,8 +1849,8 @@ body {
 
 .te-result-section-header {
   grid-column: 1 / -1;
-  margin-top: 6px;
-  padding-top: 8px;
+  margin-top: 4px;
+  padding-top: 4px;
   border-top: 1px solid var(--border-color);
 }
 
@@ -1874,9 +1922,6 @@ body {
   color: #d9362e;
 }
 
-.te-result-footnote {
-  margin: 12px 2px 0;
-}
 
 /* ---------- Test Exploration: Predictions header ---------- */
 
@@ -1884,4 +1929,58 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* ---------- Test Exploration: 1080p density pass ----------
+   Sized so the left column, Scenario Result + Explore Opioid Strategy +
+   full Dose-Response graph, and BIS/MAP/Propofol PK/PD together fit a
+   1920x1080 viewport at 100% zoom without significant scrolling. Both
+   overrides below are scoped to this page's own wrapper ids (not the
+   shared .graph-card--tall/.graph-card rules graph_card() itself
+   defines, which the Recommendation and Scenario Exploration pages'
+   own graph cards also use at their own heights) - see the identical
+   #se-dose-response-card-wrapper pattern above for precedent. */
+#te-dose-response-card-wrapper .graph-card--tall {
+  height: 280px;
+  padding-top: 10px;
+  padding-bottom: 8px;
+}
+
+#te-dose-response-card-wrapper .graph-card-header {
+  margin-bottom: 4px;
+}
+
+#te-dose-response-card-wrapper .graph-card-plot {
+  min-height: 200px;
+}
+
+/* BIS/MAP/Propofol PK/PD/Opioid PK - Opioid PK itself defaults to
+   collapsed (build_te_predictions_column() passes default_visible=False
+   for it), so this fixed height only actually applies to the 3
+   higher-priority graphs at a time on first load. */
+#te-predictions-grid {
+  gap: 8px;
+}
+
+#te-predictions-grid .graph-card {
+  height: 230px;
+  padding: 10px 12px 8px;
+}
+
+/* Must come after the fixed-height rule above (both are equally specific
+   - one id + one class each - so source order decides): Opioid PK
+   defaults to collapsed (see build_te_predictions_column()) and must
+   still shrink to just its header, exactly like the shared
+   .graph-card--collapsed rule already does for every other graph card
+   on every other page. */
+#te-predictions-grid .graph-card--collapsed {
+  height: auto;
+}
+
+#te-predictions-grid .graph-card-header {
+  margin-bottom: 4px;
+}
+
+#te-predictions-grid .graph-card-plot {
+  min-height: 170px;
 }

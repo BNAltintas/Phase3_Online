@@ -1396,38 +1396,49 @@ def build_te_input_column():
 
 def build_te_explore_card():
     """
-    Build the "Explore opioid strategy" card - a slider (bounds/units
-    depend on the committed opioid, reconfigured by runScenario in
-    test_exploration.js on every "Run Scenario" click) whose own live
-    label/track use the orange "explored/what-if" accent (a Test-
-    Exploration-only "te-explore-slider" class layered on top of the
-    shared .scenario-slider class, so the Scenario Exploration page's own
-    remifentanil-rate slider - which reuses .scenario-slider too - keeps
-    its existing blue look unaffected). Dragging it live-updates the
-    Scenario Result card and every graph (updateExploredLive) without
-    needing "Run Scenario" again.
+    Build the "Explore opioid strategy" card. Its own opioid dropdown
+    (te-explore-opioid-dropdown) is completely independent from the left
+    column's Medication Scenario dropdown (te-opioid-dropdown, which only
+    feeds the Baseline Recommendation) - this lets the user explore a
+    different opioid (or a different rate of the same one) without ever
+    re-running the baseline. Selecting an opioid here reveals a rate
+    slider (te-explore-slider-wrapper), reconfigured for that opioid by
+    onExploreOpioidChange in test_exploration.js and initialized exactly
+    at that opioid's own recommended rate - the Explored Scenario column,
+    Change column, and every graph's orange trace stay empty/hidden until
+    the slider is actually moved away from that initial value
+    (updateExploredLive treats "still at the recommended value" as "no
+    exploration yet").
     """
-    cfg = TEST_EXPLORATION_OPIOID_DEFAULTS["remifentanil"]
     return html.Div(
         [
             _te_card_header("fa-sliders", "Explore opioid strategy"),
-            html.P(
-                "Adjust opioid dosing and explore how DosePilot adapts the recommended propofol regimen.",
-                className="te-card-subtitle",
+            _te_dropdown_field(
+                "Opioid to explore", "te-explore-opioid-dropdown",
+                [
+                    {"label": "None", "value": "none"},
+                    {"label": "Remifentanil", "value": "remifentanil"},
+                    {"label": "Sufentanil", "value": "sufentanil"},
+                    {"label": "Fentanyl", "value": "fentanyl"},
+                ],
+                "none",
             ),
-            html.Div("Remifentanil infusion rate", id="te-explore-rate-title", className="te-summary-label"),
             html.Div(
-                f"{cfg['baseline']:.2f} {cfg['unit']}",
-                id="te-explore-rate-label", className="te-explore-rate-value",
-            ),
-            dcc.Slider(
-                id="te-explore-rate-slider",
-                min=cfg["min"], max=cfg["max"], step=cfg["step"], value=cfg["baseline"],
-                marks={cfg["min"]: f"{cfg['min']:.2f}", cfg["max"]: f"{cfg['max']:.2f}"},
-                tooltip={"placement": "bottom", "always_visible": False},
-                updatemode="drag",
-                allow_direct_input=False,
-                className="scenario-slider te-explore-slider",
+                [
+                    html.Div("", id="te-explore-rate-title", className="te-summary-label"),
+                    html.Div("", id="te-explore-rate-label", className="te-explore-rate-value"),
+                    dcc.Slider(
+                        id="te-explore-rate-slider",
+                        min=0, max=1, step=0.1, value=0,
+                        marks={},
+                        tooltip={"placement": "bottom", "always_visible": False},
+                        updatemode="drag",
+                        allow_direct_input=False,
+                        className="scenario-slider te-explore-slider",
+                    ),
+                ],
+                id="te-explore-slider-wrapper",
+                style={"display": "none"},
             ),
         ],
         className="card te-card",
@@ -1435,13 +1446,13 @@ def build_te_explore_card():
 
 
 def _te_result_header_row():
-    """The Scenario Result grid's header row: column titles + a decorative arrow between Baseline and Explored."""
+    """The Scenario Result grid's header row: column titles + a decorative arrow between Baseline Recommendation and Explored Scenario."""
     return html.Div(
         [
             html.Div(className="te-result-cell"),
-            html.Div("Baseline (recommended)", className="te-result-cell te-result-col-heading te-result-col-heading--baseline"),
+            html.Div("Baseline Recommendation", className="te-result-cell te-result-col-heading te-result-col-heading--baseline"),
             html.Div("→", className="te-result-cell te-result-arrow-cell"),
-            html.Div("Explored scenario", className="te-result-cell te-result-col-heading te-result-col-heading--explored"),
+            html.Div("Explored Scenario", className="te-result-cell te-result-col-heading te-result-col-heading--explored"),
             html.Div("Change", className="te-result-cell te-result-col-heading te-result-col-heading--change"),
         ],
         className="te-result-row te-result-row--header",
@@ -1516,6 +1527,25 @@ def build_te_scenario_result_card():
             ),
             html.Div(
                 [
+                    html.Div(
+                        [
+                            html.Span("Baseline Strategy", className="te-strategy-label"),
+                            html.Span("No opioid", id="te-strategy-baseline-value", className="te-strategy-value te-strategy-value--baseline"),
+                        ],
+                        className="te-strategy-row",
+                    ),
+                    html.Div(
+                        [
+                            html.Span("Explored Strategy", className="te-strategy-label"),
+                            html.Span("Not selected", id="te-strategy-explored-value", className="te-strategy-value te-strategy-value--explored"),
+                        ],
+                        className="te-strategy-row",
+                    ),
+                ],
+                className="te-strategy-summary",
+            ),
+            html.Div(
+                [
                     _te_result_header_row(),
                     html.Div(
                         [
@@ -1531,7 +1561,7 @@ def build_te_scenario_result_card():
                             html.Div(
                                 [
                                     html.Span(
-                                        "Adjust remifentanil rate and run scenario",
+                                        "Select an opioid to begin exploring alternative strategies.",
                                         id="te-explored-induction",
                                         className="te-result-explored-induction-value te-result-explored-value--placeholder",
                                     ),
@@ -1552,7 +1582,7 @@ def build_te_scenario_result_card():
                     html.Div(
                         [
                             _te_result_section_header(
-                                "te-opioid-maintenance-title", "Infusion regimen relative to induction", title_is_id=True,
+                                "Selected Opioid Strategy", "Infusion regimen relative to induction",
                             ),
                             _te_result_data_row("0–2 min", "Pause", "te-explored-remi-pause"),
                             _te_result_data_row(
@@ -1566,13 +1596,6 @@ def build_te_scenario_result_card():
                 ],
                 className="te-result-grid",
             ),
-            html.Div(
-                [
-                    html.Span("i", className="info-icon"),
-                    "Adjust the remifentanil infusion rate and click “Run Scenario” to see how DosePilot adapts the recommended regimen.",
-                ],
-                className="te-helper-text te-result-footnote",
-            ),
         ],
         className="card te-card te-result-card",
     )
@@ -1580,20 +1603,16 @@ def build_te_scenario_result_card():
 
 def build_te_dose_response_card():
     """
-    Build the "Dose-response interaction (fake logic)" card - reuses
-    graph_card() (the same generic card/graph/"Show"-toggle shell every
-    other prediction graph in this app uses), with a dynamic subtitle
-    naming the selected opioid. The figure itself (now swept across
-    opioid infusion rate, not propofol dose) is built and refreshed
-    entirely client-side by test_exploration.js.
+    Build the "Dose-response interaction" card - reuses graph_card() (the
+    same generic card/graph/"Show"-toggle shell every other prediction
+    graph in this app uses). No subtitle - the graph's own legend/axis
+    labels already say which opioid and variable are being swept. The
+    figure itself (swept across opioid infusion rate, not propofol dose)
+    is built and refreshed entirely client-side by test_exploration.js.
     """
     card = graph_card(
-        "DOSE-RESPONSE INTERACTION (FAKE LOGIC)",
+        "Dose-Response Interaction",
         "te-dose-response-graph",
-        note=html.Span(
-            "How remifentanil infusion rate affects MAP and BIS",
-            id="te-dose-response-subtitle",
-        ),
         tall=True,
     )
     return html.Div(
@@ -1605,20 +1624,20 @@ def build_te_dose_response_card():
 def build_te_center_column():
     """
     Build the Test Exploration page's center column: Scenario Result,
-    Explore Opioid Strategy (wrapped in its own div so just this one card
-    - not Scenario Result or Dose-Response - hides when "None" is
-    selected, since there is no opioid rate to explore in that case),
-    then Dose-Response Interaction. Carries an extra "te-center-column"
-    class (on top of the shared "recommendation-column" flex-item class
-    every other page's center column also uses) so its width can be
-    widened in style.css - scoped to this one class, never touching
-    .recommendation-column itself - to give the Scenario Result grid
-    enough room for its 5 columns.
+    Explore Opioid Strategy (always shown once a scenario is active,
+    regardless of the baseline's own opioid choice - its own dropdown
+    lets the user explore any opioid independently), then Dose-Response
+    Interaction. Carries an extra "te-center-column" class (on top of the
+    shared "recommendation-column" flex-item class every other page's
+    center column also uses) so its width can be widened in style.css -
+    scoped to this one class, never touching .recommendation-column
+    itself - to give the Scenario Result grid enough room for its 5
+    columns.
     """
     return html.Div(
         [
             build_te_scenario_result_card(),
-            html.Div(build_te_explore_card(), id="te-explore-card-wrapper"),
+            build_te_explore_card(),
             build_te_dose_response_card(),
         ],
         className="recommendation-column te-center-column",
@@ -1641,7 +1660,7 @@ def build_te_predictions_column():
                     html.Div(
                         [
                             html.I(className="fa-solid fa-magnifying-glass-chart te-card-icon"),
-                            "Predictions (placeholder)",
+                            "Predictions",
                         ],
                         className="section-label te-predictions-label",
                     ),
@@ -1658,8 +1677,14 @@ def build_te_predictions_column():
                     graph_card("BIS", "te-bis-graph", default_visible=True),
                     graph_card("MAP", "te-map-graph", default_visible=True),
                     graph_card("Propofol PK/PD", "te-propofol-pk-graph", default_visible=True),
-                    graph_card("Opioid PK", "te-opioid-pk-graph", default_visible=True),
+                    # Lowest-priority graph on a 1080p viewport - collapsed by
+                    # default (still fully available via its own "Show"
+                    # checkbox, graph_card()'s existing generic mechanism) so
+                    # the 3 higher-priority graphs above it fit on screen
+                    # without it eating vertical space nobody asked to see yet.
+                    graph_card("Opioid PK", "te-opioid-pk-graph", default_visible=False),
                 ],
+                id="te-predictions-grid",
                 className="predictions-grid",
             ),
         ],

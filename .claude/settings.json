@@ -221,7 +221,26 @@
       "Bash(taskkill //F //PID 10692)",
       "Bash(taskkill //F //PID 30900)",
       "Bash(taskkill //F //PID 35288)",
-      "Bash(taskkill //F //PID 15288)"
+      "Bash(taskkill //F //PID 15288)",
+      "Bash(\".venv/Scripts/python.exe\" -c \"from propofol.app import app; print\\(len\\(app.callback_map\\)\\)\")",
+      "Bash(mkdir -p \"/c/Users/baltinta/AppData/Local/Temp/claude/c--Users-baltinta-OneDrive---UMC-Utrecht-Master-Thesis-Prototype-Phase-3-V2-Beyza/5eefb19f-a4d1-42b7-b266-8d20aa3eb8d1/scratchpad\")",
+      "Read(//c/Users/baltinta/AppData/Local/Temp/claude/c--Users-baltinta-OneDrive---UMC-Utrecht-Master-Thesis-Prototype-Phase-3-V2-Beyza/5eefb19f-a4d1-42b7-b266-8d20aa3eb8d1/scratchpad/**)",
+      "Bash(pip show *)",
+      "Bash(\".venv/Scripts/python.exe\" -c \"import playwright; print\\(playwright.__file__\\)\")",
+      "Bash(npx --version)",
+      "Bash(node verify_te.js)",
+      "Bash(node verify_te2.js)",
+      "Bash(node inspect_dropdown.js)",
+      "Bash(node inspect_slider.js)",
+      "Bash(node verify_regress.js)",
+      "Bash(node verify_regress2.js)",
+      "Bash(node verify_regress3.js)",
+      "Bash(node verify_regress4.js)",
+      "Bash(node verify_te3.js)",
+      "Bash(node verify_te4.js)",
+      "Bash(node verify_te5.js)",
+      "Bash(node verify_density.js)",
+      "Bash(node verify_density2.js)"
     ]
   }
 }

@@ -12,27 +12,35 @@
  * The story this page tells: fill in a patient (opioid defaults to
  * "None") - all pure form state, nothing computes yet, and only the left
  * column is visible - then press "Run Scenario" (the page's single
- * trigger) to reveal the results area: the baseline propofol
- * recommendation (opioid at its own fixed anchor rate, blue) compared
- * against the explored recommendation (your chosen rate, orange - a
- * manual/what-if accent, not another baseline output), and the
- * physiological consequences on the right-hand prediction graphs. More
- * opioid always pulls propofol (and BIS/MAP) down; less opioid pushes
- * them back up. Editing the left column again immediately hides the
- * results area until "Run Scenario" is pressed again.
+ * trigger) to reveal the results area: the Baseline Recommendation
+ * (whatever opioid the left column held at that moment, green) plus an
+ * Explore Opioid Strategy card with its own, fully independent opioid
+ * dropdown - choosing an opioid there and moving its rate slider away
+ * from the recommended value it starts at reveals the Explored Scenario
+ * (orange - a manual/what-if accent, not another baseline output) side
+ * by side with the baseline, on every graph and in the comparison table.
+ * The baseline and explored opioid never have to match - you can explore
+ * "what if we gave remifentanil instead" even when the baseline itself
+ * used no opioid at all. More opioid always pulls propofol (and BIS/MAP)
+ * down; less opioid pushes them back up. Editing the left column again
+ * immediately hides the results area until "Run Scenario" is pressed
+ * again.
  */
 
 (function () {
   "use strict";
 
+  // Green = Baseline Recommendation, Orange = Explored Scenario -
+  // applied consistently across every Test Exploration graph and the
+  // Scenario Result card alike. RED/BLUE are a separate axis (MAP vs
+  // BIS variable identity) used only by the Dose-Response sweep curves,
+  // where the green/orange distinction is carried by the two vertical
+  // reference lines instead.
   var GREEN = "#1f9254";
+  var ORANGE = "#c2680f";
+  var ORANGE_BAND = "rgba(194, 104, 15, 0.22)";
   var BLUE = "#2f6fed";
   var RED = "#d9362e";
-  // The "explored/what-if" accent - matches the app-wide manual-override
-  // orange used elsewhere in DosePilot, so the Explored Scenario column
-  // and the dose-response graph's "Explored" line read as a manual/
-  // what-if result, not another baseline/recommended output.
-  var ORANGE = "#c2680f";
   var GRID = "#eef0f5";
   var AXIS_LINE = "#e2e5ec";
   var TEXT = "#1f2330";
@@ -293,18 +301,22 @@
     var data = [targetBand, mapLine, bisLine];
 
     if (hasOpioid) {
-      data.push({
-        x: [baselineRate, baselineRate], y: [0, 100], mode: "lines",
-        name: "Baseline (" + baselineRate.toFixed(cfg.decimals) + " " + cfg.unit + ")",
-        line: { color: GREEN, width: 2, dash: "dash" }, yaxis: "y2", hoverinfo: "skip",
-      });
-      // exploredRate is null until "Run Scenario" has actually been
-      // clicked - omit the "Explored" line entirely until then, rather
-      // than drawing it on top of (and hiding) the baseline line.
+      // Both baselineRate and exploredRate are null whenever the vertical
+      // line they'd represent doesn't apply to this sweep - e.g. the
+      // swept opioid isn't the baseline's own opioid, or no exploration
+      // is active yet - so each line is omitted independently rather
+      // than drawn on top of (and hiding) the other.
+      if (baselineRate !== null && baselineRate !== undefined) {
+        data.push({
+          x: [baselineRate, baselineRate], y: [0, 100], mode: "lines",
+          name: "Baseline Recommendation (" + baselineRate.toFixed(cfg.decimals) + " " + cfg.unit + ")",
+          line: { color: GREEN, width: 2, dash: "dash" }, yaxis: "y2", hoverinfo: "skip",
+        });
+      }
       if (exploredRate !== null && exploredRate !== undefined) {
         data.push({
           x: [exploredRate, exploredRate], y: [0, 100], mode: "lines",
-          name: "Explored (" + exploredRate.toFixed(cfg.decimals) + " " + cfg.unit + ")",
+          name: "Explored Scenario (" + exploredRate.toFixed(cfg.decimals) + " " + cfg.unit + ")",
           line: { color: ORANGE, width: 2.5 }, yaxis: "y2", hoverinfo: "skip",
         });
       }
@@ -324,20 +336,33 @@
     return { data: data, layout: layout };
   }
 
-  /* ---------- predictions (fake) - reflect the explored scenario ---------- */
+  /* ---------- predictions (fake) - each graph always shows the Baseline
+     Recommendation (green). The Explored Scenario (orange) - and its
+     confidence band - is added on top only when `sExp` is non-null,
+     i.e. an opioid has been chosen to explore AND its rate has actually
+     been moved away from the recommended value (see updateExploredLive):
+     before that, these graphs show baseline-only, no orange trace, no
+     "Explored Scenario" legend entry at all. ---------- */
 
-  function teBisFigure(s) {
-    var t = teLinspace(0, 15, 61);
-    var floor = Math.max(20, s.bisLow - 8);
-    var y = t.map(function (tt) {
+  // More propofol (higher induction) -> deeper/lower steady-state BIS;
+  // less propofol -> lighter/higher BIS. Still anchored to this
+  // scenario's own BIS targets, same as before.
+  function teBisFloor(s) {
+    var base = Math.max(20, s.bisLow - 8);
+    var shift = (s.induction - 2.0) * 12;
+    return teClamp(base - shift, 15, 90);
+  }
+
+  function teBisCurve(s, t) {
+    var floor = teBisFloor(s);
+    return t.map(function (tt) {
       return floor + (92 - floor) * Math.exp(-tt / 1.3);
     });
-    var yLow = y.map(function (v) {
-      return Math.max(0, v - 6);
-    });
-    var yHigh = y.map(function (v) {
-      return Math.min(100, v + 6);
-    });
+  }
+
+  function teBisFigure(sBase, sExp) {
+    var t = teLinspace(0, 15, 61);
+    var yBase = teBisCurve(sBase, t);
 
     var layout = {
       xaxis: teAxis("Time (min)"),
@@ -346,57 +371,90 @@
       paper_bgcolor: "#ffffff",
       font: teFont(),
       legend: teLegend(),
-      margin: { t: 40, r: 85, b: 45, l: 55 },
-      shapes: [teHLineShape(s.bisLow), teHLineShape(s.bisHigh)],
-      annotations: [teHLineAnnotation(s.bisLow, "BIS " + s.bisLow.toFixed(0)), teHLineAnnotation(s.bisHigh, "BIS " + s.bisHigh.toFixed(0))],
+      margin: { t: 26, r: 65, b: 34, l: 46 },
+      shapes: [teHLineShape(sBase.bisLow), teHLineShape(sBase.bisHigh)],
+      annotations: [teHLineAnnotation(sBase.bisLow, "BIS " + sBase.bisLow.toFixed(0)), teHLineAnnotation(sBase.bisHigh, "BIS " + sBase.bisHigh.toFixed(0))],
     };
 
-    return {
-      data: [
-        teBand(t, yLow, yHigh, "90% Prediction Interval", "rgba(47, 111, 237, 0.35)"),
-        { x: t, y: y, mode: "lines", name: "Predicted BIS", line: { color: GREEN, width: 2.5 } },
-      ],
-      layout: layout,
-    };
+    var data = [{ x: t, y: yBase, mode: "lines", name: "Baseline Recommendation", line: { color: GREEN, width: 2 } }];
+
+    if (sExp) {
+      var yExp = teBisCurve(sExp, t);
+      var yLow = yExp.map(function (v) {
+        return Math.max(0, v - 6);
+      });
+      var yHigh = yExp.map(function (v) {
+        return Math.min(100, v + 6);
+      });
+      data = [
+        teBand(t, yLow, yHigh, "90% Prediction Interval", ORANGE_BAND),
+        data[0],
+        { x: t, y: yExp, mode: "lines", name: "Explored Scenario", line: { color: ORANGE, width: 2.5 } },
+      ];
+    }
+
+    return { data: data, layout: layout };
   }
 
-  function teMapFigure(s) {
+  // The opioid infusion rate pulls MAP down, same relationship the
+  // Dose-Response sweep uses - so Baseline and Explored genuinely
+  // diverge here whenever their rates differ.
+  function teMapStartValue(s) {
+    if (s.opioid === "none" || s.rate === null || s.rate === undefined) {
+      return s.map;
+    }
+    var cfg = teOpioidConfig(s.opioid);
+    var t = teClamp((s.rate - cfg.min) / (cfg.max - cfg.min), 0, 1);
+    var mapFloorRate = 55.0;
+    return mapFloorRate + (s.map - mapFloorRate) * (1 - 0.55 * t);
+  }
+
+  function teMapCurve(s, t) {
+    var start = teMapStartValue(s);
+    var floor = start - 22;
+    return t.map(function (tt) {
+      return floor + (start - floor) * Math.exp(-tt / 3.0);
+    });
+  }
+
+  function teMapFigure(sBase, sExp) {
     var t = teLinspace(0, 15, 61);
-    var floor = s.map - 22;
-    var y = t.map(function (tt) {
-      return floor + (s.map - floor) * Math.exp(-tt / 3.0);
-    });
-    var yLow = y.map(function (v) {
-      return v - 8;
-    });
-    var yHigh = y.map(function (v) {
-      return v + 8;
-    });
-    var lowerBound = s.map * 0.72;
+    var yBase = teMapCurve(sBase, t);
+    var lowerBound = sBase.map * 0.72;
 
     var layout = {
       xaxis: teAxis("Time (min)"),
-      yaxis: teAxis("MAP (mmHg)", { range: [0, Math.max(160, s.map + 30)] }),
+      yaxis: teAxis("MAP (mmHg)", { range: [0, Math.max(160, sBase.map + 30)] }),
       plot_bgcolor: "#ffffff",
       paper_bgcolor: "#ffffff",
       font: teFont(),
       legend: teLegend(),
-      margin: { t: 40, r: 100, b: 45, l: 55 },
+      margin: { t: 26, r: 96, b: 34, l: 46 },
       shapes: [teHLineShape(lowerBound)],
       annotations: [teHLineAnnotation(lowerBound, "MAP lower bound")],
     };
 
-    return {
-      data: [
-        teBand(t, yLow, yHigh, "90% Prediction Interval", "rgba(47, 111, 237, 0.35)"),
-        { x: t, y: y, mode: "lines", name: "Predicted MAP", line: { color: GREEN, width: 2.5 } },
-      ],
-      layout: layout,
-    };
+    var data = [{ x: t, y: yBase, mode: "lines", name: "Baseline Recommendation", line: { color: GREEN, width: 2 } }];
+
+    if (sExp) {
+      var yExp = teMapCurve(sExp, t);
+      var yLow = yExp.map(function (v) {
+        return v - 8;
+      });
+      var yHigh = yExp.map(function (v) {
+        return v + 8;
+      });
+      data = [
+        teBand(t, yLow, yHigh, "90% Prediction Interval", ORANGE_BAND),
+        data[0],
+        { x: t, y: yExp, mode: "lines", name: "Explored Scenario", line: { color: ORANGE, width: 2.5 } },
+      ];
+    }
+
+    return { data: data, layout: layout };
   }
 
-  function tePropofolPkFigure(s) {
-    var t = teLinspace(0, 15, 61);
+  function tePropofolCurves(s, t) {
     var peakCp = 3.0 + s.induction * 1.5;
     var plateauCp = 1.0 + s.propRate1McgKgMin / 60.0;
     var cp = t.map(function (tt) {
@@ -405,12 +463,12 @@
     var ce = t.map(function (tt) {
       return plateauCp + (peakCp - plateauCp) * 0.75 * (Math.exp(-tt / 3.5) - Math.exp(-tt / 0.7));
     });
-    var cpLow = cp.map(function (v) {
-      return Math.max(0, v * 0.85);
-    });
-    var cpHigh = cp.map(function (v) {
-      return v * 1.15;
-    });
+    return { cp: cp, ce: ce };
+  }
+
+  function tePropofolPkFigure(sBase, sExp) {
+    var t = teLinspace(0, 15, 61);
+    var base = tePropofolCurves(sBase, t);
 
     var layout = {
       xaxis: teAxis("Time (min)"),
@@ -419,30 +477,66 @@
       paper_bgcolor: "#ffffff",
       font: teFont(),
       legend: teLegend(),
-      margin: { t: 40, r: 20, b: 45, l: 55 },
+      margin: { t: 26, r: 16, b: 34, l: 46 },
     };
 
-    return {
-      data: [
-        teBand(t, cpLow, cpHigh, "90% Prediction Interval", "rgba(47, 111, 237, 0.35)"),
-        { x: t, y: cp, mode: "lines", name: "Predicted Cp", line: { color: GREEN, width: 2.5 } },
-        { x: t, y: ce, mode: "lines", name: "Predicted Ce", line: { color: GREEN, width: 2.5, dash: "dash" } },
-      ],
-      layout: layout,
-    };
+    var data = [
+      { x: t, y: base.cp, mode: "lines", name: "Baseline Recommendation (Cp)", line: { color: GREEN, width: 2 } },
+      { x: t, y: base.ce, mode: "lines", name: "Baseline Recommendation (Ce)", line: { color: GREEN, width: 2, dash: "dash" } },
+    ];
+
+    if (sExp) {
+      var exp = tePropofolCurves(sExp, t);
+      var cpLow = exp.cp.map(function (v) {
+        return Math.max(0, v * 0.85);
+      });
+      var cpHigh = exp.cp.map(function (v) {
+        return v * 1.15;
+      });
+      data = [
+        teBand(t, cpLow, cpHigh, "90% Prediction Interval", ORANGE_BAND),
+        data[0],
+        data[1],
+        { x: t, y: exp.cp, mode: "lines", name: "Explored Scenario (Cp)", line: { color: ORANGE, width: 2.5 } },
+        { x: t, y: exp.ce, mode: "lines", name: "Explored Scenario (Ce)", line: { color: ORANGE, width: 2.5, dash: "dash" } },
+      ];
+    }
+
+    return { data: data, layout: layout };
   }
 
-  // For opioid === "none" this renders a flat zero-concentration line
-  // rather than an empty/hidden graph - "no opioid administered" is
-  // itself a valid, displayable result of the scenario that was run.
-  function teOpioidPkFigure(s) {
-    var t = teLinspace(0, 15, 61);
-    var hasOpioid = s.opioid !== "none";
-    var plateau = hasOpioid ? { remifentanil: 2.4, sufentanil: 0.4, fentanyl: 3.2 }[s.opioid] || 1.0 : 0;
-    var y = t.map(function (tt) {
-      return hasOpioid ? plateau * (1 - Math.exp(-tt / 3.5)) : 0;
+  // More opioid rate -> higher steady-state concentration (scaled off
+  // this opioid's own configured rate range), so Baseline and Explored
+  // diverge whenever their rates differ. For opioid === "none" both are
+  // flat zero - "no opioid administered" is itself a valid, displayable
+  // result of the scenario that was run.
+  function teOpioidPkPlateau(s) {
+    if (s.opioid === "none" || s.rate === null || s.rate === undefined) {
+      return 0;
+    }
+    var cfg = teOpioidConfig(s.opioid);
+    var t = teClamp((s.rate - cfg.min) / (cfg.max - cfg.min), 0, 1);
+    var basePlateau = { remifentanil: 1.2, sufentanil: 0.2, fentanyl: 1.6 }[s.opioid] || 0.5;
+    return basePlateau + basePlateau * 2.0 * t;
+  }
+
+  function teOpioidPkCurve(s, t) {
+    var plateau = teOpioidPkPlateau(s);
+    return t.map(function (tt) {
+      return plateau * (1 - Math.exp(-tt / 3.5));
     });
-    var drugLabel = hasOpioid ? teCapitalize(s.opioid) : "Opioid";
+  }
+
+  function teOpioidPkFigure(sBase, sExp) {
+    var t = teLinspace(0, 15, 61);
+    // Whichever opioid is actually driving a visible curve names the
+    // axis - the explored one when active, else the baseline's own
+    // (which may itself be "none", giving a flat zero-concentration
+    // line - "no opioid administered" is a valid, displayable result).
+    var primaryOpioid = sExp && sExp.opioid !== "none" ? sExp.opioid : sBase.opioid;
+    var hasOpioid = primaryOpioid !== "none";
+    var drugLabel = hasOpioid ? teCapitalize(primaryOpioid) : "Opioid";
+    var yBase = teOpioidPkCurve(sBase, t);
 
     var layout = {
       xaxis: teAxis("Time (min)"),
@@ -451,30 +545,27 @@
       paper_bgcolor: "#ffffff",
       font: teFont(),
       legend: teLegend(),
-      margin: { t: 40, r: 20, b: 45, l: 55 },
+      margin: { t: 26, r: 16, b: 34, l: 46 },
     };
 
-    if (!hasOpioid) {
-      return {
-        data: [{ x: t, y: y, mode: "lines", name: "Predicted Cp (no opioid)", line: { color: GREEN, width: 2.5 } }],
-        layout: layout,
-      };
+    var data = [{ x: t, y: yBase, mode: "lines", name: "Baseline Recommendation", line: { color: GREEN, width: 2 } }];
+
+    if (sExp) {
+      var yExp = teOpioidPkCurve(sExp, t);
+      var yLow = yExp.map(function (v) {
+        return Math.max(0, v * 0.85);
+      });
+      var yHigh = yExp.map(function (v) {
+        return v * 1.15;
+      });
+      data = [
+        teBand(t, yLow, yHigh, "90% Prediction Interval", ORANGE_BAND),
+        data[0],
+        { x: t, y: yExp, mode: "lines", name: "Explored Scenario", line: { color: ORANGE, width: 2.5 } },
+      ];
     }
 
-    var yLow = y.map(function (v) {
-      return Math.max(0, v * 0.85);
-    });
-    var yHigh = y.map(function (v) {
-      return v * 1.15;
-    });
-
-    return {
-      data: [
-        teBand(t, yLow, yHigh, "90% Prediction Interval", "rgba(47, 111, 237, 0.35)"),
-        { x: t, y: y, mode: "lines", name: "Predicted Cp", line: { color: GREEN, width: 2.5 } },
-      ],
-      layout: layout,
-    };
+    return { data: data, layout: layout };
   }
 
   /* ---------- Dash clientside entry points ---------- */
@@ -498,36 +589,28 @@
   window.dash_clientside = window.dash_clientside || {};
   window.dash_clientside.testExploration = {
     // "Run Scenario" click: commits the left column's current values into
-    // te-committed-scenario-store, resets the Explore-strategy slider to
-    // the newly-committed opioid's own baseline rate/bounds/unit, and
-    // switches the page into State B (te-scenario-active-store = true,
-    // revealing te-results-area). Computes nothing else directly -
-    // committing the store triggers computeBaseline, and resetting the
-    // slider's value triggers updateExploredLive, so the rest of the
+    // te-committed-scenario-store (this is the Baseline Recommendation
+    // from now on - whatever opioid the left column held at click time,
+    // including "none"), resets the independent Explore-opioid dropdown
+    // back to "none" (a fresh scenario always starts with no exploration
+    // active - see onExploreOpioidChange below, which reacts to that
+    // reset by hiding the rate slider again), and switches the page into
+    // State B (te-scenario-active-store = true, revealing
+    // te-results-area). Computes nothing else directly - committing the
+    // store triggers computeBaseline, and resetting the dropdown triggers
+    // onExploreOpioidChange -> updateExploredLive, so the rest of the
     // card fills in through that natural chain reaction.
     runScenario: function (_nClicks, age, sex, height, weight, sbp, dbp, opioid, bisLow, bisHigh, mapMode, mapValue) {
-      var noUpdate = window.dash_clientside.no_update;
       var snapshot = teBuildSnapshot(age, sex, height, weight, sbp, dbp, opioid, bisLow, bisHigh, mapMode, mapValue);
-      var visible = snapshot.opioid !== "none";
-
-      if (!visible) {
-        return [snapshot, noUpdate, noUpdate, noUpdate, noUpdate, noUpdate, noUpdate, noUpdate, true];
-      }
-
-      var cfg = teOpioidConfig(snapshot.opioid);
-      var marks = {};
-      marks[cfg.min] = cfg.min.toFixed(cfg.decimals);
-      marks[cfg.max] = cfg.max.toFixed(cfg.decimals);
-      var label = teCapitalize(snapshot.opioid) + " infusion rate";
-      var valueText = cfg.baseline.toFixed(cfg.decimals) + " " + cfg.unit;
-
-      return [snapshot, cfg.min, cfg.max, cfg.step, cfg.baseline, marks, label, valueText, true];
+      return [snapshot, "none", true];
     },
 
-    // Baseline column + section visibility - driven solely by
-    // te-committed-scenario-store (fires on page load with this page's
-    // default snapshot, and again every "Run Scenario" click). Never
-    // reacts to the live left-column fields directly.
+    // Baseline column - driven solely by te-committed-scenario-store
+    // (fires on page load with this page's default snapshot, and again
+    // every "Run Scenario" click). Never reacts to the live left-column
+    // fields, and never reacts to the (fully independent) Explore-opioid
+    // dropdown - this is the Baseline Recommendation, unaffected by
+    // whatever is being explored.
     computeBaseline: function (committed) {
       var c = committed || {};
       var opioid = c.opioid || "none";
@@ -539,57 +622,147 @@
       var totalText = "(" + s.inductionTotalMg.toFixed(1) + " mg total)";
       var propRate1Text = s.propRate1MlH.toFixed(0) + " mL/h (" + s.propRate1McgKgMin.toFixed(0) + " µg/kg/min)";
       var propRate2Text = s.propRate2MlH.toFixed(0) + " mL/h (" + s.propRate2McgKgMin.toFixed(0) + " µg/kg/min)";
-      var opioidTitle = visible ? teCapitalize(opioid) + " – Early maintenance (0–15 min)" : "-";
       var remiRateText = visible ? s.opioidRateDisplay : "-";
-      var exploreCardStyle = visible ? null : { display: "none" };
-      var opioidSectionStyle = visible ? null : { display: "none" };
 
-      return [inductionText, totalText, propRate1Text, propRate2Text, opioidTitle, remiRateText, exploreCardStyle, opioidSectionStyle];
+      return [inductionText, totalText, propRate1Text, propRate2Text, remiRateText];
     },
 
-    // The Explore-strategy slider's live-update path - fires on every
-    // drag tick, reading te-committed-scenario-store (never the live
-    // left-column fields) so it always reflects the last committed
-    // patient/opioid, even while an unrelated left-column edit is
-    // pending. No "Run Scenario" click needed for this to update.
-    updateExploredLive: function (rateValue, committed) {
+    // Fires whenever the Explore Opioid Strategy card's own opioid
+    // dropdown changes (including runScenario resetting it to "none").
+    // "None" hides the rate slider entirely (nothing to explore).
+    // Any real opioid reconfigures + reveals the slider, always
+    // reinitialized exactly at that opioid's own recommended rate - the
+    // starting point updateExploredLive treats as "not explored yet".
+    onExploreOpioidChange: function (exploreOpioidValue) {
+      var noUpdate = window.dash_clientside.no_update;
+      var opioid = exploreOpioidValue || "none";
+
+      if (opioid === "none") {
+        return [noUpdate, noUpdate, noUpdate, noUpdate, noUpdate, "", "", { display: "none" }];
+      }
+
+      var cfg = teOpioidConfig(opioid);
+      var marks = {};
+      marks[cfg.min] = cfg.min.toFixed(cfg.decimals);
+      marks[cfg.max] = cfg.max.toFixed(cfg.decimals);
+      var title = teCapitalize(opioid) + " infusion rate";
+      var label = cfg.baseline.toFixed(cfg.decimals) + " " + cfg.unit;
+
+      return [cfg.min, cfg.max, cfg.step, cfg.baseline, marks, title, label, null];
+    },
+
+    // The Explore-strategy live-update path - fires on every slider drag
+    // tick, every Explore-opioid dropdown change, and every "Run
+    // Scenario" commit. Reads te-committed-scenario-store for the
+    // Baseline Recommendation (never the live left-column fields) and
+    // the live Explore-opioid dropdown + slider for the Explored
+    // Scenario - two fully independent opioid choices. "Explored" only
+    // becomes active once an opioid is chosen here AND its rate has
+    // actually been moved away from the recommended value it was reset
+    // to; until then every Explored cell/graph shows baseline-only.
+    updateExploredLive: function (rateValue, committed, exploreOpioidValue) {
       var c = committed || {};
-      var opioid = c.opioid || "none";
-      var visible = opioid !== "none";
-      var cfg = visible ? teOpioidConfig(opioid) : null;
-      var baselineRate = visible ? cfg.baseline : 0;
-      var exploredRate = visible ? teParseFloat(rateValue, cfg.baseline) : 0;
+      var baseOpioid = c.opioid || "none";
+      var baseVisible = baseOpioid !== "none";
+      var baseCfg = baseVisible ? teOpioidConfig(baseOpioid) : null;
+      var baselineRate = baseVisible ? baseCfg.baseline : 0;
+      var sBase = teComputeState(c.age, c.sex, c.height, c.weight, c.sbp, c.dbp, baseOpioid, c.bisLow, c.bisHigh, c.mapMode, c.mapValue, baselineRate);
 
-      var sBase = teComputeState(c.age, c.sex, c.height, c.weight, c.sbp, c.dbp, opioid, c.bisLow, c.bisHigh, c.mapMode, c.mapValue, baselineRate);
-      var sExp = teComputeState(c.age, c.sex, c.height, c.weight, c.sbp, c.dbp, opioid, c.bisLow, c.bisHigh, c.mapMode, c.mapValue, exploredRate);
+      var exploreOpioid = exploreOpioidValue || "none";
+      var exploreVisible = exploreOpioid !== "none";
+      var exploreCfg = exploreVisible ? teOpioidConfig(exploreOpioid) : null;
+      var recommendedExploreRate = exploreVisible ? exploreCfg.baseline : 0;
+      var exploredRateRaw = exploreVisible ? teParseFloat(rateValue, exploreCfg.baseline) : 0;
+      var active = exploreVisible && Math.abs(exploredRateRaw - recommendedExploreRate) > 1e-9;
 
-      var expInductionText = sExp.induction.toFixed(2) + " mg/kg";
-      var expTotalText = "(" + sExp.inductionTotalMg.toFixed(1) + " mg total)";
-      var expPropRate1Text = sExp.propRate1MlH.toFixed(0) + " mL/h (" + sExp.propRate1McgKgMin.toFixed(0) + " µg/kg/min)";
-      var expPropRate2Text = sExp.propRate2MlH.toFixed(0) + " mL/h (" + sExp.propRate2McgKgMin.toFixed(0) + " µg/kg/min)";
-      var expRemiRateText = visible ? sExp.opioidRateDisplay : "-";
+      var sExp = active
+        ? teComputeState(c.age, c.sex, c.height, c.weight, c.sbp, c.dbp, exploreOpioid, c.bisLow, c.bisHigh, c.mapMode, c.mapValue, exploredRateRaw)
+        : null;
 
-      var propofolDeltaPct = ((sExp.induction - sBase.induction) / sBase.induction) * 100;
-      var opioidDeltaPct = !visible || baselineRate === 0 ? 0 : ((exploredRate - baselineRate) / baselineRate) * 100;
+      var expInductionText, expInductionClass, expTotalText, expPropRate1Text, expPropRate2Text, expRemiRateText;
+      var propofolDeltaText, propofolDeltaClass, opioidDeltaText, opioidDeltaClass;
 
-      var subtitle = visible
-        ? "How " + opioid + " infusion rate affects MAP and BIS"
-        : "Propofol-only baseline (no opioid administered)";
-      var doseResponseFig = teDoseResponseFigure(sExp, cfg, baselineRate, visible ? exploredRate : null);
-      var opioidPkFig = teOpioidPkFigure(sExp);
+      if (sExp) {
+        expInductionText = sExp.induction.toFixed(2) + " mg/kg";
+        expInductionClass = "te-result-explored-induction-value";
+        expTotalText = "(" + sExp.inductionTotalMg.toFixed(1) + " mg total)";
+        expPropRate1Text = sExp.propRate1MlH.toFixed(0) + " mL/h (" + sExp.propRate1McgKgMin.toFixed(0) + " µg/kg/min)";
+        expPropRate2Text = sExp.propRate2MlH.toFixed(0) + " mL/h (" + sExp.propRate2McgKgMin.toFixed(0) + " µg/kg/min)";
+        expRemiRateText = sExp.opioidRateDisplay;
+
+        var propofolDeltaPct = ((sExp.induction - sBase.induction) / sBase.induction) * 100;
+        propofolDeltaText = teDeltaText(propofolDeltaPct);
+        propofolDeltaClass = teDeltaClass(propofolDeltaPct);
+
+        if (baseVisible && baseOpioid === exploreOpioid) {
+          var opioidDeltaPct = baselineRate === 0 ? 0 : ((exploredRateRaw - baselineRate) / baselineRate) * 100;
+          opioidDeltaText = teDeltaText(opioidDeltaPct);
+          opioidDeltaClass = teDeltaClass(opioidDeltaPct);
+        } else {
+          // Baseline and explored are different drugs (or there's no
+          // baseline opioid at all) - a percentage change between two
+          // different opioids' rates isn't a meaningful number, so show
+          // a flat dash instead of a misleading one.
+          opioidDeltaText = "–";
+          opioidDeltaClass = "te-result-cell te-result-change-value";
+        }
+      } else {
+        expInductionText = !exploreVisible
+          ? "Select an opioid to begin exploring alternative strategies."
+          : "Move the slider to explore an alternative strategy.";
+        expInductionClass = "te-result-explored-induction-value te-result-explored-value--placeholder";
+        expTotalText = "";
+        expPropRate1Text = "–";
+        expPropRate2Text = "–";
+        expRemiRateText = "–";
+        propofolDeltaText = "–";
+        propofolDeltaClass = "te-result-cell te-result-change-value";
+        opioidDeltaText = "–";
+        opioidDeltaClass = "te-result-cell te-result-change-value";
+      }
+
+      // Dose-Response sweep: across the explored opioid's own rate range
+      // whenever one is chosen (that's the drug actually being
+      // explored), else the baseline's own opioid, else the "no opioid
+      // administered" flat fallback - same graph structure/shapes/axes
+      // throughout (teDoseResponseFigure is unchanged), only which drug
+      // is swept and which vertical reference lines are drawn changes.
+      var sweepOpioid = exploreVisible ? exploreOpioid : baseOpioid;
+      var sweepCfg = sweepOpioid !== "none" ? teOpioidConfig(sweepOpioid) : null;
+      var sSweep = teComputeState(c.age, c.sex, c.height, c.weight, c.sbp, c.dbp, sweepOpioid, c.bisLow, c.bisHigh, c.mapMode, c.mapValue, 0);
+      var doseBaselineRate = sweepCfg && baseVisible && baseOpioid === sweepOpioid ? baselineRate : null;
+      var doseExploredRate = sweepCfg && active && exploreOpioid === sweepOpioid ? exploredRateRaw : null;
+      var doseResponseFig = teDoseResponseFigure(sSweep, sweepCfg, doseBaselineRate, doseExploredRate);
+
+      var strategyBaselineText = baseVisible
+        ? teCapitalize(baseOpioid) + " " + baselineRate.toFixed(baseCfg.decimals) + " " + baseCfg.unit
+        : "No opioid";
+      var strategyExploredText = !exploreVisible
+        ? "Not selected"
+        : !active
+        ? "Move slider to explore an alternative strategy"
+        : teCapitalize(exploreOpioid) + " " + exploredRateRaw.toFixed(exploreCfg.decimals) + " " + exploreCfg.unit;
 
       return [
-        expInductionText, "te-result-explored-induction-value", expTotalText,
+        expInductionText, expInductionClass, expTotalText,
         "Pause", expPropRate1Text, expPropRate2Text, "Pause", expRemiRateText,
-        teDeltaText(propofolDeltaPct), teDeltaClass(propofolDeltaPct),
-        teDeltaText(opioidDeltaPct), teDeltaClass(opioidDeltaPct),
-        doseResponseFig, subtitle,
-        teBisFigure(sExp), teMapFigure(sExp), tePropofolPkFigure(sExp), opioidPkFig,
+        propofolDeltaText, propofolDeltaClass,
+        opioidDeltaText, opioidDeltaClass,
+        doseResponseFig,
+        teBisFigure(sBase, sExp), teMapFigure(sBase, sExp), tePropofolPkFigure(sBase, sExp), teOpioidPkFigure(sBase, sExp),
+        strategyBaselineText, strategyExploredText,
       ];
     },
 
-    updateExploreLiveLabel: function (rateValue, committed) {
-      var opioid = (committed && committed.opioid) || "remifentanil";
+    // Live label above the slider - fires on every drag tick (cheap
+    // string formatting only), reading the live Explore-opioid dropdown
+    // (not the committed baseline) so its unit/decimals always match
+    // whatever the slider is actually configured for.
+    updateExploreLiveLabel: function (rateValue, exploreOpioidValue) {
+      var opioid = exploreOpioidValue || "none";
+      if (opioid === "none") {
+        return window.dash_clientside.no_update;
+      }
       var cfg = teOpioidConfig(opioid);
       var rate = teParseFloat(rateValue, cfg.baseline);
       return rate.toFixed(cfg.decimals) + " " + cfg.unit;

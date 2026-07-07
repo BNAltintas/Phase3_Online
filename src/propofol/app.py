@@ -1871,17 +1871,51 @@ _TE_LEFT_COLUMN_FIELDS = (
 )
 
 # "Run Scenario" click: commit the left column's current values into
-# te-committed-scenario-store, reset the Explore-strategy slider to the
-# newly-committed opioid's own baseline rate/bounds/unit, and flip
+# te-committed-scenario-store (the Baseline Recommendation from now on -
+# whatever opioid the left column held, including "none"), reset the
+# fully independent Explore-opioid dropdown back to "none" (a fresh
+# scenario always starts with no exploration active), and flip
 # te-scenario-active-store to True (switching the page into State B -
 # see render_te_results_area below). Nothing else is computed directly
 # here - committing the store triggers computeBaseline below, and
-# resetting the slider's value triggers updateExploredLive below, so the
-# whole Scenario Result card ends up freshly filled through that natural
-# chain reaction.
+# resetting the dropdown triggers onExploreOpioidChange below (which
+# hides the rate slider and, via its own reset of the slider's value,
+# ultimately re-triggers updateExploredLive), so the whole Scenario
+# Result card ends up freshly filled through that natural chain reaction.
 app.clientside_callback(
     ClientsideFunction(namespace="testExploration", function_name="runScenario"),
     Output("te-committed-scenario-store", "data"),
+    Output("te-explore-opioid-dropdown", "value"),
+    Output("te-scenario-active-store", "data", allow_duplicate=True),
+    Input("te-run-scenario-btn", "n_clicks"),
+    *[State(field_id, prop) for field_id, prop in _TE_LEFT_COLUMN_FIELDS],
+    prevent_initial_call=True,
+)
+
+# Baseline column - driven solely by te-committed-scenario-store, so it
+# fires once on page load (showing a real baseline immediately, per this
+# page's default committed snapshot) and again every time "Run Scenario"
+# commits a new one. It never reacts to the live left-column fields, and
+# never reacts to the Explore-opioid dropdown - this is the Baseline
+# Recommendation, unaffected by whatever is being explored.
+app.clientside_callback(
+    ClientsideFunction(namespace="testExploration", function_name="computeBaseline"),
+    Output("te-induction-dose", "children"),
+    Output("te-induction-total", "children"),
+    Output("te-baseline-prop-rate1", "children"),
+    Output("te-baseline-prop-rate2", "children"),
+    Output("te-baseline-remi-rate", "children"),
+    Input("te-committed-scenario-store", "data"),
+)
+
+# The Explore Opioid Strategy card's own opioid dropdown - fully
+# independent from the left column's Medication Scenario dropdown.
+# Choosing "None" hides the rate slider (nothing to explore); choosing a
+# real opioid reconfigures the slider for that opioid's own bounds/step
+# and resets its value to that opioid's recommended rate (the starting
+# point updateExploredLive below treats as "not explored yet").
+app.clientside_callback(
+    ClientsideFunction(namespace="testExploration", function_name="onExploreOpioidChange"),
     Output("te-explore-rate-slider", "min"),
     Output("te-explore-rate-slider", "max"),
     Output("te-explore-rate-slider", "step"),
@@ -1889,41 +1923,19 @@ app.clientside_callback(
     Output("te-explore-rate-slider", "marks"),
     Output("te-explore-rate-title", "children"),
     Output("te-explore-rate-label", "children", allow_duplicate=True),
-    Output("te-scenario-active-store", "data", allow_duplicate=True),
-    Input("te-run-scenario-btn", "n_clicks"),
-    *[State(field_id, prop) for field_id, prop in _TE_LEFT_COLUMN_FIELDS],
+    Output("te-explore-slider-wrapper", "style"),
+    Input("te-explore-opioid-dropdown", "value"),
     prevent_initial_call=True,
 )
 
-# Baseline column + section visibility - driven solely by
-# te-committed-scenario-store, so it fires once on page load (showing a
-# real baseline immediately, per this page's default committed snapshot)
-# and again every time "Run Scenario" commits a new one. It never reacts
-# to the live left-column fields directly.
-app.clientside_callback(
-    ClientsideFunction(namespace="testExploration", function_name="computeBaseline"),
-    Output("te-induction-dose", "children"),
-    Output("te-induction-total", "children"),
-    Output("te-baseline-prop-rate1", "children"),
-    Output("te-baseline-prop-rate2", "children"),
-    Output("te-opioid-maintenance-title", "children"),
-    Output("te-baseline-remi-rate", "children"),
-    Output("te-explore-card-wrapper", "style"),
-    Output("te-opioid-maintenance-section", "style"),
-    Input("te-committed-scenario-store", "data"),
-)
-
-# The Explore-strategy slider's live-update path - fires on every drag
-# tick AND whenever "Run Scenario" commits a new snapshot (both are
-# Inputs, not State: for opioid === "none" specifically, runScenario
-# leaves the slider's own value untouched - there is no rate to reset -
-# so the committed-store change alone must still be enough to refresh
-# these cells/graphs; relying solely on the slider value changing would
-# leave them stale after committing "None"). Reads
-# te-committed-scenario-store, never the live left-column fields, so it
-# always reflects the last committed patient/opioid even while an
-# unrelated left-column edit is pending. No "Run Scenario" click needed
-# just to drag the slider.
+# The Explore-strategy live-update path - fires on every slider drag
+# tick, every Explore-opioid dropdown change, and every "Run Scenario"
+# commit (all three are Inputs, not State). Reads
+# te-committed-scenario-store for the Baseline Recommendation (never the
+# live left-column fields) and the live Explore-opioid dropdown + slider
+# for the Explored Scenario - two fully independent opioid choices, so
+# e.g. exploring "remifentanil" against a "no opioid" baseline works
+# without needing "Run Scenario" again.
 app.clientside_callback(
     ClientsideFunction(namespace="testExploration", function_name="updateExploredLive"),
     Output("te-explored-induction", "children", allow_duplicate=True),
@@ -1939,25 +1951,27 @@ app.clientside_callback(
     Output("te-result-delta-opioid", "children", allow_duplicate=True),
     Output("te-result-delta-opioid", "className", allow_duplicate=True),
     Output("te-dose-response-graph", "figure"),
-    Output("te-dose-response-subtitle", "children"),
     Output("te-bis-graph", "figure"),
     Output("te-map-graph", "figure"),
     Output("te-propofol-pk-graph", "figure"),
     Output("te-opioid-pk-graph", "figure"),
+    Output("te-strategy-baseline-value", "children"),
+    Output("te-strategy-explored-value", "children"),
     Input("te-explore-rate-slider", "value"),
     Input("te-committed-scenario-store", "data"),
+    Input("te-explore-opioid-dropdown", "value"),
     prevent_initial_call=True,
 )
 
 # Live label above the slider - fires on every drag tick (cheap string
-# formatting only), also reading the committed opioid (not the live
-# dropdown) so its unit/decimals always match whatever the slider is
-# actually configured for.
+# formatting only), reading the live Explore-opioid dropdown (not the
+# committed baseline) so its unit/decimals always match whatever the
+# slider is actually configured for.
 app.clientside_callback(
     ClientsideFunction(namespace="testExploration", function_name="updateExploreLiveLabel"),
     Output("te-explore-rate-label", "children", allow_duplicate=True),
     Input("te-explore-rate-slider", "value"),
-    State("te-committed-scenario-store", "data"),
+    State("te-explore-opioid-dropdown", "value"),
     prevent_initial_call=True,
 )
 
