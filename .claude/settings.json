@@ -243,7 +243,10 @@
       "Bash(node verify_density2.js)",
       "Bash(node verify_disabled.js)",
       "Bash(node verify_banner.js)",
-      "Bash(curl -s \"http://127.0.0.1:8109/assets/style.css\")"
+      "Bash(curl -s \"http://127.0.0.1:8109/assets/style.css\")",
+      "Bash(\".venv/Scripts/python.exe\" \"C:\\\\Users\\\\baltinta\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-baltinta-OneDrive---UMC-Utrecht-Master-Thesis-Prototype-Phase-3-V2-Beyza\\\\5eefb19f-a4d1-42b7-b266-8d20aa3eb8d1\\\\scratchpad\\\\benchmark_model.py\")",
+      "Bash(\".venv/Scripts/python.exe\" -c \"import os; print\\('CPU count:', os.cpu_count\\(\\)\\)\")",
+      "Bash(\".venv/Scripts/python.exe\" \"C:\\\\Users\\\\baltinta\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-baltinta-OneDrive---UMC-Utrecht-Master-Thesis-Prototype-Phase-3-V2-Beyza\\\\5eefb19f-a4d1-42b7-b266-8d20aa3eb8d1\\\\scratchpad\\\\benchmark_parallel.py\")"
     ]
   }
 }

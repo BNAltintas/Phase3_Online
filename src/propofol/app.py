@@ -1519,52 +1519,32 @@ def make_induction_dose_rationale_figure(
             color="green",
             range=[x_axis_min, x_axis_max],
         ),
+        # The "which way is more" direction for each y-axis is shown as a
+        # small arrow glyph appended directly to its own title text, rather
+        # than a separately-positioned annotation arrow (the previous
+        # approach: floating annotations placed by hand-tuned pixel
+        # offsets, which drifted into overlapping the rotated axis-title
+        # text on the left and rendered as a barely-visible, disconnected
+        # triangle on the right). Baking the arrow into the title string
+        # guarantees it's always correctly positioned and colored, since
+        # it's laid out as part of the same text run - no separate
+        # positioning to get wrong.
         yaxis=dict(
-            title=dict(text="Minimal MAP (mmHg)", font=dict(color="red")),
+            title=dict(text="Minimal MAP (mmHg) ↑", font=dict(color="red")),
             tickfont=dict(color="red"),
             color="red",
             range=[map_axis_min, map_axis_max],
         ),
         yaxis2=dict(
-            title=dict(text="Maximal BIS", font=dict(color="blue")),
+            # Points down: this axis is visually inverted, so lower on the
+            # page is a higher BIS value.
+            title=dict(text="Maximal BIS ↓", font=dict(color="blue")),
             tickfont=dict(color="blue"),
             color="blue",
             range=[max_bis_axis_max, max_bis_axis_min],
             overlaying="y",
             side="right",
         ),
-    )
-
-    # Directional arrows next to each y-axis, purely to help interpret which
-    # way is "more" on each axis - neither changes any plotted data. ax/ay
-    # are pixel offsets for the arrow tail relative to the (x, y) head
-    # position (Plotly's axref/ayref only support "pixel" or another axis's
-    # domain, not "paper", so the head is anchored in paper coordinates and
-    # the tail is just an offset from it).
-    # Left axis (MAP): points up, since higher on this axis is higher MAP.
-    fig.add_annotation(
-        xref="paper", yref="paper",
-        x=-0.20, y=0.55,
-        ax=0, ay=40,
-        showarrow=True,
-        arrowhead=2,
-        arrowsize=1.3,
-        arrowwidth=3,
-        arrowcolor="red",
-        text="",
-    )
-    # Right axis (BIS): points down, since this axis is visually inverted -
-    # lower on the page is a higher BIS value.
-    fig.add_annotation(
-        xref="paper", yref="paper",
-        x=1.16, y=0.45,
-        ax=0, ay=-40,
-        showarrow=True,
-        arrowhead=2,
-        arrowsize=1.3,
-        arrowwidth=3,
-        arrowcolor="blue",
-        text="",
     )
 
     return fig
@@ -1585,6 +1565,22 @@ def update_sex(value):
     buttons.
     """
     return value or "male"
+
+
+@app.callback(
+    Output("remifentanil-concentration-row", "style"),
+    Input("opiate-dropdown", "value"),
+)
+def toggle_remifentanil_concentration_row(opiate):
+    """
+    Show the Remifentanil (µg/mL) concentration row only when Remifentanil
+    is the selected opiate - hidden (not removed) otherwise, so
+    run_model's own State("remifentanil-concentration", "value") always
+    resolves regardless of which opiate is selected. Fires on page load
+    too (no prevent_initial_call), matching the layout's own default
+    (hidden, since opiate-dropdown defaults to "none").
+    """
+    return None if opiate == "remifentanil" else {"display": "none"}
 
 
 # ============================================================

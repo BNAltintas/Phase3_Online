@@ -100,6 +100,14 @@
 
   /* ---------- shared fake-logic state ---------- */
 
+  // The clamp bounds for the fake propofol induction dose (mg/kg) -
+  // named here (not just inline in teComputeState below) because
+  // teDoseResponseFigure's own dose sweep needs to cover exactly this
+  // same range, so its curves are guaranteed to contain both the
+  // baseline and explored dose markers.
+  var TE_DOSE_MIN_MGKG = 0.8;
+  var TE_DOSE_MAX_MGKG = 3.0;
+
   // `rate` is the opioid infusion rate (in that opioid's own unit) this
   // particular computation should reflect - the fixed baseline anchor,
   // the committed "explored" rate, or one point along the dose-response
@@ -137,7 +145,7 @@
       inductionBase += (mapValue - 65) * 0.01;
     }
     var reduction = teOpioidReductionFactor(opioid, rate);
-    var induction = teClamp(inductionBase * (1 - reduction), 0.8, 3.0);
+    var induction = teClamp(inductionBase * (1 - reduction), TE_DOSE_MIN_MGKG, TE_DOSE_MAX_MGKG);
     var inductionTotalMg = induction * weight;
 
     // ---- fake propofol maintenance (0-1 pause, 1-8 rate1, 8-15 rate2) ----
@@ -240,96 +248,133 @@
     };
   }
 
-  /* ---------- dose-response interaction (fake) - swept across the
-     selected opioid's own infusion rate, not propofol dose. `cfg` is
-     null when opioid === "none": there is no rate to sweep, so this
-     falls back to flat MAP/BIS reference lines at the no-opioid
-     baseline instead of hiding the graph entirely. ---------- */
+  /* ---------- dose-response interaction (fake) - mimics the
+     Recommendation page's own "Induction-dose rationale" graph
+     (make_induction_dose_rationale_figure in app.py), but entirely
+     fake/local: swept across propofol INDUCTION DOSE (mg/kg, same
+     TE_DOSE_MIN_MGKG..TE_DOSE_MAX_MGKG range teComputeState's induction
+     is clamped to - never the opioid infusion rate. The curve shape
+     itself depends only on the committed patient/targets (sBase.map,
+     sBase.bisLow/bisHigh - always identical between sBase/sExp, since
+     only opioid+rate differ between them), so it stays one stable
+     reference curve; exploring a different opioid/rate only ever moves
+     the two vertical markers left/right along it (sBase.induction /
+     sExp.induction, already computed by teComputeState's existing
+     opioid-reduction formula - no new dose logic needed for that part).
+     No real PK/PD simulation, no Su2023PropofolRemifentanilRecommender -
+     just smooth saturating exp() curves standing in for it. ---------- */
 
-  function teDoseResponseFigure(s, cfg, baselineRate, exploredRate) {
-    var hasOpioid = !!cfg;
-    var xs, mapCurve, bisCurve, xAxisTitle;
+  // Saturating (not linear) MAP/BIS-vs-dose curves - steep drop at low
+  // dose, flattening at high dose, same qualitative shape a real
+  // resimulated sweep would have. floor values are anchored to this
+  // patient's own baseline MAP / BIS targets so the curve stays
+  // clinically plausible per-patient, not a fixed constant for everyone.
+  function teDoseCurveT(dose) {
+    return teClamp((dose - TE_DOSE_MIN_MGKG) / (TE_DOSE_MAX_MGKG - TE_DOSE_MIN_MGKG), 0, 1);
+  }
 
-    if (hasOpioid) {
-      var mapFloor = 55.0;
-      var bisFloor = 25.0;
-      var bisCeil = 85.0;
-      xs = teLinspace(cfg.min, cfg.max, 61);
-      mapCurve = xs.map(function (rate) {
-        var t = (rate - cfg.min) / (cfg.max - cfg.min);
-        return mapFloor + (s.map - mapFloor) * (1 - 0.55 * t);
-      });
-      bisCurve = xs.map(function (rate) {
-        var t = (rate - cfg.min) / (cfg.max - cfg.min);
-        return bisFloor + (bisCeil - bisFloor) * (1 - 0.6 * t);
-      });
-      xAxisTitle = teCapitalize(s.opioid) + " infusion rate (" + cfg.unit + ")";
-    } else {
-      // No opioid at all: nothing to sweep, so show the patient's own
-      // no-opioid baseline as flat reference lines instead.
-      xs = teLinspace(0, 1, 21);
-      mapCurve = xs.map(function () {
-        return s.map;
-      });
-      bisCurve = xs.map(function () {
-        return 85.0;
-      });
-      xAxisTitle = "No opioid administered (propofol-only baseline)";
-    }
+  function teDoseMapValue(dose, s) {
+    var floor = Math.max(35, s.map * 0.55);
+    return floor + (s.map - floor) * Math.exp(-3.2 * teDoseCurveT(dose));
+  }
 
-    var xMin = xs[0];
-    var xMax = xs[xs.length - 1];
+  function teDoseBisValue(dose, s) {
+    var ceil = 88.0;
+    var floor = teClamp(s.bisLow - 10, 15, 40);
+    return floor + (ceil - floor) * Math.exp(-2.6 * teDoseCurveT(dose));
+  }
 
-    var targetBand = {
-      x: [xMin, xMax, xMax, xMin],
-      y: [s.bisHigh, s.bisHigh, s.bisLow, s.bisLow],
-      fill: "toself",
-      mode: "lines",
-      line: { width: 0 },
-      fillcolor: "rgba(31, 146, 84, 0.14)",
-      name: "Target",
-      yaxis: "y2",
-      showlegend: true,
+  // One green diamond + one orange diamond (each on both curves) per
+  // active scenario - color encodes WHICH scenario (baseline/explored),
+  // consistent with every other trace/marker on this page, rather than
+  // which variable (that's already carried by the red/blue curves
+  // themselves).
+  function teDoseMarkerTrace(dose, value, yaxis, color) {
+    return {
+      x: [dose], y: [value], mode: "markers", yaxis: yaxis, showlegend: false,
+      marker: { symbol: "diamond", size: 12, color: color, line: { color: "#ffffff", width: 1.5 } },
       hoverinfo: "skip",
     };
+  }
 
-    var mapLine = { x: xs, y: mapCurve, mode: "lines", name: "MAP (mmHg)", line: { color: RED, width: 3 } };
-    var bisLine = {
-      x: xs, y: bisCurve, mode: "lines", name: "BIS", line: { color: BLUE, width: 3 }, yaxis: "y2",
-    };
+  function teDoseResponseFigure(sBase, sExp) {
+    var xs = teLinspace(TE_DOSE_MIN_MGKG, TE_DOSE_MAX_MGKG, 61);
+    var mapCurve = xs.map(function (dose) {
+      return teDoseMapValue(dose, sBase);
+    });
+    var bisCurve = xs.map(function (dose) {
+      return teDoseBisValue(dose, sBase);
+    });
 
-    var data = [targetBand, mapLine, bisLine];
+    var mapTargetLow = sBase.map * 0.72;
+    var mapTargetHigh = sBase.map;
+    var bisTargetLow = sBase.bisLow;
+    var bisTargetHigh = sBase.bisHigh;
 
-    if (hasOpioid) {
-      // Both baselineRate and exploredRate are null whenever the vertical
-      // line they'd represent doesn't apply to this sweep - e.g. the
-      // swept opioid isn't the baseline's own opioid, or no exploration
-      // is active yet - so each line is omitted independently rather
-      // than drawn on top of (and hiding) the other.
-      if (baselineRate !== null && baselineRate !== undefined) {
-        data.push({
-          x: [baselineRate, baselineRate], y: [0, 100], mode: "lines",
-          name: "Baseline Recommendation (" + baselineRate.toFixed(cfg.decimals) + " " + cfg.unit + ")",
-          line: { color: GREEN, width: 2, dash: "dash" }, yaxis: "y2", hoverinfo: "skip",
-        });
-      }
-      if (exploredRate !== null && exploredRate !== undefined) {
-        data.push({
-          x: [exploredRate, exploredRate], y: [0, 100], mode: "lines",
-          name: "Explored Scenario (" + exploredRate.toFixed(cfg.decimals) + " " + cfg.unit + ")",
-          line: { color: ORANGE, width: 2.5 }, yaxis: "y2", hoverinfo: "skip",
-        });
-      }
+    var shapes = [
+      {
+        type: "rect", xref: "paper", x0: 0, x1: 1, yref: "y",
+        y0: mapTargetLow, y1: mapTargetHigh,
+        fillcolor: "rgba(217, 54, 46, 0.10)", line: { width: 0 }, layer: "below",
+      },
+      {
+        type: "rect", xref: "paper", x0: 0, x1: 1, yref: "y2",
+        y0: bisTargetLow, y1: bisTargetHigh,
+        fillcolor: "rgba(47, 111, 237, 0.10)", line: { width: 0 }, layer: "below",
+      },
+      {
+        type: "line", xref: "x", yref: "paper",
+        x0: sBase.induction, x1: sBase.induction, y0: 0, y1: 1,
+        line: { color: GREEN, width: 2.5, dash: "dash" }, layer: "above",
+      },
+    ];
+
+    var data = [
+      { x: xs, y: mapCurve, mode: "lines", name: "MAP", line: { color: RED, width: 3 } },
+      { x: xs, y: bisCurve, mode: "lines", name: "BIS", line: { color: BLUE, width: 3 }, yaxis: "y2" },
+      // Shapes (target bands, vertical dose lines) never generate their
+      // own legend entry, so - same trick the Recommendation page's own
+      // rationale graph uses - these zero-data dummy traces exist purely
+      // to give them one.
+      {
+        x: [null], y: [null], mode: "markers", showlegend: true, name: "Target",
+        marker: { symbol: "square", size: 10, color: "rgba(0, 150, 0, 0.25)" },
+      },
+      {
+        x: [null], y: [null], mode: "lines", showlegend: true, name: "Baseline Recommendation",
+        line: { color: GREEN, width: 2.5, dash: "dash" },
+      },
+    ];
+
+    data.push(teDoseMarkerTrace(sBase.induction, teDoseMapValue(sBase.induction, sBase), "y", GREEN));
+    data.push(teDoseMarkerTrace(sBase.induction, teDoseBisValue(sBase.induction, sBase), "y2", GREEN));
+
+    if (sExp) {
+      shapes.push({
+        type: "line", xref: "x", yref: "paper",
+        x0: sExp.induction, x1: sExp.induction, y0: 0, y1: 1,
+        line: { color: ORANGE, width: 2.5, dash: "dash" }, layer: "above",
+      });
+      data.push({
+        x: [null], y: [null], mode: "lines", showlegend: true, name: "Explored Scenario",
+        line: { color: ORANGE, width: 2.5, dash: "dash" },
+      });
+      data.push(teDoseMarkerTrace(sExp.induction, teDoseMapValue(sExp.induction, sBase), "y", ORANGE));
+      data.push(teDoseMarkerTrace(sExp.induction, teDoseBisValue(sExp.induction, sBase), "y2", ORANGE));
     }
 
     var layout = {
-      xaxis: teAxis(xAxisTitle, hasOpioid ? null : { showticklabels: false }),
-      yaxis: teAxis("MAP (mmHg)", { range: [40, 110] }),
-      yaxis2: teAxis("BIS", { overlaying: "y", side: "right", range: [0, 100], gridcolor: "transparent" }),
+      xaxis: teAxis("Propofol induction dose (mg/kg)", { range: [TE_DOSE_MIN_MGKG, TE_DOSE_MAX_MGKG] }),
+      yaxis: teAxis("MAP (mmHg)", { range: [30, Math.max(120, sBase.map + 20)] }),
+      // Reversed, same as the Recommendation page's own rationale graph -
+      // "up" on the chart still reads as "better/lighter", even though
+      // the BIS number itself gets smaller as dose increases.
+      yaxis2: teAxis("BIS", { overlaying: "y", side: "right", range: [100, 0], gridcolor: "transparent" }),
       plot_bgcolor: "#ffffff",
       paper_bgcolor: "#ffffff",
       font: teFont(),
       legend: teLegend(),
+      shapes: shapes,
       margin: { t: 40, r: 50, b: 50, l: 55 },
     };
 
@@ -744,18 +789,15 @@
         opioidDeltaClass = "te-result-cell te-result-change-value";
       }
 
-      // Dose-Response sweep: across the explored opioid's own rate range
-      // whenever one is chosen (that's the drug actually being
-      // explored), else the baseline's own opioid, else the "no opioid
-      // administered" flat fallback - same graph structure/shapes/axes
-      // throughout (teDoseResponseFigure is unchanged), only which drug
-      // is swept and which vertical reference lines are drawn changes.
-      var sweepOpioid = exploreVisible ? exploreOpioid : baseOpioid;
-      var sweepCfg = sweepOpioid !== "none" ? teOpioidConfig(sweepOpioid) : null;
-      var sSweep = teComputeState(c.age, c.sex, c.height, c.weight, c.sbp, c.dbp, sweepOpioid, c.bisLow, c.bisHigh, c.mapMode, c.mapValue, 0);
-      var doseBaselineRate = sweepCfg && baseVisible && baseOpioid === sweepOpioid ? baselineRate : null;
-      var doseExploredRate = sweepCfg && active && exploreOpioid === sweepOpioid ? exploredRateRaw : null;
-      var doseResponseFig = teDoseResponseFigure(sSweep, sweepCfg, doseBaselineRate, doseExploredRate);
+      // Dose-Response sweep is now over propofol induction dose (mg/kg,
+      // same axis as the Recommendation page's own rationale graph) -
+      // sBase/sExp already carry their own .induction, so no separate
+      // "which opioid to sweep" logic is needed any more; the sweep
+      // curve itself only ever depends on sBase (patient/targets, always
+      // identical between sBase/sExp), while sExp being null/non-null is
+      // exactly the "explored active" flag that decides whether the
+      // orange marker is drawn at all.
+      var doseResponseFig = teDoseResponseFigure(sBase, sExp);
 
       var strategyBaselineText = baseVisible
         ? teCapitalize(baseOpioid) + " " + baselineRate.toFixed(baseCfg.decimals) + " " + baseCfg.unit

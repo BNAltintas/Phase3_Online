@@ -221,6 +221,16 @@ input[type=number] {
   grid-template-columns: auto 70px 58px;
 }
 
+/* Wraps one conditionally-hidden editable_field_row() (e.g. Remifentanil
+   concentration) so a single id can be toggled by a callback.
+   display:contents makes the wrapper itself invisible to .param-table's
+   grid - its children (label/value/source/date/popover) still lay out
+   as if they were direct grid children - so this has zero visual effect
+   until an inline "display: none" override actually hides the row. */
+.param-row-group {
+  display: contents;
+}
+
 /* Full-width subsection heading row (e.g. "Concentrations", "Target BIS")
    inside a shared .param-table, so several field groups can sit under one
    PARAMETER/VALUE/SOURCE header instead of each repeating it. */
@@ -262,6 +272,37 @@ input[type=number] {
 
 .param-source--manual {
   color: #c2680f;
+}
+
+/* Target BIS / Target MAP's paired side-by-side layout (Test
+   Exploration's own compact style: small label above, value cell below,
+   two fields sharing one row) - grid-column: 1/-1 so this reads as one
+   full-width band within the outer .param-table/.param-table--no-date
+   grid, same technique .param-subsection-label already uses. Its own
+   nested grid uses grid-auto-flow: column so the flat
+   [Label1, Value1, Label2, Value2] child sequence editable_field_row()
+   produces (Source/Date are compact=True/show_date=False - hidden, so
+   they never occupy a cell) lays out as two label-above-value columns
+   instead of .param-table's usual label-beside-value single row. */
+.param-pair-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto auto;
+  grid-auto-flow: column;
+  column-gap: 16px;
+  row-gap: 4px;
+  align-items: center;
+}
+
+.param-pair-row .param-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.param-pair-row .value-badge-wrapper {
+  width: 100%;
 }
 
 .param-date {
@@ -307,6 +348,18 @@ input[type=number] {
   font-weight: 600;
 }
 
+/* Recommendation page only: Sex and Select opiate should read as plain
+   white dropdowns, not editable-value cells - id-scoped (not the shared
+   .opiate-dropdown-wrapper rule above, which the Scenario Exploration
+   page's own se-opioid-dropdown also uses and must keep unchanged).
+   Border/radius/weight are left as the shared rule set them, per-page
+   consistency, only the color treatment changes here. */
+#sex-dropdown,
+#opiate-dropdown {
+  background-color: #ffffff;
+  border-color: var(--border-color);
+}
+
 .opiate-dropdown-wrapper {
   width: 100%;
 }
@@ -326,6 +379,21 @@ input[type=number] {
   font-size: 12px;
   text-align: center;
   cursor: pointer;
+}
+
+/* The underlying dcc.Input(type="number", readOnly=True) is a read-only
+   display badge - editing only ever happens through its popover's own
+   draft input + Save button. The +/- stepper buttons the component
+   library renders for type="number" inputs are hidden by the library's
+   own narrow-width rule at .param-table's original 70px column, but
+   .param-pair-row's wider paired layout crosses that width threshold and
+   un-hides them - they'd look clickable but must never let a user change
+   a target value outside the popover's Save/Cancel/Restore flow, so hide
+   them unconditionally here regardless of width. !important because the
+   library's own base ".dash-input-stepper { display: flex }" rule is
+   injected via its own stylesheet, not this one. */
+.value-badge-wrapper .dash-input-stepper {
+  display: none !important;
 }
 
 .edit-popover {
@@ -1140,8 +1208,8 @@ body {
 }
 
 .override-unit-toggle label:has(input:checked) {
-  background-color: #eef3ff;
-  color: var(--blue-accent);
+  background-color: var(--blue-accent);
+  color: #ffffff;
 }
 
 .override-unit-toggle input[type="radio"] {

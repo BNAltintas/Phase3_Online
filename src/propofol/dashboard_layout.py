@@ -105,6 +105,7 @@ def editable_field_row(
     step: float = 1,
     source_label: str = "EHR",
     show_date: bool = True,
+    compact: bool = False,
 ):
     """
     Build a click-to-edit parameter row: value badge, source/date, and edit popover.
@@ -119,6 +120,11 @@ def editable_field_row(
     When show_date is False, the date cell is still rendered (app.py's
     generic popover callback always writes to it) but hidden via inline
     style, so it doesn't reserve a column in `.param-table`.
+
+    compact=True (used for Target BIS/Target MAP's paired side-by-side
+    rows, see .param-pair-row) additionally hides the Source cell the
+    same way - still rendered, never removed, just display:none - so two
+    fields' Label+Value cells alone can sit side by side.
     """
     return [
         html.Div(label, className="param-label"),
@@ -136,7 +142,10 @@ def editable_field_row(
             n_clicks=0,
             className="value-badge-wrapper",
         ),
-        html.Div(source_label, id=f"{field_id}-source", className="param-source"),
+        html.Div(
+            source_label, id=f"{field_id}-source", className="param-source",
+            style={"display": "none"} if compact else None,
+        ),
         html.Div(
             timestamp_display(EHR_RECORD_DATE, EHR_RECORD_TIME),
             id=f"{field_id}-date",
@@ -420,30 +429,76 @@ def build_model_settings_card():
                         DEFAULT_PROPOFOL_CONC_MG_ML, DEFAULT_PROPOFOL_CONC_MG_ML,
                         min_value=0.1, step=0.1, source_label="Default", show_date=False,
                     ),
-                    *editable_field_row(
-                        "Remifentanil (µg/mL)", "remifentanil-concentration",
-                        DEFAULT_REMI_CONC_MCG_ML, DEFAULT_REMI_CONC_MCG_ML,
-                        min_value=0.1, step=0.1, source_label="Default", show_date=False,
+                    # Hidden (not removed) whenever "No opiate / propofol
+                    # only" is selected - see toggle_remifentanil_concentration_row
+                    # in app.py. The field itself, and its id, stay in the
+                    # DOM unchanged either way, so run_model's own
+                    # State("remifentanil-concentration", "value") always
+                    # resolves. display:contents (via .param-row-group)
+                    # when shown keeps its 5 cells as direct .param-table
+                    # grid children, exactly as if this wrapper didn't
+                    # exist; only the "display: none" override actually
+                    # hides it.
+                    html.Div(
+                        editable_field_row(
+                            "Remifentanil (µg/mL)", "remifentanil-concentration",
+                            DEFAULT_REMI_CONC_MCG_ML, DEFAULT_REMI_CONC_MCG_ML,
+                            min_value=0.1, step=0.1, source_label="Default", show_date=False,
+                        ),
+                        id="remifentanil-concentration-row",
+                        className="param-row-group",
+                        style={"display": "none"},
                     ),
                     param_subsection_label("Target BIS"),
-                    *editable_field_row(
-                        "Lower", "bis-target-low", TARGET_BIS_LOW, TARGET_BIS_LOW,
-                        min_value=0, step=1, source_label="Default", show_date=False,
-                    ),
-                    *editable_field_row(
-                        "Upper", "bis-target-high", TARGET_BIS_HIGH, TARGET_BIS_HIGH,
-                        min_value=0, step=1, source_label="Default", show_date=False,
+                    # Lower/Upper side by side (Test Exploration's own
+                    # compact Target BIS layout) instead of stacked full
+                    # table rows - .param-pair-row is its own nested grid
+                    # (grid-column: 1/-1 so it still reads as one
+                    # full-width band within the outer .param-table), and
+                    # compact=True hides each field's Source cell so only
+                    # Label+Value show. Ids/values/callbacks are entirely
+                    # unchanged - purely a layout change.
+                    html.Div(
+                        [
+                            *editable_field_row(
+                                "Lower", "bis-target-low", TARGET_BIS_LOW, TARGET_BIS_LOW,
+                                min_value=0, step=1, source_label="Default", show_date=False,
+                                compact=True,
+                            ),
+                            *editable_field_row(
+                                "Upper", "bis-target-high", TARGET_BIS_HIGH, TARGET_BIS_HIGH,
+                                min_value=0, step=1, source_label="Default", show_date=False,
+                                compact=True,
+                            ),
+                        ],
+                        className="param-pair-row",
                     ),
                     param_subsection_label("Target MAP"),
-                    *editable_field_row(
-                        "Absolute (mmHg)", "map-target-abs",
-                        MAP_ABS_MIN_TARGET, MAP_ABS_MIN_TARGET,
-                        min_value=30, step=1, source_label="Default", show_date=False,
-                    ),
-                    *editable_field_row(
-                        "Relative (% baseline)", "map-target-rel",
-                        MAP_REL_FRAC_TARGET * 100, MAP_REL_FRAC_TARGET * 100,
-                        min_value=30, step=1, source_label="Default", show_date=False,
+                    # Absolute/Relative side by side, same technique as
+                    # Target BIS above. Both fields stay simultaneously
+                    # live model inputs exactly as before (the model
+                    # combines them via map_lower_bound_from_baseline =
+                    # max(absolute, relative% x baseline MAP) - there is
+                    # no mode-toggle in the real model here, unlike Test
+                    # Exploration's own fake map_mode, so this is a
+                    # side-by-side pairing of both real fields rather than
+                    # a single-value-with-mode-dropdown control.
+                    html.Div(
+                        [
+                            *editable_field_row(
+                                "Absolute (mmHg)", "map-target-abs",
+                                MAP_ABS_MIN_TARGET, MAP_ABS_MIN_TARGET,
+                                min_value=30, step=1, source_label="Default", show_date=False,
+                                compact=True,
+                            ),
+                            *editable_field_row(
+                                "Relative (% baseline)", "map-target-rel",
+                                MAP_REL_FRAC_TARGET * 100, MAP_REL_FRAC_TARGET * 100,
+                                min_value=30, step=1, source_label="Default", show_date=False,
+                                compact=True,
+                            ),
+                        ],
+                        className="param-pair-row",
                     ),
                 ],
                 className="param-table param-table--no-date",
