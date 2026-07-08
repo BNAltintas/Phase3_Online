@@ -651,22 +651,54 @@ def build_sidebar():
 
 def build_patient_id_card():
     """
-    Build the small patient-identification card shown above Input Parameters.
+    Build the patient-identification card shown above Input Parameters.
 
-    Static placeholder content only (hardcoded "Test Patient" / "TEST-001") -
-    no ids, no callbacks, no effect on model inputs or data flow. Uses a
-    Font Awesome glyph (already loaded for the sidebar icons) instead of
-    an emoji so it can be recolored via CSS.
+    Clicking the icon/name/ID row (patient-id-card-btn) opens a small popover
+    (test-patient-popover) listing the 3 preset test patients - reuses the
+    shared .edit-popover open/closed styling the manual-dose popover already
+    uses, scoped with its own "grid-column: unset" override (see
+    .patient-id-card .edit-popover in style.css) since this card sits in
+    plain block flow, not inside a .param-table grid. The open/close +
+    apply-preset logic lives in one callback in app.py
+    (toggle_test_patient_popover) - this function only builds static markup;
+    patient-id-name/-label update via that callback's Outputs so the card
+    reflects whichever preset (if any) is currently active.
     """
     return html.Div(
         [
-            html.I(className="fa-solid fa-circle-user patient-id-icon"),
             html.Div(
                 [
-                    html.Div("Test Patient", className="patient-id-name"),
-                    html.Div("Patient ID: TEST-001", className="patient-id-label"),
+                    html.I(className="fa-solid fa-circle-user patient-id-icon"),
+                    html.Div(
+                        [
+                            html.Div("Test Patient", id="patient-id-name", className="patient-id-name"),
+                            html.Div("Patient ID: TEST-001", id="patient-id-label", className="patient-id-label"),
+                        ],
+                        className="patient-id-info",
+                    ),
+                    html.I(className="fa-solid fa-chevron-down patient-id-chevron"),
                 ],
-                className="patient-id-info",
+                id="patient-id-card-btn",
+                n_clicks=0,
+                className="patient-id-trigger",
+            ),
+            html.Div(
+                [
+                    html.Button(
+                        "Test Patient 1", id="test-patient-1-btn", n_clicks=0,
+                        className="test-patient-option",
+                    ),
+                    html.Button(
+                        "Test Patient 2", id="test-patient-2-btn", n_clicks=0,
+                        className="test-patient-option",
+                    ),
+                    html.Button(
+                        "Test Patient 3", id="test-patient-3-btn", n_clicks=0,
+                        className="test-patient-option",
+                    ),
+                ],
+                id="test-patient-popover",
+                className="edit-popover",
             ),
         ],
         className="card patient-id-card",
@@ -1880,6 +1912,14 @@ def build_layout():
     return html.Div(
         [
             dcc.Store(id="sex-store", data="male"),
+            # Which preset test patient ("1"/"2"/"3") is currently active, if
+            # any - None until the user picks one from the Test Patient
+            # card's popover. Purely a display/tracking aid (which preset
+            # name to show on the card); the actual patient values it
+            # applies live in PRESET_TEST_PATIENTS in app.py and are written
+            # directly into the same age/height/weight/... fields every
+            # other input already uses.
+            dcc.Store(id="selected-test-patient-store", data=None),
             # Holds the original model recommendation (context + result),
             # populated only by "Run recommendation" - never mutated by the
             # manual-override flow.

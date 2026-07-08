@@ -2065,6 +2065,30 @@ def update_derived_pressures(baseline_sap, baseline_dap):
 # `State(field_id, "value")` reads are unaffected.
 # ============================================================
 
+# Preset test patients selectable from the Test Patient card's popover (see
+# toggle_test_patient_popover below). Keys match the "1"/"2"/"3" suffix of
+# each option's button id (test-patient-1-btn, ...). Values map directly
+# onto the same field ids EDITABLE_FIELDS/build_patient_parameters_card
+# already use, so applying a preset is just writing into those same ids -
+# no new fields, no change to run_model's own State reads.
+PRESET_TEST_PATIENTS = {
+    "1": {
+        "label": "Test Patient 1",
+        "age": 35, "sex": "male", "weight": 72, "height": 180,
+        "baseline_sap": 130, "baseline_dap": 75, "baseline_hr": 72,
+    },
+    "2": {
+        "label": "Test Patient 2",
+        "age": 67, "sex": "male", "weight": 90, "height": 170,
+        "baseline_sap": 180, "baseline_dap": 98, "baseline_hr": 78,
+    },
+    "3": {
+        "label": "Test Patient 3",
+        "age": 79, "sex": "female", "weight": 54, "height": 165,
+        "baseline_sap": 160, "baseline_dap": 90, "baseline_hr": 84,
+    },
+}
+
 EDITABLE_FIELDS = [
     ("age", 35, "EHR"),
     ("height", 170, "EHR"),
@@ -2317,11 +2341,18 @@ def _field_result(value, original_value, source_label, popover_open=False):
 def _register_editable_field_callback(field_id: str, original_value: float, source_label: str):
     """
     Register the Save/Cancel/Restore popover callback for one patient-parameter field.
+
+    Output(field_id, "value") is allow_duplicate=True because the 6 patient-
+    parameter fields (age/height/weight/baseline_sap/baseline_dap/
+    baseline_hr) are also written by toggle_test_patient_popover when a
+    preset test patient is selected - harmless for the other fields in
+    EDITABLE_FIELDS (targets/concentrations), which only this callback ever
+    writes.
     """
     cross_field = FIELD_RULES[field_id].get("cross_check_field")
 
     outputs = [
-        Output(field_id, "value"),
+        Output(field_id, "value", allow_duplicate=True),
         Output(f"{field_id}-popover", "className"),
         Output(f"{field_id}-draft", "value"),
         Output(f"{field_id}-source", "children"),
@@ -2371,6 +2402,82 @@ def _register_editable_field_callback(field_id: str, original_value: float, sour
 
 for _field_id, _original_value, _source_label in EDITABLE_FIELDS:
     _register_editable_field_callback(_field_id, _original_value, _source_label)
+
+
+# ============================================================
+# Test Patient card - preset patient selector
+#
+# Clicking the card opens test-patient-popover (reuses the shared
+# .edit-popover open/closed styling every other popover on this page
+# already uses). Picking one of the 3 presets writes straight into the
+# same age/height/weight/baseline_sap/baseline_dap/baseline_hr/
+# sex-dropdown ids every other input already uses - run_model,
+# derived-map/derived-pp, and every editable-field popover are completely
+# unaffected by where a value came from. The only extra care needed is
+# marking any existing recommendation stale and clearing any active
+# manual override (mirroring mark_inputs_stale above) - selecting a new
+# preset bypasses that callback's own Save/Restore-button-click Inputs
+# entirely, so without this the old recommendation would otherwise keep
+# displaying as if it still belonged to the newly-selected patient.
+# ============================================================
+
+@app.callback(
+    Output("test-patient-popover", "className"),
+    Output("age", "value", allow_duplicate=True),
+    Output("height", "value", allow_duplicate=True),
+    Output("weight", "value", allow_duplicate=True),
+    Output("baseline_sap", "value", allow_duplicate=True),
+    Output("baseline_dap", "value", allow_duplicate=True),
+    Output("baseline_hr", "value", allow_duplicate=True),
+    Output("sex-dropdown", "value"),
+    Output("patient-id-name", "children"),
+    Output("patient-id-label", "children"),
+    Output("selected-test-patient-store", "data"),
+    Output("recommendation-stale-store", "data", allow_duplicate=True),
+    Output("manual-scenario-store", "data", allow_duplicate=True),
+    Input("patient-id-card-btn", "n_clicks"),
+    Input("test-patient-1-btn", "n_clicks"),
+    Input("test-patient-2-btn", "n_clicks"),
+    Input("test-patient-3-btn", "n_clicks"),
+    State("recommendation-store", "data"),
+    State("manual-scenario-store", "data"),
+    prevent_initial_call=True,
+)
+def toggle_test_patient_popover(_card_clicks, _p1, _p2, _p3, rec_store, manual_store):
+    """
+    Open the Test Patient popover (card click), or apply the clicked
+    preset and close it. Mirrors mark_inputs_stale's own guard: only mark
+    the recommendation stale / clear the manual override if a
+    recommendation actually exists yet.
+    """
+    no_change = (no_update,) * 13
+    triggered = ctx.triggered_id
+
+    if triggered == "patient-id-card-btn":
+        return ("edit-popover edit-popover--open",) + no_change[1:]
+
+    preset_key = {
+        "test-patient-1-btn": "1",
+        "test-patient-2-btn": "2",
+        "test-patient-3-btn": "3",
+    }.get(triggered)
+    if preset_key is None:
+        return no_change
+
+    preset = PRESET_TEST_PATIENTS[preset_key]
+    stale = True if rec_store is not None else no_update
+    clear_manual = None if manual_store is not None else no_update
+
+    return (
+        "edit-popover",
+        preset["age"], preset["height"], preset["weight"],
+        preset["baseline_sap"], preset["baseline_dap"], preset["baseline_hr"],
+        preset["sex"],
+        preset["label"], f"Patient ID: TEST-00{preset_key}",
+        preset_key,
+        stale,
+        clear_manual,
+    )
 
 
 # ============================================================
@@ -2473,7 +2580,7 @@ _STALE_TRACKING_INPUTS.append(Input("opiate-dropdown", "value"))
 
 
 @app.callback(
-    Output("recommendation-stale-store", "data"),
+    Output("recommendation-stale-store", "data", allow_duplicate=True),
     Output("manual-scenario-store", "data", allow_duplicate=True),
     *_STALE_TRACKING_INPUTS,
     State("recommendation-store", "data"),

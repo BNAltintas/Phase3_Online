@@ -80,10 +80,17 @@ input[type=number] {
 
 /* Compact patient-identification card shown above Input Parameters. */
 .patient-id-card {
+  padding: 14px 16px;
+}
+
+/* The clickable icon/name/ID row - carries the flex layout .patient-id-card
+   itself used to have, now split out so the popover below can be a plain
+   block sibling instead of a third flex item fighting for row space. */
+.patient-id-trigger {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px 16px;
+  cursor: pointer;
 }
 
 .patient-id-icon {
@@ -97,6 +104,7 @@ input[type=number] {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
 .patient-id-name {
@@ -108,6 +116,47 @@ input[type=number] {
 .patient-id-label {
   font-size: 12px;
   color: var(--text-primary);
+}
+
+.patient-id-chevron {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* test-patient-popover sits in plain block flow (not a .param-table grid,
+   unlike every other .edit-popover), same situation the manual-dose
+   popover is in - same fix: cancel the shared rule's "grid-column: 1/-1"
+   (meaningless outside a grid, but harmless to leave unset) and give it
+   its own spacing instead of the grid's row-gap. */
+.patient-id-card .edit-popover {
+  grid-column: unset;
+  margin-top: 12px;
+  padding: 6px;
+}
+
+.test-patient-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 9px 10px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.test-patient-option:hover {
+  background-color: #eaf0fe;
+  color: var(--blue-accent);
+}
+
+.test-patient-option + .test-patient-option {
+  margin-top: 2px;
 }
 
 .card-subheading {

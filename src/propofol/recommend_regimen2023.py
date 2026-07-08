@@ -56,7 +56,7 @@ MIN_SWITCH_MIN = TARGET_ASSESSMENT_START_MIN
 MAX_SWITCH_MIN = float(SIM_MINUTES)
 
 # Automatic clinical rounding.
-PROPOFOL_BOLUS_STEP_MG = 10.0
+PROPOFOL_BOLUS_STEP_MG = 5.0
 PUMP_RATE_STEP_ML_H = 1.0
 
 # Default concentrations. The app can override these.
