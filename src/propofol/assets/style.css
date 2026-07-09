@@ -2174,3 +2174,50 @@ body {
 #te-predictions-grid .graph-card-plot {
   min-height: 170px;
 }
+
+/* ---------- Precomputed Remi ----------
+   Reuses Test Exploration's own .card/.te-card/.te-result-grid/
+   .te-strategy-card classes directly (see dashboard_layout.py's
+   build_precomputed_remi_page and friends) for pixel-consistent styling
+   without duplicating that CSS - every rule below is purely additive,
+   scoped to the two new pr-only classes that don't already have a look
+   from those shared rules. */
+
+.pr-missing-data-banner,
+.pr-case-error-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #c2680f;
+  background-color: rgba(194, 104, 15, 0.08);
+  border-color: rgba(194, 104, 15, 0.35);
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* Scenario Result's combined "Propofol - Induction" row: additive on top
+   of Test Exploration's own (unmodified) .te-result-baseline-induction-
+   total/.te-result-explored-induction-total, which style the "total mg"
+   subtitle at only 10px - too small per this page's own requirement that
+   it stay "clearly readable... but still secondary to mg/kg". Bumping
+   the shared class itself would also resize Test Exploration's own
+   induction row, so this size override is scoped to a second, PR-only
+   class instead. */
+.pr-induction-total {
+  font-size: 12px;
+}
+
+/* Change-column direction color, inverted from Test Exploration's own
+   te-delta-good/te-delta-bad (there, a dose *decrease* is "good"/green;
+   here, the Change column only communicates direction, not a clinical
+   judgement) - same two hex colors, new PR-only class names so
+   te-delta-good/te-delta-bad and Test Exploration's own coloring stay
+   completely untouched. */
+.pr-delta-increase {
+  color: #1f9254;
+}
+
+.pr-delta-decrease {
+  color: #d9362e;
+}

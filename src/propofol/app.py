@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
 
@@ -19,6 +21,8 @@ from propofol.dashboard_layout import (
     TEST_EXPLORATION_DEFAULT_MAP_ABS,
     TEST_EXPLORATION_DEFAULT_MAP_REL,
     TEST_EXPLORATION_DEFAULT_PATIENT,
+    _te_result_header_row,
+    _te_result_section_header,
     build_layout,
     timestamp_display,
 )
@@ -53,9 +57,42 @@ from propofol.recommend_regimen2023 import (
 # Python dependency.
 FONT_AWESOME_CDN = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
 
+# ------------------------------------------------------------
+# Precomputed Remi's offline-generated data (see
+# scripts/precompute_remi_cases.py). Loaded once, here, at import time -
+# never re-read or recomputed while the app is running, and never touches
+# recommend_regimen2023.py. Missing/corrupt file -> None, not a raised
+# exception, so a server that hasn't had the precompute script run yet
+# still starts up and every other page keeps working; the page itself
+# (build_precomputed_remi_page in dashboard_layout.py) renders a clear
+# "not generated yet" message in that case instead of a case picker.
+# ------------------------------------------------------------
+PRECOMPUTED_REMI_PATH = Path(__file__).resolve().parent / "data" / "precomputed_remi_cases.json"
+
+
+def _load_precomputed_remi_data() -> Optional[dict]:
+    if not PRECOMPUTED_REMI_PATH.exists():
+        return None
+    try:
+        with PRECOMPUTED_REMI_PATH.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+PRECOMPUTED_REMI_DATA = _load_precomputed_remi_data()
+
+
+def _pr_case(case_id: Optional[str]) -> Optional[dict]:
+    """Look up one case's precomputed data, or None if unavailable/unknown - never raises."""
+    if PRECOMPUTED_REMI_DATA is None or not case_id:
+        return None
+    return PRECOMPUTED_REMI_DATA.get("cases", {}).get(case_id)
+
+
 app = dash.Dash(__name__, external_stylesheets=[FONT_AWESOME_CDN])
 app.title = "Su2023 Propofol Dashboard"
-app.layout = build_layout()
+app.layout = build_layout(precomputed_remi_available=PRECOMPUTED_REMI_DATA is not None)
 
 # The induction card's "Override propofol dose" button/popover only exist in
 # the DOM after the first "Run recommendation" (summary-output starts empty).
@@ -1644,6 +1681,7 @@ def toggle_graph_visibility(checked_values, current_class_name):
     Input("nav-recommendation-btn", "n_clicks"),
     Input("nav-scenario-btn", "n_clicks"),
     Input("nav-test-exploration-btn", "n_clicks"),
+    Input("nav-precomputed-remi-btn", "n_clicks"),
     Input("nav-more-info-btn", "n_clicks"),
     Input("back-to-recommendation-btn", "n_clicks"),
     Input("learn-more-link-btn", "n_clicks"),
@@ -1651,8 +1689,8 @@ def toggle_graph_visibility(checked_values, current_class_name):
     prevent_initial_call=True,
 )
 def set_active_page(
-    rec_nav_clicks, scenario_nav_clicks, test_exploration_nav_clicks, more_info_nav_clicks,
-    back_clicks, learn_more_clicks, te_learn_more_clicks,
+    rec_nav_clicks, scenario_nav_clicks, test_exploration_nav_clicks, precomputed_remi_nav_clicks,
+    more_info_nav_clicks, back_clicks, learn_more_clicks, te_learn_more_clicks,
 ):
     """
     Track which top-level page is active based on which nav/back control was
@@ -1668,6 +1706,8 @@ def set_active_page(
         return "scenario-exploration"
     if triggered == "nav-test-exploration-btn":
         return "test-exploration"
+    if triggered == "nav-precomputed-remi-btn":
+        return "precomputed-remi"
     if triggered in ("nav-recommendation-btn", "back-to-recommendation-btn"):
         return "recommendation"
     return no_update
@@ -1677,21 +1717,26 @@ def set_active_page(
     Output("main-content", "style"),
     Output("scenario-exploration-view", "style"),
     Output("test-exploration-view", "style"),
+    Output("precomputed-remi-view", "style"),
     Output("more-info-view", "style"),
     Output("nav-recommendation-btn", "className"),
     Output("nav-scenario-btn", "className"),
     Output("nav-test-exploration-btn", "className"),
+    Output("nav-precomputed-remi-btn", "className"),
     Output("nav-more-info-btn", "className"),
     Input("active-page-store", "data"),
 )
 def render_active_page(active_page):
     """
-    Show exactly one of the four pages, and keep the sidebar's active
+    Show exactly one of the five pages, and keep the sidebar's active
     highlight in sync with it.
     """
-    is_recommendation = active_page not in ("more-info", "scenario-exploration", "test-exploration")
+    is_recommendation = active_page not in (
+        "more-info", "scenario-exploration", "test-exploration", "precomputed-remi",
+    )
     is_scenario = active_page == "scenario-exploration"
     is_test_exploration = active_page == "test-exploration"
+    is_precomputed_remi = active_page == "precomputed-remi"
     is_more_info = active_page == "more-info"
     hidden = {"display": "none"}
 
@@ -1702,10 +1747,12 @@ def render_active_page(active_page):
         None if is_recommendation else hidden,
         None if is_scenario else hidden,
         None if is_test_exploration else hidden,
+        None if is_precomputed_remi else hidden,
         None if is_more_info else hidden,
         cls(is_recommendation),
         cls(is_scenario),
         cls(is_test_exploration),
+        cls(is_precomputed_remi),
         cls(is_more_info),
     )
 
@@ -3731,6 +3778,809 @@ def render_scenario_page(baseline_store):
         make_map_figure(baseline),
         make_propofol_pk_figure(baseline),
         make_remifentanil_pk_figure(baseline),
+    )
+
+
+# ============================================================
+# Precomputed Remi - real-model outputs for fixed Phase 3 patient cases,
+# loaded once at startup (PRECOMPUTED_REMI_DATA, above) from
+# src/propofol/data/precomputed_remi_cases.json, generated offline by
+# scripts/precompute_remi_cases.py. Nothing below this point ever imports
+# or calls recommend_su2023_regimen, Su2023PropofolRemifentanilRecommender,
+# or any other recommend_regimen2023.py entry point - every number comes
+# straight out of the loaded JSON via _rec_to_store_dict/
+# _store_dict_to_namespace (the exact same two functions the
+# Recommendation page's own recommendation-store round-trip already
+# uses), and every prediction figure reuses the Recommendation page's own
+# make_bis_figure/make_bis_figure_dual family unmodified.
+# RECOMMENDED_COLOR/MANUAL_OVERRIDE_COLOR are already exactly green/orange
+# (#1f9254/#c2680f), matching Test Exploration's own Baseline
+# Recommendation/Explored Scenario color language, so no new colors are
+# introduced anywhere on this page.
+# ============================================================
+
+def _pr_remi_rate_display(ns) -> str:
+    """"No opioid" or "Remifentanil X.XXX µg/kg/min" (the achieved rate, not the requested grid value) for a baseline or grid-point namespace."""
+    if not ns.remifentanil_selected or ns.remifentanil_inf_rates_mcgkgmin is None:
+        return "No opioid"
+    rate = float(ns.remifentanil_inf_rates_mcgkgmin[-1])
+    return f"Remifentanil {rate:.3f} µg/kg/min"
+
+
+def make_pr_remifentanil_pk_figure(baseline_ns, explored_ns):
+    """
+    Own thin wrapper around make_remifentanil_pk_figure_dual: that shared
+    function returns early (an empty figure) whenever the *baseline* has
+    no remifentanil, regardless of what the manual/explored side has -
+    correct for the Recommendation page (a manual override can never
+    introduce an opioid the original recommendation didn't already have),
+    but wrong here, where the baseline reference and the explored grid
+    point are two independently real, potentially different opioid
+    choices (e.g. a "No opioid" baseline compared against a real
+    remifentanil grid point). Falls back to the shared dual function
+    unchanged whenever the baseline does have remifentanil, so this only
+    adds the one case that function doesn't already handle.
+    """
+    if baseline_ns.remifentanil_selected:
+        return make_remifentanil_pk_figure_dual(baseline_ns, explored_ns, manual_name="Explored Scenario")
+    if not explored_ns.remifentanil_selected:
+        return make_remifentanil_pk_figure(baseline_ns)
+
+    fig = go.Figure()
+    _add_line(fig, explored_ns.time_min, explored_ns.cp_remifentanil, "Explored Scenario", color=MANUAL_OVERRIDE_COLOR)
+    fig.update_layout(
+        xaxis_title="Time (min)",
+        yaxis_title="Remifentanil concentration (ng/mL)",
+        template="plotly_white",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        margin=dict(t=60),
+    )
+    return fig
+
+
+def make_pr_induction_dose_rationale_figure(baseline_ns, baseline_map: float, explored_ns=None):
+    """
+    Precomputed Remi's own version of the Recommendation page's
+    make_induction_dose_rationale_figure (that function itself is never
+    modified or called live from this page - see its own docstring
+    above). Reproduces the exact same visual structure - MAP target band
+    (red), BIS target band (blue), the green "both targets met" dose
+    region with its own annotated bounds, diamond markers, reversed BIS
+    axis, green dashed Baseline / orange dashed Explored reference lines
+    - but reads the propofol induction-dose sweep from baseline_ns.
+    dose_sweep (and explored_ns.dose_sweep, when given) instead of
+    calling Su2023PropofolRemifentanilRecommender.simulate_regimen()
+    live: those arrays are precomputed once offline by
+    scripts/precompute_remi_cases.py's own _dose_sweep() - the exact same
+    forward-simulation logic, just run at precompute time - so nothing on
+    this page ever triggers a live model call.
+
+    The plotted MAP/BIS curves are the *baseline* regimen's own sweep
+    (varying induction dose, baseline's own maintenance schedule held
+    fixed) - matching the Recommendation page's own one-curve-per-
+    regimen structure. When explored_ns is given, its diamond marker is
+    still plotted at its own true precomputed (min MAP, max BIS) - read
+    from explored_ns's own dose_sweep at its own dose, not sampled off
+    the baseline curve - since baseline and an explored remifentanil-grid
+    point are two independently optimized regimens with their own
+    maintenance schedules, unlike the Recommendation page's manual-
+    override case (which only ever changes the dose, never the schedule,
+    so one sweep always covers both).
+
+    baseline_map is this case's own baseline (pre-drug) MAP in mmHg -
+    (baseline_sap + 2*baseline_dap) / 3, the same formula Patient itself
+    uses for base_map - passed in rather than reconstructed here since
+    the caller (update_pr_results) already has the case's own patient
+    dict at hand.
+    """
+    sweep = baseline_ns.dose_sweep
+    dose_grid_mgkg = np.asarray(sweep["dose_grid_mgkg"], dtype=float)
+    min_maps = np.asarray(sweep["min_map_mmhg"], dtype=float)
+    min_bis_values = np.asarray(sweep["min_bis"], dtype=float)
+    max_bis_values = np.asarray(sweep["max_bis"], dtype=float)
+
+    selected_dose_mgkg = float(baseline_ns.propofol_bolus_mgkg)
+    map_target = float(baseline_ns.map_lower_bound_mmhg)
+    map_target_upper = float(1.20 * baseline_map)
+    target_bis_low = float(baseline_ns.target_bis_low)
+    target_bis_high = float(baseline_ns.target_bis_high)
+
+    explored_dose_mgkg = float(explored_ns.propofol_bolus_mgkg) if explored_ns is not None else None
+    x_axis_min, x_axis_max = _dose_axis_limits_mgkg(selected_dose_mgkg, explored_dose_mgkg)
+
+    selected_idx = int(np.argmin(np.abs(dose_grid_mgkg - selected_dose_mgkg)))
+    selected_min_map = float(min_maps[selected_idx])
+    selected_min_bis = float(min_bis_values[selected_idx])
+    selected_max_bis = float(max_bis_values[selected_idx])
+
+    map_axis_min, map_axis_max = _strict_prediction_axis_range(
+        min_maps, lower_floor=0.0, upper_ceiling=None,
+        default_min=0.0, default_max=max(1.0, map_target_upper), min_span=1.0,
+    )
+    max_bis_axis_min, max_bis_axis_max = _strict_prediction_axis_range(
+        max_bis_values, lower_floor=0.0, upper_ceiling=100.0,
+        default_min=0.0, default_max=100.0, min_span=1.0,
+    )
+
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+    map_band = _target_rect_y_limits(map_target, map_target_upper, map_axis_min, map_axis_max)
+    if map_band is not None:
+        fig.add_shape(
+            type="rect", xref="paper", x0=0, x1=1, yref="y", y0=map_band[0], y1=map_band[1],
+            fillcolor="rgba(220, 0, 0, 0.10)", line=dict(width=0), layer="below",
+        )
+
+    bis_band = _target_rect_y_limits(target_bis_low, target_bis_high, max_bis_axis_min, max_bis_axis_max)
+    if bis_band is not None:
+        fig.add_shape(
+            type="rect", xref="paper", x0=0, x1=1, yref="y2", y0=bis_band[0], y1=bis_band[1],
+            fillcolor="rgba(0, 85, 220, 0.10)", line=dict(width=0), layer="below",
+        )
+
+    both_targets_ok = (
+        np.isfinite(min_maps) & np.isfinite(min_bis_values) & np.isfinite(max_bis_values)
+        & (min_maps >= map_target) & (min_maps <= map_target_upper)
+        & (min_bis_values >= target_bis_low) & (max_bis_values <= target_bis_high)
+    )
+    if np.any(both_targets_ok):
+        ok_doses = dose_grid_mgkg[both_targets_ok]
+        ok_start = float(np.min(ok_doses))
+        ok_end = float(np.max(ok_doses))
+
+        if ok_end > ok_start:
+            band_x0, band_x1 = ok_start, ok_end
+        else:
+            local_step = float(np.nanmedian(np.diff(dose_grid_mgkg))) if len(dose_grid_mgkg) > 1 else 0.05
+            band_half_width = max(0.025, 0.5 * local_step)
+            band_x0 = max(x_axis_min, ok_start - band_half_width)
+            band_x1 = min(x_axis_max, ok_end + band_half_width)
+
+        fig.add_shape(
+            type="rect", xref="x", yref="paper", x0=band_x0, x1=band_x1, y0=0, y1=1,
+            fillcolor="rgba(0, 150, 0, 0.10)", line=dict(width=0), layer="below",
+        )
+        for x_value, label, x_anchor in [(ok_start, f"{ok_start:.2f}", "right"), (ok_end, f"{ok_end:.2f}", "left")]:
+            fig.add_annotation(
+                x=x_value, y=1.01, xref="x", yref="paper", text=f"<b>{label}</b>",
+                showarrow=False, xanchor=x_anchor, yanchor="bottom", font=dict(color="green", size=13),
+            )
+
+    fig.add_trace(
+        go.Scatter(
+            x=dose_grid_mgkg, y=min_maps, mode="lines+markers",
+            line=dict(color="red", width=3), marker=dict(color="red", size=6),
+            name="MAP", showlegend=True,
+            hovertemplate="Dose %{x:.2f} mg/kg<br>Minimal MAP %{y:.1f} mmHg<extra></extra>",
+        ),
+        secondary_y=False,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=dose_grid_mgkg, y=max_bis_values, customdata=np.stack([min_bis_values], axis=-1),
+            mode="lines+markers", line=dict(color="blue", width=3), marker=dict(color="blue", size=6),
+            name="BIS", showlegend=True,
+            hovertemplate=(
+                "Dose %{x:.2f} mg/kg<br>Maximal BIS %{y:.1f}<br>Minimal BIS %{customdata[0]:.1f}<extra></extra>"
+            ),
+        ),
+        secondary_y=True,
+    )
+
+    diamond = dict(symbol="diamond", size=14)
+    fig.add_trace(
+        go.Scatter(
+            x=[selected_dose_mgkg], y=[selected_min_map], mode="markers",
+            marker=dict(color="red", **diamond), showlegend=False,
+            hovertemplate=(
+                f"Baseline {selected_dose_mgkg:.2f} mg/kg<br>Minimal MAP %{{y:.1f}} mmHg<br>"
+                f"MAP target {map_target:.1f}-{map_target_upper:.1f} mmHg<extra></extra>"
+            ),
+        ),
+        secondary_y=False,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=[selected_dose_mgkg], y=[selected_max_bis], customdata=[[selected_min_bis]], mode="markers",
+            marker=dict(color="blue", **diamond), showlegend=False,
+            hovertemplate=(
+                f"Baseline {selected_dose_mgkg:.2f} mg/kg<br>Maximal BIS %{{y:.1f}}<br>"
+                f"Minimal BIS %{{customdata[0]:.1f}}<br>BIS target {target_bis_low:.0f}-{target_bis_high:.0f}<extra></extra>"
+            ),
+        ),
+        secondary_y=True,
+    )
+
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None], mode="markers",
+        marker=dict(symbol="square", size=10, color="rgba(0, 150, 0, 0.25)"),
+        name="Target", showlegend=True,
+    ))
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None], mode="lines", line=dict(color=RECOMMENDED_COLOR, width=3, dash="dash"),
+        name="Baseline", showlegend=True,
+    ))
+    if explored_ns is not None:
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode="lines", line=dict(color=MANUAL_OVERRIDE_COLOR, width=3, dash="dash"),
+            name="Explored", showlegend=True,
+        ))
+
+    fig.add_shape(
+        type="line", xref="x", yref="paper", x0=selected_dose_mgkg, x1=selected_dose_mgkg, y0=0, y1=1,
+        line=dict(color=RECOMMENDED_COLOR, width=3, dash="dash"), layer="above",
+    )
+    fig.add_annotation(
+        x=selected_dose_mgkg, y=1.07, xref="x", yref="paper",
+        text=f"<b>Baseline {selected_dose_mgkg:.2f} mg/kg</b>", showarrow=False, yanchor="bottom",
+        font=dict(color=RECOMMENDED_COLOR, size=13),
+    )
+
+    if explored_ns is not None:
+        explored_sweep = explored_ns.dose_sweep
+        explored_dose_grid = np.asarray(explored_sweep["dose_grid_mgkg"], dtype=float)
+        explored_idx = int(np.argmin(np.abs(explored_dose_grid - explored_dose_mgkg)))
+        explored_min_map = float(np.asarray(explored_sweep["min_map_mmhg"], dtype=float)[explored_idx])
+        explored_max_bis = float(np.asarray(explored_sweep["max_bis"], dtype=float)[explored_idx])
+
+        fig.add_trace(
+            go.Scatter(
+                x=[explored_dose_mgkg], y=[explored_min_map], mode="markers",
+                marker=dict(color=MANUAL_OVERRIDE_COLOR, **diamond), showlegend=False,
+                hovertemplate=f"Explored {explored_dose_mgkg:.2f} mg/kg<br>Minimal MAP %{{y:.1f}} mmHg<extra></extra>",
+            ),
+            secondary_y=False,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=[explored_dose_mgkg], y=[explored_max_bis], mode="markers",
+                marker=dict(color=MANUAL_OVERRIDE_COLOR, **diamond), showlegend=False,
+                hovertemplate=f"Explored {explored_dose_mgkg:.2f} mg/kg<br>Maximal BIS %{{y:.1f}}<extra></extra>",
+            ),
+            secondary_y=True,
+        )
+        fig.add_shape(
+            type="line", xref="x", yref="paper", x0=explored_dose_mgkg, x1=explored_dose_mgkg, y0=0, y1=1,
+            line=dict(color=MANUAL_OVERRIDE_COLOR, width=3, dash="dash"), layer="above",
+        )
+        fig.add_annotation(
+            x=explored_dose_mgkg, y=1.14, xref="x", yref="paper",
+            text=f"<b>Explored {explored_dose_mgkg:.2f} mg/kg</b>", showarrow=False, yanchor="bottom",
+            font=dict(color=MANUAL_OVERRIDE_COLOR, size=13),
+        )
+
+    legend_y = 1.26 if explored_ns is not None else 1.19
+    margin_t = 90 if explored_ns is not None else 70
+
+    fig.update_layout(
+        template="plotly_white",
+        showlegend=True,
+        legend=dict(
+            orientation="h", yanchor="bottom", y=legend_y, xanchor="left", x=0,
+            font=dict(size=9), tracegroupgap=2,
+        ),
+        margin=dict(t=margin_t, b=42, l=48, r=38),
+        xaxis=dict(
+            title=dict(text="Propofol induction dose (mg/kg)", font=dict(color="green")),
+            tickfont=dict(color="green"), color="green",
+            range=[x_axis_min, x_axis_max],
+        ),
+        yaxis=dict(
+            title=dict(text="Minimal MAP (mmHg) ↑", font=dict(color="red")),
+            tickfont=dict(color="red"), color="red",
+            range=[map_axis_min, map_axis_max],
+        ),
+        yaxis2=dict(
+            title=dict(text="Maximal BIS ↓", font=dict(color="blue")),
+            tickfont=dict(color="blue"), color="blue",
+            range=[max_bis_axis_max, max_bis_axis_min],
+            overlaying="y", side="right",
+        ),
+    )
+
+    return fig
+
+
+def _pr_delta(baseline_val: float, explored_val: float) -> tuple[str, str]:
+    """
+    Shared percent-change text/class logic for every Scenario Result
+    change cell (Propofol induction, Propofol maintenance, Remifentanil/
+    opioid strategy) - direction only, not a clinical good/bad judgement,
+    so colors are inverted from Test Exploration's own te-delta-good/
+    te-delta-bad (there, decrease=green/"good"; here, increase=green,
+    decrease=red, via the pr-delta-increase/pr-delta-decrease classes
+    added in style.css - te-delta-good/te-delta-bad themselves are never
+    touched, so Test Exploration's own coloring is unaffected).
+    """
+    pct = ((explored_val - baseline_val) / baseline_val) * 100 if baseline_val else 0.0
+    if abs(pct) < 0.5:
+        return "→ 0%", "te-result-cell te-result-change-value"
+    arrow = "↑" if pct > 0 else "↓"
+    change_class = "te-result-cell te-result-change-value " + ("pr-delta-increase" if pct > 0 else "pr-delta-decrease")
+    return f"{arrow} {abs(pct):.0f}%", change_class
+
+
+def _pr_result_row(label: str, baseline_val, explored_val, fmt: str = "{:.2f}"):
+    """One te-result-row-shaped comparison row (reusing Test Exploration's own CSS classes) with a computed percent change."""
+    if baseline_val is None or explored_val is None:
+        baseline_text = fmt.format(baseline_val) if baseline_val is not None else "-"
+        explored_text = fmt.format(explored_val) if explored_val is not None else "-"
+        change_text, change_class = "–", "te-result-cell te-result-change-value"
+    else:
+        baseline_text = fmt.format(baseline_val)
+        explored_text = fmt.format(explored_val)
+        change_text, change_class = _pr_delta(baseline_val, explored_val)
+
+    return html.Div(
+        [
+            html.Div(label, className="te-result-cell te-result-row-label"),
+            html.Div(baseline_text, className="te-result-cell te-result-baseline-value"),
+            html.Div(className="te-result-cell te-result-arrow-cell"),
+            html.Div(explored_text, className="te-result-cell te-result-explored-value"),
+            html.Div(change_text, className=change_class),
+        ],
+        className="te-result-row",
+    )
+
+
+def _pr_text_row(label: str, baseline_text: str, explored_text: str):
+    """Same shape as _pr_result_row, for cells that are already plain text (e.g. "Pause") rather than a number to compute a percent change from."""
+    return html.Div(
+        [
+            html.Div(label, className="te-result-cell te-result-row-label"),
+            html.Div(baseline_text, className="te-result-cell te-result-baseline-value"),
+            html.Div(className="te-result-cell te-result-arrow-cell"),
+            html.Div(explored_text, className="te-result-cell te-result-explored-value"),
+            html.Div("–", className="te-result-cell te-result-change-value"),
+        ],
+        className="te-result-row",
+    )
+
+
+def _pr_text_row_with_delta(label: str, baseline_text: str, explored_text: str, baseline_val: float, explored_val: float):
+    """
+    Same shape as _pr_text_row (baseline/explored shown as already-
+    formatted text, e.g. "52 mL/h (120 µg/kg/min)"), but with a real
+    colored percent-change in the Change column, computed from the
+    underlying numeric rate - used for Propofol maintenance rows so their
+    Change column behaves like Propofol Induction/Remifentanil rate
+    instead of always showing a static dash.
+    """
+    change_text, change_class = _pr_delta(baseline_val, explored_val)
+    return html.Div(
+        [
+            html.Div(label, className="te-result-cell te-result-row-label"),
+            html.Div(baseline_text, className="te-result-cell te-result-baseline-value"),
+            html.Div(className="te-result-cell te-result-arrow-cell"),
+            html.Div(explored_text, className="te-result-cell te-result-explored-value"),
+            html.Div(change_text, className=change_class),
+        ],
+        className="te-result-row",
+    )
+
+
+def _pr_induction_row(baseline_mgkg: float, baseline_mg: float, explored_mgkg: float = None, explored_mg: float = None):
+    """
+    Combined "Propofol – Induction" row - one row instead of two separate
+    "(mg/kg)"/"(mg total)" rows, matching Test Exploration's own combined
+    induction display (te-result-baseline-induction-value/-total,
+    te-result-explored-induction-value/-total - all shared, unmodified
+    CSS classes/markup shape). mg/kg stays the primary (larger) value;
+    mg total is shown underneath, rounded to the nearest 10 mg, with the
+    pr-induction-total override class (style.css) making it larger than
+    Test Exploration's own 10px subtitle while staying visually secondary
+    to mg/kg. explored_mgkg=None (nothing explored yet) shows the same
+    placeholder look Test Exploration uses before an opioid is picked.
+    """
+    baseline_total_rounded = int(round(float(baseline_mg) / 10.0) * 10)
+    baseline_cell = html.Div(
+        [
+            html.Span(f"{float(baseline_mgkg):.2f} mg/kg", className="te-result-baseline-induction-value"),
+            html.Span(
+                f"({baseline_total_rounded} mg total)",
+                className="te-result-baseline-induction-total pr-induction-total",
+            ),
+        ],
+        className="te-result-cell te-result-baseline-value",
+    )
+
+    if explored_mgkg is None:
+        explored_cell = html.Div(
+            html.Span("-", className="te-result-explored-induction-value te-result-explored-value--placeholder"),
+            className="te-result-cell te-result-explored-value",
+        )
+        change_text, change_class = "–", "te-result-cell te-result-change-value"
+    else:
+        explored_total_rounded = int(round(float(explored_mg) / 10.0) * 10)
+        explored_cell = html.Div(
+            [
+                html.Span(f"{float(explored_mgkg):.2f} mg/kg", className="te-result-explored-induction-value"),
+                html.Span(
+                    f"({explored_total_rounded} mg total)",
+                    className="te-result-explored-induction-total pr-induction-total",
+                ),
+            ],
+            className="te-result-cell te-result-explored-value",
+        )
+        change_text, change_class = _pr_delta(float(baseline_mgkg), float(explored_mgkg))
+
+    return html.Div(
+        [
+            html.Div("Propofol – Induction", className="te-result-cell te-result-row-label"),
+            baseline_cell,
+            html.Div(className="te-result-cell te-result-arrow-cell"),
+            explored_cell,
+            html.Div(change_text, className=change_class),
+        ],
+        className="te-result-row",
+    )
+
+
+def _pr_maintenance_rows(baseline_ns, explored_ns) -> list:
+    """
+    One row per compressed propofol-maintenance interval, using the
+    EXPLORED regimen's own compress_minute_schedule() boundaries (always
+    well-defined - every grid point is a fresh, complete optimization) and
+    sampling the baseline regimen's own rate at each interval's start
+    minute for direct comparison. Baseline and explored can have
+    different switch times, but propofol_inf_rates_ml_h/_mcgkgmin are
+    always exactly N_INTERVALS=15 minute-indexed entries for both, so
+    index-sampling baseline by minute is always safe, never a length
+    mismatch. Change column is a real colored percent-change (mirroring
+    Propofol Induction/Remifentanil rate) whenever both sides are
+    actually infusing; a Pause interval (rate 0 on either side) keeps the
+    static dash, since a percent change against/to zero isn't meaningful.
+    """
+    intervals = compress_minute_schedule(explored_ns.propofol_inf_rates_ml_h)
+    explored_secondary = explored_ns.propofol_inf_rates_mcgkgmin
+    baseline_ml = baseline_ns.propofol_inf_rates_ml_h
+    baseline_secondary = baseline_ns.propofol_inf_rates_mcgkgmin
+
+    rows = []
+    for interval in intervals:
+        start = int(interval["start_min"])
+        end = int(interval["end_min"])
+        label = f"{start}–{end} min"
+
+        explored_rate = float(interval["rate"])
+        explored_secondary_rate = float(explored_secondary[min(start, len(explored_secondary) - 1)])
+        baseline_rate = float(baseline_ml[min(start, len(baseline_ml) - 1)])
+        baseline_secondary_rate = float(baseline_secondary[min(start, len(baseline_secondary) - 1)])
+
+        baseline_paused = np.isclose(baseline_rate, 0.0, atol=1e-8)
+        explored_paused = np.isclose(explored_rate, 0.0, atol=1e-8)
+        baseline_text = "Pause" if baseline_paused else f"{baseline_rate:.0f} mL/h ({baseline_secondary_rate:.0f} µg/kg/min)"
+        explored_text = "Pause" if explored_paused else f"{explored_rate:.0f} mL/h ({explored_secondary_rate:.0f} µg/kg/min)"
+
+        if baseline_paused or explored_paused:
+            rows.append(_pr_text_row(label, baseline_text, explored_text))
+        else:
+            rows.append(_pr_text_row_with_delta(label, baseline_text, explored_text, baseline_rate, explored_rate))
+
+    return rows
+
+
+def _build_pr_result_grid(baseline_ns, explored_ns) -> list:
+    rows = [_te_result_header_row()]
+
+    rows.append(_pr_induction_row(
+        float(baseline_ns.propofol_bolus_mgkg), float(baseline_ns.propofol_bolus_mg),
+        float(explored_ns.propofol_bolus_mgkg), float(explored_ns.propofol_bolus_mg),
+    ))
+
+    rows.append(_te_result_section_header(
+        "Propofol – Early maintenance (0–15 min)", "Infusion regimen relative to induction",
+    ))
+    rows.extend(_pr_maintenance_rows(baseline_ns, explored_ns))
+
+    rows.append(_te_result_section_header("Selected Opioid Strategy", "Achieved remifentanil infusion rate"))
+    baseline_has_remi = baseline_ns.remifentanil_selected and baseline_ns.remifentanil_inf_rates_mcgkgmin is not None
+    explored_has_remi = explored_ns.remifentanil_selected and explored_ns.remifentanil_inf_rates_mcgkgmin is not None
+    if explored_has_remi and baseline_has_remi:
+        rows.append(_pr_result_row(
+            "Remifentanil rate (µg/kg/min)",
+            float(baseline_ns.remifentanil_inf_rates_mcgkgmin[-1]),
+            float(explored_ns.remifentanil_inf_rates_mcgkgmin[-1]),
+            fmt="{:.3f}",
+        ))
+    elif explored_has_remi:
+        rows.append(_pr_text_row(
+            "Remifentanil rate (µg/kg/min)", "No opioid",
+            f"{float(explored_ns.remifentanil_inf_rates_mcgkgmin[-1]):.3f}",
+        ))
+    else:
+        rows.append(_pr_text_row("Remifentanil rate (µg/kg/min)", "-", "-"))
+
+    return rows
+
+
+def _build_pr_result_grid_baseline_only(baseline_ns) -> list:
+    """
+    "Explore opioid strategy" = None: only the Baseline Recommendation
+    column has real data - the Explored Scenario column and its percent
+    change show placeholder dashes, since no opioid rate is currently
+    being explored (requirement: "Explored Scenario column should stay
+    empty or show placeholder values").
+    """
+    rows = [_te_result_header_row()]
+
+    rows.append(_pr_induction_row(
+        float(baseline_ns.propofol_bolus_mgkg), float(baseline_ns.propofol_bolus_mg),
+    ))
+
+    rows.append(_te_result_section_header(
+        "Propofol – Early maintenance (0–15 min)", "Infusion regimen relative to induction",
+    ))
+    intervals = compress_minute_schedule(baseline_ns.propofol_inf_rates_ml_h)
+    baseline_secondary = baseline_ns.propofol_inf_rates_mcgkgmin
+    for interval in intervals:
+        start = int(interval["start_min"])
+        end = int(interval["end_min"])
+        rate = float(interval["rate"])
+        secondary_rate = float(baseline_secondary[min(start, len(baseline_secondary) - 1)])
+        text = (
+            "Pause" if np.isclose(rate, 0.0, atol=1e-8)
+            else f"{rate:.0f} mL/h ({secondary_rate:.0f} µg/kg/min)"
+        )
+        rows.append(_pr_text_row(f"{start}–{end} min", text, "-"))
+
+    rows.append(_te_result_section_header("Selected Opioid Strategy", "Achieved remifentanil infusion rate"))
+    baseline_has_remi = baseline_ns.remifentanil_selected and baseline_ns.remifentanil_inf_rates_mcgkgmin is not None
+    baseline_remi_text = (
+        f"{float(baseline_ns.remifentanil_inf_rates_mcgkgmin[-1]):.3f}" if baseline_has_remi else "No opioid"
+    )
+    rows.append(_pr_text_row("Remifentanil rate (µg/kg/min)", baseline_remi_text, "-"))
+
+    return rows
+
+
+@app.callback(
+    Output("pr-rate-slider-wrapper", "style"),
+    Input("pr-explore-opioid-dropdown", "value"),
+    prevent_initial_call=True,
+)
+def toggle_pr_explore_slider(explore_opioid):
+    """
+    Requirement 2: the remifentanil rate slider only appears once
+    "Opioid to explore" = Remifentanil is picked - "None" (or anything
+    else, though Sufentanil/Fentanyl can never actually be selected since
+    their dropdown options are disabled) keeps it hidden.
+    """
+    return None if explore_opioid == "remifentanil" else {"display": "none"}
+
+
+@app.callback(
+    Output("pr-detail-age", "value"),
+    Output("pr-detail-sex", "value"),
+    Output("pr-detail-height", "value"),
+    Output("pr-detail-weight", "value"),
+    Output("pr-detail-sbp", "value"),
+    Output("pr-detail-dbp", "value"),
+    Output("pr-detail-hr", "value"),
+    Output("pr-detail-map", "children"),
+    Output("pr-detail-pp", "children"),
+    Output("pr-target-bis-low", "value"),
+    Output("pr-target-bis-high", "value"),
+    Output("pr-target-map-abs", "value"),
+    Output("pr-target-map-rel", "value"),
+    Output("pr-baseline-dropdown", "value"),
+    Output("pr-case-error-banner", "style"),
+    Output("pr-case-error-banner", "children"),
+    Input("pr-case-dropdown", "value"),
+    prevent_initial_call=True,
+)
+def update_pr_patient_preview(case_id):
+    """
+    Live preview only: populates the read-only Patient scenario and
+    Targets cards for whichever case is currently selected, and resets
+    Medication scenario back to "None" - or, if that case's precomputed
+    grid data is missing/malformed, shows pr-case-error-banner instead
+    (a per-case data problem must show a clear message, never crash the
+    app or silently show stale/wrong numbers). Deliberately does not
+    touch pr-results-area/pr-selected-case-store/pr-rate-slider - those
+    are only committed by run_pr_scenario, below, on "Run Scenario".
+    """
+    hidden = {"display": "none"}
+    blank = ("-",) * 13 + ("none",)
+
+    if not case_id:
+        return blank + (hidden, no_update)
+
+    case = _pr_case(case_id)
+    grid = (case or {}).get("remifentanil_grid", {})
+    if case is None or not grid.get("rates_mcgkgmin") or not grid.get("results"):
+        error_text = (
+            f"Case {case_id} has no precomputed grid data. "
+            "Re-run scripts/precompute_remi_cases.py for this patient."
+        )
+        return blank + (None, error_text)
+
+    p = case["patient"]
+    map_val = p["baseline_dap"] + (p["baseline_sap"] - p["baseline_dap"]) / 3.0
+    pp_val = p["baseline_sap"] - p["baseline_dap"]
+
+    meta = (PRECOMPUTED_REMI_DATA or {}).get("metadata", {})
+    bis_low = meta.get("target_bis_low")
+    bis_high = meta.get("target_bis_high")
+    map_abs = meta.get("map_abs_min_target_mmhg")
+    map_rel = meta.get("map_rel_frac_target")
+
+    return (
+        f"{p['age']:.0f}",
+        str(p["sex"]).capitalize(),
+        f"{p['height']:.0f}",
+        f"{p['weight']:.0f}",
+        f"{p['baseline_sap']:.0f}",
+        f"{p['baseline_dap']:.0f}",
+        f"{p['baseline_hr']:.0f}",
+        f"{map_val:.1f}",
+        f"{pp_val:.1f}",
+        f"{bis_low:.0f}" if bis_low is not None else "-",
+        f"{bis_high:.0f}" if bis_high is not None else "-",
+        f"{map_abs:.0f}" if map_abs is not None else "-",
+        f"{map_rel * 100:.0f}" if map_rel is not None else "-",
+        "none",
+        hidden,
+        "",
+    )
+
+
+@app.callback(
+    Output("pr-scenario-active-store", "data", allow_duplicate=True),
+    Input("pr-case-dropdown", "value"),
+    Input("pr-baseline-dropdown", "value"),
+    prevent_initial_call=True,
+)
+def mark_pr_scenario_stale(_case_id, _baseline_choice):
+    """
+    Mirrors Test Exploration's own markScenarioStale (clientside JS) in
+    server-side Python: any change to the case or the medication
+    (baseline) selection means whatever pr-results-area currently shows,
+    if anything, no longer reflects the current left-column selection -
+    so it hides again until Run Scenario is clicked, exactly like Test
+    Exploration's own Patient/Medication cards require Run Scenario again
+    after an edit.
+    """
+    return False
+
+
+@app.callback(
+    Output("pr-selected-case-store", "data"),
+    Output("pr-committed-baseline-store", "data"),
+    Output("pr-rate-slider", "value", allow_duplicate=True),
+    Output("pr-scenario-active-store", "data", allow_duplicate=True),
+    Input("pr-run-scenario-btn", "n_clicks"),
+    State("pr-case-dropdown", "value"),
+    State("pr-baseline-dropdown", "value"),
+    prevent_initial_call=True,
+)
+def run_pr_scenario(_n_clicks, case_id, baseline_choice):
+    """
+    "Run Scenario" commit step, mirroring Test Exploration's own Run
+    Scenario button: takes whatever case + medication (baseline) is
+    currently selected in the left column and commits it, revealing/
+    refreshing pr-results-area for it (via pr-scenario-active-store,
+    below). No model computation happens here or anywhere else on this
+    page - every number is already sitting in PRECOMPUTED_REMI_DATA; this
+    callback only decides which of those already-computed numbers to
+    show. If the selected case has no precomputed grid data,
+    pr-results-area is kept hidden - update_pr_patient_preview, above,
+    has already shown pr-case-error-banner for the same case.
+    """
+    case = _pr_case(case_id)
+    grid = (case or {}).get("remifentanil_grid", {})
+    if case is None or not grid.get("rates_mcgkgmin") or not grid.get("results"):
+        return None, no_update, no_update, False
+
+    rates = grid["rates_mcgkgmin"]
+    return case_id, baseline_choice, rates[0], True
+
+
+@app.callback(
+    Output("pr-results-area", "style"),
+    Input("pr-scenario-active-store", "data"),
+    prevent_initial_call=True,
+)
+def render_pr_results_area(is_active):
+    return None if is_active else {"display": "none"}
+
+
+@app.callback(
+    Output("pr-strategy-baseline-value", "children"),
+    Output("pr-strategy-explored-value", "children"),
+    Output("pr-result-grid", "children"),
+    Output("pr-rate-label", "children"),
+    Output("pr-bis-graph", "figure"),
+    Output("pr-map-graph", "figure"),
+    Output("pr-propofol-pk-graph", "figure"),
+    Output("pr-remifentanil-pk-graph", "figure"),
+    Output("pr-dose-response-graph", "figure"),
+    Input("pr-rate-slider", "value"),
+    Input("pr-selected-case-store", "data"),
+    Input("pr-committed-baseline-store", "data"),
+    Input("pr-explore-opioid-dropdown", "value"),
+    prevent_initial_call=True,
+)
+def update_pr_results(rate, case_id, baseline_choice, explore_opioid):
+    """
+    Everything shown for the committed case + committed baseline
+    reference + current grid rate - all 9 outputs are read straight from
+    PRECOMPUTED_REMI_DATA (already loaded, module-level, at startup) and
+    reused figure-building functions. No model call happens here or
+    anywhere else on this page - the slider only ever selects among the
+    20 already-computed grid results (step=None + marks on the slider
+    itself guarantees it can only land exactly on one of those 20 values,
+    never an in-between one). case/baseline are the *committed* values
+    (set only by run_pr_scenario, above, on "Run Scenario"), not the raw
+    dropdown values, so pr-results-area's content only ever changes on a
+    deliberate Run Scenario click, a rate-slider move, or a change to
+    "Opioid to explore".
+
+    "Opioid to explore" = None (or anything other than "remifentanil" -
+    Sufentanil/Fentanyl can never actually be selected, their dropdown
+    options are disabled) means nothing is currently being explored:
+    Explored Strategy reads "Not selected", the Scenario Result grid's
+    Explored Scenario column is all placeholder dashes
+    (_build_pr_result_grid_baseline_only), every prediction graph shows
+    only the baseline (single-series make_bis_figure/make_map_figure/
+    make_propofol_pk_figure/make_remifentanil_pk_figure, the same
+    functions the Recommendation page's own baseline-only display already
+    uses - no orange trace), and the induction-dose rationale graph shows
+    only the green Baseline reference (make_pr_induction_dose_rationale_
+    figure's explored_ns=None branch).
+    """
+    case = _pr_case(case_id)
+    if case is None:
+        return (no_update,) * 9
+
+    grid = case.get("remifentanil_grid", {})
+    rates = grid.get("rates_mcgkgmin") or []
+    results = grid.get("results") or []
+    baseline_key = "baseline_remifentanil" if baseline_choice == "remifentanil" else "baseline_none"
+    baseline_dict = case.get(baseline_key)
+
+    if not rates or not results or baseline_dict is None:
+        empty = make_empty_figure("No precomputed data for this selection")
+        return "-", "-", [], "-", empty, empty, empty, empty, empty
+
+    baseline_ns = _store_dict_to_namespace(baseline_dict)
+    baseline_label = _pr_remi_rate_display(baseline_ns)
+
+    p = case["patient"]
+    baseline_map = p["baseline_dap"] + (p["baseline_sap"] - p["baseline_dap"]) / 3.0
+
+    if explore_opioid != "remifentanil":
+        bis_fig = make_bis_figure(baseline_ns)
+        map_fig = make_map_figure(baseline_ns)
+        propofol_fig = make_propofol_pk_figure(baseline_ns)
+        remifentanil_fig = make_remifentanil_pk_figure(baseline_ns)
+        dose_response_fig = make_pr_induction_dose_rationale_figure(baseline_ns, baseline_map)
+        grid_children = _build_pr_result_grid_baseline_only(baseline_ns)
+        return (
+            baseline_label, "Not selected", grid_children, "-",
+            bis_fig, map_fig, propofol_fig, remifentanil_fig, dose_response_fig,
+        )
+
+    idx = min(range(len(rates)), key=lambda i: abs(rates[i] - rate)) if rate is not None else 0
+    explored_dict = results[idx]
+    explored_ns = _store_dict_to_namespace(explored_dict)
+
+    bis_fig = make_bis_figure_dual(baseline_ns, explored_ns, manual_name="Explored Scenario")
+    map_fig = make_map_figure_dual(baseline_ns, explored_ns, manual_name="Explored Scenario")
+    propofol_fig = make_propofol_pk_figure_dual(
+        baseline_ns, explored_ns,
+        manual_cp_name="Explored Scenario (Cp)", manual_ce_name="Explored Scenario (Ce)",
+    )
+    remifentanil_fig = make_pr_remifentanil_pk_figure(baseline_ns, explored_ns)
+    dose_response_fig = make_pr_induction_dose_rationale_figure(baseline_ns, baseline_map, explored_ns)
+
+    explored_label = _pr_remi_rate_display(explored_ns)
+    grid_children = _build_pr_result_grid(baseline_ns, explored_ns)
+    rate_label = f"{rates[idx]:.2f} µg/kg/min"
+
+    return (
+        baseline_label, explored_label, grid_children, rate_label,
+        bis_fig, map_fig, propofol_fig, remifentanil_fig, dose_response_fig,
     )
 
 

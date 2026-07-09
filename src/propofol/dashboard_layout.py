@@ -634,6 +634,15 @@ def build_sidebar():
                     ),
                     html.Div(
                         [
+                            html.I(className="fa-solid fa-bolt sidebar-nav-icon"),
+                            "Precomputed Remi",
+                        ],
+                        id="nav-precomputed-remi-btn",
+                        n_clicks=0,
+                        className="sidebar-nav-item",
+                    ),
+                    html.Div(
+                        [
                             html.I(className="fa-solid fa-circle-info sidebar-nav-icon"),
                             "Model Info",
                         ],
@@ -1893,15 +1902,466 @@ def build_test_exploration_page():
     )
 
 
-def build_layout():
+# ============================================================
+# Precomputed Remi - real-model outputs for fixed Phase 3 patient cases,
+# loaded from a JSON file precomputed offline (see
+# scripts/precompute_remi_cases.py) rather than computed live. Visually
+# mirrors Test Exploration as closely as possible - reuses its .te-card/
+# .te-result-grid/.te-strategy-* CSS classes and generic helper functions
+# (_te_card_header, _te_dropdown_field, _te_result_header_row, etc. -
+# despite the "_te_" name these only take ids/labels as parameters, so
+# reusing them for pr-* ids is safe and does not touch Test Exploration
+# itself) directly, for pixel-consistent styling without duplicating that
+# CSS. Every id below is pr-*-prefixed and new - nothing here is a
+# te-*/se-*/recommendation-page id, so there is no collision risk and no
+# shared callback output with any other page. See the "Precomputed Remi"
+# section in app.py for the callbacks that read the offline-generated data
+# and drive this page; no PK/PD/optimization code is ever called from here
+# or from those callbacks.
+# ============================================================
+
+PR_CASE_OPTIONS = [
+    {"label": "Test Patient 1 (TEST-001)", "value": "1"},
+    {"label": "Test Patient 2 (TEST-002)", "value": "2"},
+    {"label": "Test Patient 3 (TEST-003)", "value": "3"},
+]
+
+# Mirrors scripts/precompute_remi_cases.py's own GRID_MIN/MAX/POINTS -
+# used only to draw the slider's static bounds/marks at layout-build time.
+# The callback in app.py sources the actual selectable rates from the
+# loaded JSON itself, never from this Python-side copy, so if the two
+# ever drift this would be a display-only quirk (e.g. a mark not lining
+# up exactly), not a crash.
+PR_GRID_MIN_MCGKGMIN = 0.02
+PR_GRID_MAX_MCGKGMIN = 0.20
+PR_GRID_POINTS = 20
+
+
+def _pr_grid_rates() -> list[float]:
+    """Pure-Python linspace (this file has no numpy dependency) matching the precompute script's own grid."""
+    step = (PR_GRID_MAX_MCGKGMIN - PR_GRID_MIN_MCGKGMIN) / (PR_GRID_POINTS - 1)
+    return [round(PR_GRID_MIN_MCGKGMIN + i * step, 4) for i in range(PR_GRID_POINTS)]
+
+
+def _pr_slider_marks() -> dict:
+    rates = _pr_grid_rates()
+    marks = {r: "" for r in rates}
+    marks[rates[0]] = f"{rates[0]:.2f}"
+    marks[rates[-1]] = f"{rates[-1]:.2f}"
+    return marks
+
+
+def build_pr_case_card():
+    """The case-selector card - the only free-choice control on this page (together with the Medication scenario dropdown below). Everything else is read-only, driven by whichever case is selected here."""
+    return html.Div(
+        [
+            _te_card_header("fa-id-card", "Patient case"),
+            _te_dropdown_field("Fixed case", "pr-case-dropdown", PR_CASE_OPTIONS, None),
+        ],
+        className="card te-card",
+    )
+
+
+def _pr_locked_input_field(label: str, value_id: str, value):
+    """
+    Precomputed Remi's own read-only counterpart to Test Exploration's
+    _te_input_field: identical markup and the same unmodified
+    "te-field-row"/"te-field-label"/"te-field-input-plain" CSS classes (so
+    the blue-cell appearance is pixel-identical), but readOnly=True since
+    every value here is derived from the selected fixed patient case, not
+    typed in. A new, PR-only function - _te_input_field itself is never
+    touched, so Test Exploration's own editable inputs are unaffected.
+    """
+    return html.Div(
+        [
+            html.Div(label, className="te-field-label"),
+            dcc.Input(
+                id=value_id, type="text", value=value, readOnly=True,
+                className="te-field-input-plain",
+            ),
+        ],
+        className="te-field-row",
+    )
+
+
+def _pr_locked_pair_field(label: str, value_id: str, value, title_attr: str = ""):
+    """
+    Precomputed Remi's own read-only counterpart to one half of Test
+    Exploration's Target BIS row: same "te-bis-field"/"field-label"/
+    "scenario-compact-input te-target-input" classes (already shared
+    between Scenario Exploration and Test Exploration, unmodified here),
+    but readOnly=True - used for all four Targets card values, which are
+    locked because the precomputed data is only valid for these exact
+    target settings.
+    """
+    return html.Div(
+        [
+            html.Label(label, className="field-label"),
+            dcc.Input(
+                id=value_id, type="text", value=value, readOnly=True,
+                className="scenario-compact-input te-target-input",
+            ),
+        ],
+        className="te-bis-field",
+        title=title_attr or None,
+    )
+
+
+def build_pr_patient_details_card():
+    """
+    Read-only "Patient scenario" card for the selected case - structurally
+    identical to Test Exploration's own build_te_patient_card (same
+    _te_card_header/param_subsection_label section layout, same blue-cell
+    field styling via _pr_locked_input_field), but every characteristic/
+    vital is locked (readOnly) since it comes from a fixed precomputed
+    patient case, not free-form input. MAP/Baseline PP stay as plain-text
+    derived rows (_te_derived_plain_row, unmodified, exactly as Test
+    Exploration itself displays its own derived values). No Restore
+    button - there is nothing to restore to on a locked page.
+    """
+    return html.Div(
+        [
+            _te_card_header("fa-user", "Patient scenario"),
+            param_subsection_label("Patient characteristics", first=True),
+            _pr_locked_input_field("Age (years)", "pr-detail-age", "-"),
+            _pr_locked_input_field("Sex", "pr-detail-sex", "-"),
+            _pr_locked_input_field("Height (cm)", "pr-detail-height", "-"),
+            _pr_locked_input_field("Weight (kg)", "pr-detail-weight", "-"),
+            html.Div("Baseline vitals", className="param-subsection-label"),
+            _pr_locked_input_field("SBP (mmHg)", "pr-detail-sbp", "-"),
+            _pr_locked_input_field("DBP (mmHg)", "pr-detail-dbp", "-"),
+            _pr_locked_input_field("HR (bpm)", "pr-detail-hr", "-"),
+            html.Div("Derived values", className="param-subsection-label"),
+            _te_derived_plain_row("MAP (mmHg)", "pr-detail-map", "MAP = DBP + (SBP − DBP) / 3"),
+            _te_derived_plain_row("Baseline PP (mmHg)", "pr-detail-pp", "Baseline PP = SBP − DBP"),
+        ],
+        className="card te-card",
+    )
+
+
+def build_pr_baseline_card():
+    """
+    "Medication scenario" card - visually identical to Test Exploration's
+    own build_te_medication_card (same header/label/dropdown styling), but
+    offering only the two baselines actually precomputed (None/
+    Remifentanil). Selects which precomputed baseline is shown as the
+    green reference; takes effect on the next Run Scenario click, exactly
+    like Test Exploration's own Select opioid dropdown.
+    """
+    return html.Div(
+        [
+            _te_card_header("fa-pills", "Medication scenario"),
+            _te_dropdown_field(
+                "Select opioid", "pr-baseline-dropdown",
+                [
+                    {"label": "None", "value": "none"},
+                    {"label": "Remifentanil", "value": "remifentanil"},
+                ],
+                "none",
+            ),
+        ],
+        className="card te-card",
+    )
+
+
+def build_pr_targets_card():
+    """
+    Read-only "Targets" card - structurally identical to Test Exploration's
+    own build_te_targets_card (same "Target BIS" te-bis-row pair and
+    "Target MAP" pair, same blue-cell classes via _pr_locked_pair_field),
+    but every value is locked. These are the fixed BIS/MAP targets the
+    offline precompute script actually optimized against (see
+    scripts/precompute_remi_cases.py's own metadata block); editing them
+    here would silently invalidate every precomputed number, so they are
+    shown but never editable.
+
+    The real model has no separate "absolute vs relative" MAP mode toggle
+    the way Test Exploration's own (fake) Target MAP does - it always
+    enforces both an absolute mmHg floor and a relative %-of-baseline
+    floor at once (whichever is higher wins). Rather than the earlier
+    "Type"/"Value" pair (which read as unclear next to the Recommendation
+    page's own plain Absolute/Relative labeling), both numbers are shown
+    directly as their own locked field, matching the Recommendation
+    page's input-parameters styling.
+    """
+    return html.Div(
+        [
+            _te_card_header("fa-bullseye", "Targets"),
+            html.Div("Target BIS", className="param-subsection-label param-subsection-label--first"),
+            html.Div(
+                [
+                    _pr_locked_pair_field("Lower BIS target", "pr-target-bis-low", "-"),
+                    _pr_locked_pair_field("Upper BIS target", "pr-target-bis-high", "-"),
+                ],
+                className="te-bis-row",
+            ),
+            html.Div("Target MAP", className="param-subsection-label"),
+            html.Div(
+                [
+                    _pr_locked_pair_field(
+                        "Absolute (mmHg)", "pr-target-map-abs", "-",
+                        title_attr="Absolute MAP floor the model enforces, in mmHg.",
+                    ),
+                    _pr_locked_pair_field(
+                        "Relative (% baseline)", "pr-target-map-rel", "-",
+                        title_attr="Relative MAP floor the model enforces, as a percentage of this patient's own baseline MAP.",
+                    ),
+                ],
+                className="te-bis-row",
+            ),
+        ],
+        className="card te-card",
+    )
+
+
+def build_pr_input_column():
+    return html.Div(
+        [
+            build_pr_case_card(),
+            build_pr_patient_details_card(),
+            build_pr_baseline_card(),
+            build_pr_targets_card(),
+            html.Button(
+                "Run Scenario", id="pr-run-scenario-btn", n_clicks=0,
+                className="run-recommendation-btn te-run-scenario-btn",
+            ),
+        ],
+        className="input-column",
+    )
+
+
+def build_pr_scenario_result_card():
+    """
+    Mirrors Test Exploration's Scenario Result card. Unlike Test
+    Exploration, the comparison grid's rows (pr-result-grid) are entirely
+    built by the callback in app.py, not pre-declared here with fixed ids -
+    real maintenance schedules from compress_minute_schedule() can have a
+    different number of rows per case/rate (unlike Test Exploration's
+    always-exactly-2-rows fake schedule), so a fixed-row-count layout
+    would not fit real data safely.
+    """
+    return html.Div(
+        [
+            _te_card_header("fa-code-compare", "Scenario result"),
+            html.P(
+                "Compare the selected remifentanil grid scenario against the chosen baseline reference - both are real, precomputed model outputs.",
+                className="te-card-subtitle",
+            ),
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            html.Span("Baseline Strategy", className="te-strategy-label"),
+                            html.Span("-", id="pr-strategy-baseline-value", className="te-strategy-value"),
+                        ],
+                        className="te-strategy-card te-strategy-card--baseline",
+                    ),
+                    html.Div(html.I(className="fa-solid fa-arrow-right"), className="te-strategy-arrow"),
+                    html.Div(
+                        [
+                            html.Span("Explored Strategy", className="te-strategy-label"),
+                            html.Span("-", id="pr-strategy-explored-value", className="te-strategy-value"),
+                        ],
+                        className="te-strategy-card te-strategy-card--explored",
+                    ),
+                ],
+                className="te-strategy-banner",
+            ),
+            html.Div(id="pr-result-grid", className="te-result-grid"),
+        ],
+        className="card te-card te-result-card",
+    )
+
+
+def build_pr_explore_card():
+    """
+    "Explore opioid strategy" card - visually and structurally identical
+    to Test Exploration's own build_te_explore_card (same
+    _te_dropdown_field "Opioid to explore" options, same slider-wrapper-
+    hidden-until-Remifentanil-is-picked pattern), but server-side: the
+    slider's visibility is toggled by toggle_pr_explore_slider (app.py)
+    reading pr-explore-opioid-dropdown, instead of Test Exploration's own
+    clientside onExploreOpioidChange. Only "None"/"Remifentanil" are
+    selectable - Sufentanil/Fentanyl are listed disabled, exactly like
+    Test Exploration's own dropdown, and can never be selected or trigger
+    any callback. The slider itself keeps step=None + marks so it can
+    only land exactly on one of the 20 precomputed grid rates, matching
+    the fixed rates the offline script actually computed.
+    """
+    marks = _pr_slider_marks()
+    rates = _pr_grid_rates()
+    return html.Div(
+        [
+            _te_card_header("fa-sliders", "Explore opioid strategy"),
+            _te_dropdown_field(
+                "Opioid to explore", "pr-explore-opioid-dropdown",
+                [
+                    {"label": "None", "value": "none"},
+                    {"label": "Remifentanil", "value": "remifentanil"},
+                    {"label": "Sufentanil (future extension)", "value": "sufentanil", "disabled": True},
+                    {"label": "Fentanyl (future extension)", "value": "fentanyl", "disabled": True},
+                ],
+                "none",
+            ),
+            html.Div(
+                [
+                    html.Div("Remifentanil infusion rate", className="te-summary-label"),
+                    html.Div("", id="pr-rate-label", className="te-explore-rate-value"),
+                    dcc.Slider(
+                        id="pr-rate-slider",
+                        min=rates[0], max=rates[-1], step=None, marks=marks, value=rates[0],
+                        tooltip={"placement": "bottom", "always_visible": False},
+                        className="scenario-slider te-explore-slider",
+                    ),
+                ],
+                id="pr-rate-slider-wrapper",
+                style={"display": "none"},
+            ),
+        ],
+        className="card te-card",
+    )
+
+
+def build_pr_dose_response_card():
+    """
+    Dose-Response Interaction - visually matches the Recommendation
+    page's own induction-dose rationale graph (MAP/BIS target bands,
+    green "both targets met" region, diamond markers, reversed BIS axis),
+    built from each regimen's own precomputed dose-sweep data (see
+    scripts/precompute_remi_cases.py's own _dose_sweep()). See
+    make_pr_induction_dose_rationale_figure in app.py.
+    """
+    card = graph_card("Dose-Response Interaction", "pr-dose-response-graph", tall=True)
+    return html.Div([card], id="pr-dose-response-card-wrapper")
+
+
+def build_pr_center_column():
+    return html.Div(
+        [
+            build_pr_scenario_result_card(),
+            build_pr_explore_card(),
+            build_pr_dose_response_card(),
+        ],
+        className="recommendation-column te-center-column",
+    )
+
+
+def build_pr_predictions_column():
+    return html.Div(
+        [
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            html.I(className="fa-solid fa-magnifying-glass-chart te-card-icon"),
+                            "Predictions",
+                        ],
+                        className="section-label te-predictions-label",
+                    ),
+                ],
+                className="predictions-header-row",
+            ),
+            html.Div(
+                [
+                    graph_card("BIS", "pr-bis-graph", default_visible=True),
+                    graph_card("MAP", "pr-map-graph", default_visible=True),
+                    graph_card("Propofol PK/PD", "pr-propofol-pk-graph", default_visible=True),
+                    graph_card("Remifentanil PK", "pr-remifentanil-pk-graph", default_visible=True),
+                ],
+                id="pr-predictions-grid",
+                className="predictions-grid",
+            ),
+        ],
+        className="predictions-column",
+    )
+
+
+def build_precomputed_remi_page(precomputed_remi_available: bool = True):
+    """
+    Build the Precomputed Remi page - a sibling of main-content,
+    scenario-exploration-view, test-exploration-view, and more-info-view,
+    shown/hidden the same way (display:none toggling owned by
+    render_active_page in app.py).
+
+    Two guard states, both handled without any callback:
+      - precomputed_remi_available=False (the JSON file was missing at
+        server startup): pr-missing-data-banner shows instead of the left
+        column, and pr-results-area/pr-case-card are never even reachable.
+      - A case is selectable but not yet chosen, or chosen but missing
+        grid data for some reason: pr-results-area stays hidden
+        (display:none, driven by pr-selected-case-store, mirroring Test
+        Exploration's own te-results-area/te-scenario-active-store
+        pattern) and pr-case-error-banner (inside the left column) shows
+        the specific problem instead.
+    """
+    if not precomputed_remi_available:
+        return html.Div(
+            html.Div(
+                [
+                    html.I(className="fa-solid fa-triangle-exclamation"),
+                    " Precomputed data has not been generated yet. Run scripts/precompute_remi_cases.py "
+                    "and restart the app to use this page.",
+                ],
+                className="card te-card pr-missing-data-banner",
+            ),
+            id="precomputed-remi-view",
+            className="main-content",
+            style={"display": "none"},
+        )
+
+    return html.Div(
+        [
+            html.Div(
+                [
+                    build_pr_input_column(),
+                    html.Div(
+                        [
+                            html.Div(
+                                "This case has no precomputed grid data. Re-run scripts/precompute_remi_cases.py for this patient.",
+                                id="pr-case-error-banner",
+                                className="card te-card pr-case-error-banner",
+                                style={"display": "none"},
+                            ),
+                            html.Div(
+                                html.Div(
+                                    [
+                                        build_pr_center_column(),
+                                        build_pr_predictions_column(),
+                                    ],
+                                    className="content-grid",
+                                ),
+                                id="pr-results-area",
+                                className="output-column",
+                                style={"display": "none"},
+                            ),
+                        ],
+                    ),
+                ],
+                className="content-grid",
+            ),
+        ],
+        id="precomputed-remi-view",
+        className="main-content",
+        style={"display": "none"},
+    )
+
+
+def build_layout(precomputed_remi_available: bool = True):
     """
     Build the main layout of the dashboard: a navigation sidebar plus a
     three-column input/recommendation/predictions dashboard, the Scenario
-    Exploration page, or the "More Info" page - the three views are
-    siblings, and only one is ever visible at a time (Output("main-content",
-    "style") / Output("scenario-exploration-view", "style") /
-    Output("more-info-view", "style"), driven by active-page-store and
-    owned by render_active_page in app.py).
+    Exploration page, the Test Exploration page, the Precomputed Remi page,
+    or the "More Info" page - all siblings, and only one is ever visible at
+    a time (Output("main-content", "style") / Output(
+    "scenario-exploration-view", "style") / etc., driven by
+    active-page-store and owned by render_active_page in app.py).
+
+    precomputed_remi_available is passed in from app.py (which is the one
+    that actually loads src/propofol/data/precomputed_remi_cases.json, at
+    import time) purely so build_precomputed_remi_page() can render its
+    "no precomputed data yet" message immediately, with no callback and no
+    risk of a flash-of-wrong-content - dashboard_layout.py never reads that
+    file itself.
 
     The input column sits outside `dcc.Loading` (as before, inputs never
     show a loading overlay); the recommendation column (including the
@@ -1912,6 +2372,29 @@ def build_layout():
     return html.Div(
         [
             dcc.Store(id="sex-store", data="male"),
+            # Which fixed Phase 3 patient case ("1"/"2"/"3") is currently
+            # selected on the Precomputed Remi page, if any. The actual
+            # precomputed numbers never travel through this store (they
+            # stay server-side in app.py's PRECOMPUTED_REMI_DATA, loaded
+            # once at startup) - every pr-* callback re-reads that global
+            # keyed on this store's case id + the rate slider's own value,
+            # so no multi-megabyte payload round-trips to the browser on
+            # every case switch.
+            dcc.Store(id="pr-selected-case-store", data=None),
+            # Which baseline reference ("none"/"remifentanil") was selected
+            # at the time Run Scenario was last clicked - committed
+            # separately from pr-baseline-dropdown's own live value so that
+            # changing the dropdown alone (before Run Scenario) does not
+            # affect what pr-results-area currently shows, mirroring Test
+            # Exploration's own commit-on-Run-Scenario flow.
+            dcc.Store(id="pr-committed-baseline-store", data="none"),
+            # Whether pr-results-area should currently be shown - True only
+            # right after a successful Run Scenario click, reset to False by
+            # any subsequent change to the case or medication (baseline)
+            # dropdown. Mirrors Test Exploration's own
+            # te-scenario-active-store/markScenarioStale pattern, in Python
+            # instead of clientside JS.
+            dcc.Store(id="pr-scenario-active-store", data=False),
             # Which preset test patient ("1"/"2"/"3") is currently active, if
             # any - None until the user picks one from the Test Patient
             # card's popover. Purely a display/tracking aid (which preset
@@ -1979,6 +2462,7 @@ def build_layout():
 
             build_scenario_exploration_page(),
             build_test_exploration_page(),
+            build_precomputed_remi_page(precomputed_remi_available),
             build_more_info_view(),
         ],
         className="app-shell",
