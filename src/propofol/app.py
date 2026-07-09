@@ -16,6 +16,7 @@ from propofol.config import BOLUS_MGKG_BOUNDS
 from propofol.dashboard_layout import (
     EHR_RECORD_DATE,
     EHR_RECORD_TIME,
+    PRESET_TEST_PATIENTS,
     SCENARIO_DEFAULT_PATIENT,
     SCENARIO_DEFAULT_REMI_MCGKGMIN,
     TEST_EXPLORATION_DEFAULT_MAP_ABS,
@@ -353,6 +354,14 @@ def confidence_tier(confidence_percent: float) -> str:
     return "LOW"
 
 
+CONFIDENCE_INFO_TOOLTIP = (
+    "Confidence indicates how consistently the recommended dose is expected "
+    "to achieve both the BIS and MAP targets despite natural patient "
+    "variability. Higher confidence means the recommendation is expected to "
+    "perform more reliably."
+)
+
+
 def _maintenance_rows(rate_ml_h, rate_secondary, secondary_label: str) -> list:
     """
     Build interval/arrow/rate grid-cell components for one drug's
@@ -399,6 +408,7 @@ def _override_popover(prefill_value):
     """
     return html.Div(
         [
+            dcc.Store(id="override-draft-unit", data="total"),
             html.Div("Manual dose", className="override-popover-title"),
             html.Div(
                 [
@@ -481,10 +491,10 @@ def make_induction_card(original, manual=None):
             [
                 html.Span(f"{dose_mg:.0f}", className="induction-dose-number"),
                 html.Span(" mg", className="induction-dose-unit"),
+                html.Span(f"({dose_mgkg:.2f} mg/kg)", className="induction-dose-mgkg"),
             ],
             className="induction-dose-value",
         ),
-        html.Div(f"{dose_mgkg:.2f} mg/kg", className="induction-dose-subtext"),
     ]
     if manual_active:
         dose_block_children.append(
@@ -505,7 +515,17 @@ def make_induction_card(original, manual=None):
         tier_class = tier.lower()
         right_block = html.Div(
             [
-                html.Div("MODEL CONFIDENCE", className="induction-confidence-label"),
+                html.Div(
+                    [
+                        "MODEL CONFIDENCE",
+                        html.Span(
+                            "i",
+                            title=CONFIDENCE_INFO_TOOLTIP,
+                            className="info-icon",
+                        ),
+                    ],
+                    className="induction-confidence-label",
+                ),
                 html.Div(
                     f"{tier} CONFIDENCE",
                     className=f"induction-confidence-tier induction-confidence-tier--{tier_class}",
@@ -2112,37 +2132,23 @@ def update_derived_pressures(baseline_sap, baseline_dap):
 # `State(field_id, "value")` reads are unaffected.
 # ============================================================
 
-# Preset test patients selectable from the Test Patient card's popover (see
-# toggle_test_patient_popover below). Keys match the "1"/"2"/"3" suffix of
-# each option's button id (test-patient-1-btn, ...). Values map directly
-# onto the same field ids EDITABLE_FIELDS/build_patient_parameters_card
-# already use, so applying a preset is just writing into those same ids -
-# no new fields, no change to run_model's own State reads.
-PRESET_TEST_PATIENTS = {
-    "1": {
-        "label": "Test Patient 1",
-        "age": 35, "sex": "male", "weight": 72, "height": 180,
-        "baseline_sap": 130, "baseline_dap": 75, "baseline_hr": 72,
-    },
-    "2": {
-        "label": "Test Patient 2",
-        "age": 67, "sex": "male", "weight": 90, "height": 170,
-        "baseline_sap": 180, "baseline_dap": 98, "baseline_hr": 78,
-    },
-    "3": {
-        "label": "Test Patient 3",
-        "age": 79, "sex": "female", "weight": 54, "height": 165,
-        "baseline_sap": 160, "baseline_dap": 90, "baseline_hr": 84,
-    },
-}
+# PRESET_TEST_PATIENTS itself now lives in dashboard_layout.py (imported
+# below) - build_patient_parameters_card there needs it directly to
+# default the Recommendation page's own input fields to Test Patient 1,
+# and dashboard_layout.py can't import from app.py (app.py already
+# imports from dashboard_layout.py) without a circular import. Re-
+# exported here unchanged so scripts/precompute_remi_cases.py's own
+# `from propofol.app import PRESET_TEST_PATIENTS` keeps working exactly
+# as before.
+_DEFAULT_PATIENT = PRESET_TEST_PATIENTS["1"]
 
 EDITABLE_FIELDS = [
-    ("age", 35, "EHR"),
-    ("height", 170, "EHR"),
-    ("weight", 70, "EHR"),
-    ("baseline_sap", 120, "Monitor"),
-    ("baseline_dap", 70, "Monitor"),
-    ("baseline_hr", 70, "Monitor"),
+    ("age", _DEFAULT_PATIENT["age"], "EHR"),
+    ("height", _DEFAULT_PATIENT["height"], "EHR"),
+    ("weight", _DEFAULT_PATIENT["weight"], "EHR"),
+    ("baseline_sap", _DEFAULT_PATIENT["baseline_sap"], "Monitor"),
+    ("baseline_dap", _DEFAULT_PATIENT["baseline_dap"], "Monitor"),
+    ("baseline_hr", _DEFAULT_PATIENT["baseline_hr"], "Monitor"),
     ("bis-target-low", float(TARGET_BIS_LOW), "Default"),
     ("bis-target-high", float(TARGET_BIS_HIGH), "Default"),
     ("map-target-abs", float(MAP_ABS_MIN_TARGET), "Default"),
@@ -2452,24 +2458,27 @@ for _field_id, _original_value, _source_label in EDITABLE_FIELDS:
 
 
 # ============================================================
-# Test Patient card - preset patient selector
+# Patient case dropdown - preset patient selector
 #
-# Clicking the card opens test-patient-popover (reuses the shared
-# .edit-popover open/closed styling every other popover on this page
-# already uses). Picking one of the 3 presets writes straight into the
-# same age/height/weight/baseline_sap/baseline_dap/baseline_hr/
+# Picking one of the 3 presets from "Select patient" writes straight into
+# the same age/height/weight/baseline_sap/baseline_dap/baseline_hr/
 # sex-dropdown ids every other input already uses - run_model,
 # derived-map/derived-pp, and every editable-field popover are completely
-# unaffected by where a value came from. The only extra care needed is
-# marking any existing recommendation stale and clearing any active
-# manual override (mirroring mark_inputs_stale above) - selecting a new
-# preset bypasses that callback's own Save/Restore-button-click Inputs
-# entirely, so without this the old recommendation would otherwise keep
-# displaying as if it still belonged to the newly-selected patient.
+# unaffected by where a value came from. The dropdown itself defaults to
+# "1" directly in the layout (build_patient_id_card), matching
+# build_patient_parameters_card's own PRESET_TEST_PATIENTS["1"]-derived
+# field defaults, so Test Patient 1 is already fully in place on first
+# load with no callback needing to fire (prevent_initial_call=True below
+# is therefore correct, not just a performance nicety). The only extra
+# care needed when the dropdown *changes* is marking any existing
+# recommendation stale and clearing any active manual override (mirroring
+# mark_inputs_stale above) - selecting a new preset bypasses that
+# callback's own Save/Restore-button-click Inputs entirely, so without
+# this the old recommendation would otherwise keep displaying as if it
+# still belonged to the newly-selected patient.
 # ============================================================
 
 @app.callback(
-    Output("test-patient-popover", "className"),
     Output("age", "value", allow_duplicate=True),
     Output("height", "value", allow_duplicate=True),
     Output("weight", "value", allow_duplicate=True),
@@ -2477,50 +2486,33 @@ for _field_id, _original_value, _source_label in EDITABLE_FIELDS:
     Output("baseline_dap", "value", allow_duplicate=True),
     Output("baseline_hr", "value", allow_duplicate=True),
     Output("sex-dropdown", "value"),
-    Output("patient-id-name", "children"),
-    Output("patient-id-label", "children"),
     Output("selected-test-patient-store", "data"),
     Output("recommendation-stale-store", "data", allow_duplicate=True),
     Output("manual-scenario-store", "data", allow_duplicate=True),
-    Input("patient-id-card-btn", "n_clicks"),
-    Input("test-patient-1-btn", "n_clicks"),
-    Input("test-patient-2-btn", "n_clicks"),
-    Input("test-patient-3-btn", "n_clicks"),
+    Input("rec-patient-dropdown", "value"),
     State("recommendation-store", "data"),
     State("manual-scenario-store", "data"),
     prevent_initial_call=True,
 )
-def toggle_test_patient_popover(_card_clicks, _p1, _p2, _p3, rec_store, manual_store):
+def apply_test_patient(preset_key, rec_store, manual_store):
     """
-    Open the Test Patient popover (card click), or apply the clicked
-    preset and close it. Mirrors mark_inputs_stale's own guard: only mark
-    the recommendation stale / clear the manual override if a
-    recommendation actually exists yet.
+    Apply the selected preset test patient's fields. Mirrors
+    mark_inputs_stale's own guard: only mark the recommendation stale /
+    clear the manual override if a recommendation actually exists yet.
     """
-    no_change = (no_update,) * 13
-    triggered = ctx.triggered_id
+    no_change = (no_update,) * 10
 
-    if triggered == "patient-id-card-btn":
-        return ("edit-popover edit-popover--open",) + no_change[1:]
-
-    preset_key = {
-        "test-patient-1-btn": "1",
-        "test-patient-2-btn": "2",
-        "test-patient-3-btn": "3",
-    }.get(triggered)
-    if preset_key is None:
+    preset = PRESET_TEST_PATIENTS.get(preset_key)
+    if preset is None:
         return no_change
 
-    preset = PRESET_TEST_PATIENTS[preset_key]
     stale = True if rec_store is not None else no_update
     clear_manual = None if manual_store is not None else no_update
 
     return (
-        "edit-popover",
         preset["age"], preset["height"], preset["weight"],
         preset["baseline_sap"], preset["baseline_dap"], preset["baseline_hr"],
         preset["sex"],
-        preset["label"], f"Patient ID: TEST-00{preset_key}",
         preset_key,
         stale,
         clear_manual,
@@ -3104,6 +3096,7 @@ def validate_override_draft(save_clicks, submit_count, draft_value, unit, rec_st
     Output("override-dose-message", "className", allow_duplicate=True),
     Output("override-unit", "value"),
     Output("manual-scenario-store", "data", allow_duplicate=True),
+    Output("override-draft-unit", "data"),
     Input("override-dose-btn", "n_clicks"),
     Input("override-save-btn", "n_clicks"),
     Input("override-cancel-btn", "n_clicks"),
@@ -3128,9 +3121,11 @@ def handle_override(
     spinner automatically since these components live inside
     summary-output.
 
-    Opening the popover always resets the unit toggle to "Total dose" and
-    clears any leftover validation message/border from a previous edit, so
-    each edit starts clean regardless of how the last one ended.
+    Opening the popover always resets the unit toggle to "Total dose" (and
+    the override-draft-unit store that convert_override_draft_unit uses to
+    track which unit the draft text is currently expressed in) and clears
+    any leftover validation message/border from a previous edit, so each
+    edit starts clean regardless of how the last one ended.
 
     All five Inputs live inside summary-output, which starts out absent
     and is created in one shot the first time a recommendation renders -
@@ -3150,10 +3145,10 @@ def handle_override(
     clean = ("field-input", "", "field-message")
 
     if triggered == "override-return-btn" and return_clicks:
-        return "edit-popover", no_update, no_update, no_update, no_update, no_update, None
+        return "edit-popover", no_update, no_update, no_update, no_update, no_update, None, no_update
 
     if not rec_store or rec_store.get("error") or not rec_store.get("context"):
-        return (no_update,) * 7
+        return (no_update,) * 8
 
     context = rec_store["context"]
 
@@ -3163,10 +3158,10 @@ def handle_override(
             if manual_store
             else rec_store["result"]["propofol_bolus_mg"]
         )
-        return ("edit-popover edit-popover--open", prefill, *clean, "total", no_update)
+        return ("edit-popover edit-popover--open", prefill, *clean, "total", no_update, "total")
 
     if triggered == "override-cancel-btn" and cancel_clicks:
-        return ("edit-popover", no_update, *clean, no_update, no_update)
+        return ("edit-popover", no_update, *clean, no_update, no_update, no_update)
 
     if triggered in ("override-save-btn", "override-dose-draft") and (save_clicks or submit_count):
         weight_kg = float(context["weight"])
@@ -3174,7 +3169,7 @@ def handle_override(
         if status == "error":
             # Invalid value: refuse to commit, leave the popover open.
             # validate_override_draft (same trigger) shows the error inline.
-            return (no_update,) * 7
+            return (no_update,) * 8
 
         try:
             patient = _patient_from_context(context)
@@ -3192,16 +3187,58 @@ def handle_override(
         except Exception:
             # Keep the popover open; live-validation already covers the
             # common invalid-input cases, so a failure here is unexpected.
-            return (no_update,) * 7
+            return (no_update,) * 8
 
         manual_store_data = {
             "dose_mg": manual_dose_mg,
             "result": _rec_to_store_dict(manual_rec),
         }
-        return ("edit-popover", no_update, no_update, no_update, no_update, no_update, manual_store_data)
+        return ("edit-popover", no_update, no_update, no_update, no_update, no_update, manual_store_data, no_update)
 
     # Any other trigger: close the popover without changing anything.
-    return ("edit-popover", no_update, no_update, no_update, no_update, no_update, no_update)
+    return ("edit-popover", no_update, no_update, no_update, no_update, no_update, no_update, no_update)
+
+
+@app.callback(
+    Output("override-dose-draft", "value", allow_duplicate=True),
+    Output("override-draft-unit", "data", allow_duplicate=True),
+    Input("override-unit", "value"),
+    State("override-dose-draft", "value"),
+    State("override-draft-unit", "data"),
+    State("recommendation-store", "data"),
+    prevent_initial_call=True,
+)
+def convert_override_draft_unit(new_unit, draft_value, prev_unit, rec_store):
+    """
+    Convert the manual-dose draft text between total mg and mg/kg whenever
+    the user actually toggles the unit control - e.g. 120 mg for a 72 kg
+    patient becomes 1.67 when switching to mg/kg, and back to 120 mg when
+    switching back to Total dose. override-draft-unit tracks which unit the
+    currently displayed draft text is expressed in; handle_override resets
+    it to "total" alongside override-unit every time it opens/saves/cancels
+    the popover (writing the draft text in the correct unit itself), so
+    this only converts on a genuine user toggle, never on those
+    programmatic resets. This purely reformats the displayed text - the
+    value actually saved on Save is still parsed fresh against whichever
+    unit is selected at that time (_validate_override_dose), so validation
+    and the saved dose are unaffected.
+    """
+    new_unit = new_unit or "total"
+    prev_unit = prev_unit or "total"
+    if new_unit == prev_unit:
+        return no_update, no_update
+
+    if not rec_store or rec_store.get("error") or not rec_store.get("context"):
+        return no_update, new_unit
+
+    try:
+        typed_value = float(draft_value)
+    except (TypeError, ValueError):
+        return no_update, new_unit
+
+    weight_kg = float(rec_store["context"]["weight"])
+    value_mg = typed_value * weight_kg if prev_unit == "mgkg" else typed_value
+    return _dose_value_for_display(value_mg, weight_kg, new_unit), new_unit
 
 
 @app.callback(
@@ -4166,18 +4203,26 @@ def _pr_induction_row(baseline_mgkg: float, baseline_mg: float, explored_mgkg: f
     induction display (te-result-baseline-induction-value/-total,
     te-result-explored-induction-value/-total - all shared, unmodified
     CSS classes/markup shape). mg/kg stays the primary (larger) value;
-    mg total is shown underneath, rounded to the nearest 10 mg, with the
-    pr-induction-total override class (style.css) making it larger than
-    Test Exploration's own 10px subtitle while staying visually secondary
-    to mg/kg. explored_mgkg=None (nothing explored yet) shows the same
-    placeholder look Test Exploration uses before an opioid is picked.
+    mg total is shown underneath, with the pr-induction-total override
+    class (style.css) making it larger than Test Exploration's own 10px
+    subtitle while staying visually secondary to mg/kg.
+
+    baseline_mg/explored_mg are propofol_bolus_mg exactly as the optimizer
+    returned it (recommend_regimen2023.py's own round_to_step(...,
+    PROPOFOL_BOLUS_STEP_MG) already rounds it to the nearest 5 mg before
+    it is ever stored) - displayed with the same "{:.0f}" formatting the
+    Recommendation page's own induction-dose card uses (app.py's
+    build_induction_dose_card, "induction-dose-number"), with no further
+    rounding here. This keeps the two pages' displayed induction dose
+    identical for the same recommendation. explored_mgkg=None (nothing
+    explored yet) shows the same placeholder look Test Exploration uses
+    before an opioid is picked.
     """
-    baseline_total_rounded = int(round(float(baseline_mg) / 10.0) * 10)
     baseline_cell = html.Div(
         [
             html.Span(f"{float(baseline_mgkg):.2f} mg/kg", className="te-result-baseline-induction-value"),
             html.Span(
-                f"({baseline_total_rounded} mg total)",
+                f"({float(baseline_mg):.0f} mg total)",
                 className="te-result-baseline-induction-total pr-induction-total",
             ),
         ],
@@ -4191,12 +4236,11 @@ def _pr_induction_row(baseline_mgkg: float, baseline_mg: float, explored_mgkg: f
         )
         change_text, change_class = "–", "te-result-cell te-result-change-value"
     else:
-        explored_total_rounded = int(round(float(explored_mg) / 10.0) * 10)
         explored_cell = html.Div(
             [
                 html.Span(f"{float(explored_mgkg):.2f} mg/kg", className="te-result-explored-induction-value"),
                 html.Span(
-                    f"({explored_total_rounded} mg total)",
+                    f"({float(explored_mg):.0f} mg total)",
                     className="te-result-explored-induction-total pr-induction-total",
                 ),
             ],

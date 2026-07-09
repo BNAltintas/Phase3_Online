@@ -78,86 +78,12 @@ input[type=number] {
   color: var(--blue-accent);
 }
 
-/* Compact patient-identification card shown above Input Parameters. */
-.patient-id-card {
-  padding: 14px 16px;
-}
-
-/* The clickable icon/name/ID row - carries the flex layout .patient-id-card
-   itself used to have, now split out so the popover below can be a plain
-   block sibling instead of a third flex item fighting for row space. */
-.patient-id-trigger {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  cursor: pointer;
-}
-
-.patient-id-icon {
-  font-size: 22px;
-  line-height: 1;
-  flex-shrink: 0;
-  color: #6b46c1;
-}
-
-.patient-id-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.patient-id-name {
-  font-weight: 700;
-  font-size: 14px;
-  color: var(--text-primary);
-}
-
-.patient-id-label {
-  font-size: 12px;
-  color: var(--text-primary);
-}
-
-.patient-id-chevron {
-  margin-left: auto;
-  flex-shrink: 0;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-/* test-patient-popover sits in plain block flow (not a .param-table grid,
-   unlike every other .edit-popover), same situation the manual-dose
-   popover is in - same fix: cancel the shared rule's "grid-column: 1/-1"
-   (meaningless outside a grid, but harmless to leave unset) and give it
-   its own spacing instead of the grid's row-gap. */
-.patient-id-card .edit-popover {
-  grid-column: unset;
-  margin-top: 12px;
-  padding: 6px;
-}
-
-.test-patient-option {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 9px 10px;
-  background: none;
-  border: none;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  cursor: pointer;
-}
-
-.test-patient-option:hover {
-  background-color: #eaf0fe;
-  color: var(--blue-accent);
-}
-
-.test-patient-option + .test-patient-option {
-  margin-top: 2px;
-}
+/* The Recommendation page's own "Patient case" card (build_patient_id_card)
+   now reuses Test Exploration/Precomputed Remi's own .card.te-card +
+   _te_card_header/_te_dropdown_field styling directly (see dashboard_
+   layout.py) instead of its former bespoke popover-card design, so none
+   of the old patient-id-card / test-patient-option rules are needed
+   here any more. */
 
 .card-subheading {
   font-weight: 700;
@@ -478,7 +404,7 @@ input[type=number] {
 }
 
 .override-dose-row .field-input {
-  flex: 1 1 38%;
+  flex: 0 0 84px;
   min-width: 0;
   margin-bottom: 0;
   padding: 9px 10px;
@@ -544,9 +470,9 @@ input[type=number] {
 }
 
 .popover-btn--cancel {
-  background-color: #fff;
+  background-color: #e6483f;
   border-color: #e6483f;
-  color: #e6483f;
+  color: #fff;
 }
 
 .popover-footer {
@@ -701,10 +627,12 @@ body {
 
 /* Extra breathing room inside the Input Parameters panel's own cards -
    scoped to this column only so it doesn't affect Recommendation/graph
-   cards, which keep the base .card padding. Excludes .patient-id-card,
-   which already sets its own (different) padding below - :not() avoids a
-   specificity fight between two equally-specific two-class selectors. */
-.input-column .card:not(.patient-id-card) {
+   cards, which keep the base .card padding. Applies equally to the
+   "Patient case" card (build_patient_id_card, .card.te-card) so it stays
+   visually consistent with Patient Parameters/Model Settings below it -
+   and to Test Exploration/Precomputed Remi's own .card.te-card cards,
+   which share this same .input-column wrapper on their own pages. */
+.input-column .card {
   padding: 18px 18px 14px;
 }
 
@@ -892,8 +820,8 @@ body {
 }
 
 .induction-dose-label {
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--blue-accent);
@@ -906,6 +834,7 @@ body {
 .induction-dose-value {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: 4px;
   line-height: 1.1;
   margin-top: 4px;
@@ -923,11 +852,10 @@ body {
   color: var(--navy-900);
 }
 
-.induction-dose-subtext {
-  font-size: 19px;
+.induction-dose-mgkg {
+  font-size: 22px;
   font-weight: 700;
   color: var(--navy-900);
-  margin-top: 4px;
 }
 
 .induction-confidence-block {
@@ -941,8 +869,8 @@ body {
 }
 
 .induction-confidence-label {
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--blue-accent);
@@ -1229,7 +1157,7 @@ body {
 
 .override-unit-toggle {
   display: flex;
-  flex: 1 1 62%;
+  flex: 1 1 auto;
   align-items: stretch;
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -1246,28 +1174,32 @@ body {
   align-items: center;
   justify-content: center;
   flex: 1 1 50%;
+  min-width: 0;
+  box-sizing: border-box;
+  margin: 0;
   padding: 9px 10px;
   cursor: pointer;
   border-right: 1px solid var(--border-color);
   white-space: nowrap;
 }
 
-.override-unit-toggle label:last-child {
-  border-right: none;
+.override-unit-toggle label:first-child {
+  border-radius: 7px 0 0 7px;
 }
 
+.override-unit-toggle label:last-child {
+  border-right: none;
+  border-radius: 0 7px 7px 0;
+}
+
+.override-unit-toggle label.selected,
 .override-unit-toggle label:has(input:checked) {
   background-color: var(--blue-accent);
   color: #ffffff;
 }
 
 .override-unit-toggle input[type="radio"] {
-  position: absolute;
-  opacity: 0;
-  width: 0;
-  height: 0;
-  margin: 0;
-  pointer-events: none;
+  display: none;
 }
 
 /* ---------- "More Info" page ---------- */

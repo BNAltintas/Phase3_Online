@@ -14,14 +14,49 @@ from propofol.recommend_regimen2023 import (
 )
 
 # Default patient/medication scenario used the first time the Scenario
-# Exploration page loads, and restored by "Restore original patient" -
-# intentionally the same defaults as the Recommendation page's Input
-# Parameters, since this page is a fully independent, self-contained
-# what-if sandbox (its own patient, never the Recommendation page's).
+# Exploration page loads, and restored by "Restore original patient" - its
+# own independent, self-contained what-if sandbox default (never the
+# Recommendation page's own patient/inputs). Historically chosen to match
+# the Recommendation page's own (pre-Test-Patient-1-default) input
+# defaults; the Recommendation page itself now defaults to
+# PRESET_TEST_PATIENTS["1"] instead (see build_patient_parameters_card),
+# so this dict is retained unchanged as Scenario Exploration's own
+# independent starting point, not a mirror of the Recommendation page.
 SCENARIO_DEFAULT_PATIENT = {
     "age": 35, "sex": "male", "height": 170, "weight": 70, "sbp": 120, "dbp": 70,
 }
 SCENARIO_DEFAULT_REMI_MCGKGMIN = 0.10
+
+# The 3 fixed Phase 3 test-patient presets - single source of truth for:
+#   - the Recommendation page's own "Select patient" dropdown (default
+#     patient on load, and re-applied whenever the dropdown changes;
+#     see build_patient_id_card/apply_test_patient in app.py),
+#   - the Precomputed Remi page's "Select patient" dropdown (PR_CASE_
+#     OPTIONS' labels below reuse these same "1"/"2"/"3" keys), and
+#   - scripts/precompute_remi_cases.py's own offline precompute run
+#     (imports this dict from propofol.app, which re-exports it from
+#     here).
+# Defined here (not in app.py) so dashboard_layout.py's own layout-
+# building functions (build_patient_parameters_card, in particular) can
+# use it directly without a circular import - app.py imports
+# dashboard_layout.py already, never the other way around.
+PRESET_TEST_PATIENTS = {
+    "1": {
+        "label": "Test Patient 1",
+        "age": 35, "sex": "male", "weight": 72, "height": 180,
+        "baseline_sap": 130, "baseline_dap": 75, "baseline_hr": 72,
+    },
+    "2": {
+        "label": "Test Patient 2",
+        "age": 67, "sex": "male", "weight": 90, "height": 170,
+        "baseline_sap": 180, "baseline_dap": 98, "baseline_hr": 78,
+    },
+    "3": {
+        "label": "Test Patient 3",
+        "age": 79, "sex": "female", "weight": 54, "height": 165,
+        "baseline_sap": 160, "baseline_dap": 90, "baseline_hr": 84,
+    },
+}
 
 # Static placeholder date/time shown next to fields whose value still matches
 # the original EHR/Monitor-sourced default (cosmetic only - there is no real
@@ -311,7 +346,15 @@ def build_patient_parameters_card():
     layout. Derived values (MAP, Baseline PP) are calculated, read-only
     figures with no Source/Date-Time of their own, so they keep their
     existing simpler label/value layout rather than joining the grid.
+
+    Every default value below comes from PRESET_TEST_PATIENTS["1"] (the
+    same dict the "Select patient" dropdown and the precompute script
+    use) - the Recommendation page now defaults to Test Patient 1 on
+    first load, matching the "Select patient" dropdown's own default
+    value of "1" (see build_patient_id_card), instead of the page's
+    former standalone default patient.
     """
+    default_patient = PRESET_TEST_PATIENTS["1"]
     return html.Div(
         [
             html.H4("Patient parameters", className="card-subheading"),
@@ -319,13 +362,16 @@ def build_patient_parameters_card():
                 [
                     *param_table_header(),
                     *editable_field_row(
-                        "Age (years)", "age", 35, 35, min_value=0, step=1,
+                        "Age (years)", "age", default_patient["age"], default_patient["age"],
+                        min_value=0, step=1,
                     ),
                     *editable_field_row(
-                        "Height (cm)", "height", 170, 170, min_value=30, step=1,
+                        "Height (cm)", "height", default_patient["height"], default_patient["height"],
+                        min_value=30, step=1,
                     ),
                     *editable_field_row(
-                        "Weight (kg)", "weight", 70, 70, min_value=0.5, step=0.1,
+                        "Weight (kg)", "weight", default_patient["weight"], default_patient["weight"],
+                        min_value=0.5, step=0.1,
                     ),
                     html.Div("Sex", className="param-label"),
                     html.Div(
@@ -335,7 +381,7 @@ def build_patient_parameters_card():
                                 {"label": "Male", "value": "male"},
                                 {"label": "Female", "value": "female"},
                             ],
-                            value="male",
+                            value=default_patient["sex"],
                             clearable=False,
                             searchable=False,
                         ),
@@ -348,16 +394,19 @@ def build_patient_parameters_card():
                     ),
                     param_subsection_label("Baseline vitals"),
                     *editable_field_row(
-                        "SBP (mmHg)", "baseline_sap", 120, 120, min_value=30, step=0.1,
-                        source_label="Monitor",
+                        "SBP (mmHg)", "baseline_sap",
+                        default_patient["baseline_sap"], default_patient["baseline_sap"],
+                        min_value=30, step=0.1, source_label="Monitor",
                     ),
                     *editable_field_row(
-                        "DBP (mmHg)", "baseline_dap", 70, 70, min_value=10, step=0.1,
-                        source_label="Monitor",
+                        "DBP (mmHg)", "baseline_dap",
+                        default_patient["baseline_dap"], default_patient["baseline_dap"],
+                        min_value=10, step=0.1, source_label="Monitor",
                     ),
                     *editable_field_row(
-                        "HR (bpm)", "baseline_hr", 70, 70, min_value=0, step=0.1,
-                        source_label="Monitor",
+                        "HR (bpm)", "baseline_hr",
+                        default_patient["baseline_hr"], default_patient["baseline_hr"],
+                        min_value=0, step=0.1, source_label="Monitor",
                     ),
                 ],
                 className="param-table",
@@ -660,57 +709,25 @@ def build_sidebar():
 
 def build_patient_id_card():
     """
-    Build the patient-identification card shown above Input Parameters.
+    Build the "Patient case" card shown above Input Parameters - visually
+    identical to the Precomputed Remi page's own Patient Case card
+    (_te_card_header + _te_dropdown_field, the same "card te-card"
+    classes), reusing PR_CASE_OPTIONS directly so both pages' dropdowns
+    list the exact same 3 presets with the exact same labels. Defaults to
+    "1" (Test Patient 1), matching build_patient_parameters_card's own
+    default input values below, so the dropdown and the fields it drives
+    agree on first load without any callback needing to fire.
 
-    Clicking the icon/name/ID row (patient-id-card-btn) opens a small popover
-    (test-patient-popover) listing the 3 preset test patients - reuses the
-    shared .edit-popover open/closed styling the manual-dose popover already
-    uses, scoped with its own "grid-column: unset" override (see
-    .patient-id-card .edit-popover in style.css) since this card sits in
-    plain block flow, not inside a .param-table grid. The open/close +
-    apply-preset logic lives in one callback in app.py
-    (toggle_test_patient_popover) - this function only builds static markup;
-    patient-id-name/-label update via that callback's Outputs so the card
-    reflects whichever preset (if any) is currently active.
+    Selecting a different patient here is handled by one callback in
+    app.py (apply_test_patient) - this function only builds static
+    markup.
     """
     return html.Div(
         [
-            html.Div(
-                [
-                    html.I(className="fa-solid fa-circle-user patient-id-icon"),
-                    html.Div(
-                        [
-                            html.Div("Test Patient", id="patient-id-name", className="patient-id-name"),
-                            html.Div("Patient ID: TEST-001", id="patient-id-label", className="patient-id-label"),
-                        ],
-                        className="patient-id-info",
-                    ),
-                    html.I(className="fa-solid fa-chevron-down patient-id-chevron"),
-                ],
-                id="patient-id-card-btn",
-                n_clicks=0,
-                className="patient-id-trigger",
-            ),
-            html.Div(
-                [
-                    html.Button(
-                        "Test Patient 1", id="test-patient-1-btn", n_clicks=0,
-                        className="test-patient-option",
-                    ),
-                    html.Button(
-                        "Test Patient 2", id="test-patient-2-btn", n_clicks=0,
-                        className="test-patient-option",
-                    ),
-                    html.Button(
-                        "Test Patient 3", id="test-patient-3-btn", n_clicks=0,
-                        className="test-patient-option",
-                    ),
-                ],
-                id="test-patient-popover",
-                className="edit-popover",
-            ),
+            _te_card_header("fa-id-card", "Patient case"),
+            _te_dropdown_field("Select patient", "rec-patient-dropdown", PR_CASE_OPTIONS, "1"),
         ],
-        className="card patient-id-card",
+        className="card te-card",
     )
 
 
@@ -1956,7 +1973,7 @@ def build_pr_case_card():
     return html.Div(
         [
             _te_card_header("fa-id-card", "Patient case"),
-            _te_dropdown_field("Fixed case", "pr-case-dropdown", PR_CASE_OPTIONS, None),
+            _te_dropdown_field("Select patient", "pr-case-dropdown", PR_CASE_OPTIONS, None),
         ],
         className="card te-card",
     )
@@ -2371,7 +2388,7 @@ def build_layout(precomputed_remi_available: bool = True):
     """
     return html.Div(
         [
-            dcc.Store(id="sex-store", data="male"),
+            dcc.Store(id="sex-store", data=PRESET_TEST_PATIENTS["1"]["sex"]),
             # Which fixed Phase 3 patient case ("1"/"2"/"3") is currently
             # selected on the Precomputed Remi page, if any. The actual
             # precomputed numbers never travel through this store (they
@@ -2395,14 +2412,15 @@ def build_layout(precomputed_remi_available: bool = True):
             # te-scenario-active-store/markScenarioStale pattern, in Python
             # instead of clientside JS.
             dcc.Store(id="pr-scenario-active-store", data=False),
-            # Which preset test patient ("1"/"2"/"3") is currently active, if
-            # any - None until the user picks one from the Test Patient
-            # card's popover. Purely a display/tracking aid (which preset
-            # name to show on the card); the actual patient values it
-            # applies live in PRESET_TEST_PATIENTS in app.py and are written
-            # directly into the same age/height/weight/... fields every
-            # other input already uses.
-            dcc.Store(id="selected-test-patient-store", data=None),
+            # Which preset test patient ("1"/"2"/"3") is currently active -
+            # "1" (Test Patient 1) by default, matching the "Select
+            # patient" dropdown's own default value and
+            # build_patient_parameters_card's own field defaults. Purely a
+            # display/tracking aid; the actual patient values it applies
+            # live in PRESET_TEST_PATIENTS (dashboard_layout.py) and are
+            # written directly into the same age/height/weight/... fields
+            # every other input already uses.
+            dcc.Store(id="selected-test-patient-store", data="1"),
             # Holds the original model recommendation (context + result),
             # populated only by "Run recommendation" - never mutated by the
             # manual-override flow.
