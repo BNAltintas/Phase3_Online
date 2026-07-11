@@ -17,6 +17,13 @@
   --sidebar-bg: #001F6B;
   --sidebar-active-bg: #2E5BFF;
   --sidebar-text: rgba(255, 255, 255, 0.85);
+  /* Typography-polish tier colors (headers/labels), kept distinct from
+     --navy-900/--text-primary/--text-secondary above since those are used
+     pervasively elsewhere (sidebar, big dose numbers, etc.) and shouldn't
+     shift just because header/label typography was refined. */
+  --heading-navy: #1f3a68;
+  --subheading-navy: #244875;
+  --text-label: #4a5568;
 }
 
 input[type=number]::-webkit-outer-spin-button,
@@ -86,25 +93,25 @@ input[type=number] {
    here any more. */
 
 .card-subheading {
-  font-weight: 700;
-  font-size: 13px;
-  margin: 0 0 6px 0;
-  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 15px;
+  margin: 0 0 10px 0;
+  color: var(--heading-navy);
 }
 
 /* Subtle divider above a card-subheading that follows another section
    within the same card (e.g. "Derived values" after Baseline vitals),
    matching the divider .param-subsection-label uses between its own groups. */
 .card-subheading--divider {
-  margin-top: 10px;
-  padding-top: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
   border-top: 1px solid var(--border-color);
 }
 
 .field-block {
   display: flex;
   flex-direction: column;
-  margin-bottom: 10px;
+  margin-bottom: 13px;
 }
 
 .field-block:last-child {
@@ -112,10 +119,10 @@ input[type=number] {
 }
 
 .field-label {
-  font-weight: 600;
-  font-size: 11px;
-  color: var(--text-secondary);
-  margin-bottom: 3px;
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--text-label);
+  margin-bottom: 4px;
 }
 
 .field-input {
@@ -141,7 +148,7 @@ input[type=number] {
 .derived-values {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   margin-bottom: 4px;
 }
 
@@ -149,12 +156,12 @@ input[type=number] {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .derived-label {
-  color: var(--text-primary);
-  font-weight: 600;
+  color: var(--text-label);
+  font-weight: 500;
 }
 
 .derived-value {
@@ -186,7 +193,7 @@ input[type=number] {
   display: grid;
   grid-template-columns: auto 70px 58px 74px;
   column-gap: 8px;
-  row-gap: 9px;
+  row-gap: 12px;
   align-items: center;
   margin-bottom: 8px;
 }
@@ -211,11 +218,11 @@ input[type=number] {
    PARAMETER/VALUE/SOURCE header instead of each repeating it. */
 .param-subsection-label {
   grid-column: 1 / -1;
-  font-weight: 700;
-  font-size: 12px;
-  color: var(--text-primary);
-  margin-top: 10px;
-  padding-top: 10px;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--heading-navy);
+  margin-top: 14px;
+  padding-top: 14px;
   border-top: 1px solid var(--border-color);
 }
 
@@ -226,23 +233,23 @@ input[type=number] {
 }
 
 .param-table-header {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
   color: var(--text-secondary);
-  text-transform: uppercase;
+  margin-bottom: 2px;
 }
 
 .param-label {
-  font-weight: 600;
-  font-size: 12px;
-  color: var(--text-primary);
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--text-label);
 }
 
 .param-source {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-secondary);
 }
 
 .param-source--manual {
@@ -271,9 +278,9 @@ input[type=number] {
 }
 
 .param-pair-row .param-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-label);
 }
 
 .param-pair-row .value-badge-wrapper {
@@ -281,7 +288,8 @@ input[type=number] {
 }
 
 .param-date {
-  font-size: 10px;
+  font-size: 12px;
+  font-weight: 400;
   color: var(--text-secondary);
 }
 
@@ -350,8 +358,9 @@ input[type=number] {
   border-radius: 6px;
   background-color: #eef3ff;
   color: var(--text-primary);
-  font-weight: 600;
-  font-size: 12px;
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 1.3;
   text-align: center;
   cursor: pointer;
 }
@@ -601,12 +610,14 @@ body {
 }
 
 .section-label {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--navy-900);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--heading-navy);
   text-transform: uppercase;
-  margin: 0 0 6px 2px;
+  border-bottom: 2px solid var(--blue-accent);
+  padding-bottom: 7px;
+  margin: 0 0 14px 2px;
 }
 
 /* ---------- Three-column dashboard grid ---------- */
@@ -736,9 +747,9 @@ body {
 
 .graph-card-title {
   margin: 0;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--heading-navy);
 }
 
 .graph-card-toggle {
@@ -1137,8 +1148,8 @@ body {
   background: none;
   border: none;
   color: var(--blue-accent);
-  font-weight: 600;
-  font-size: 12px;
+  font-weight: 500;
+  font-size: 13px;
   cursor: pointer;
   text-decoration: none;
   padding: 2px 4px;
@@ -1333,6 +1344,9 @@ body {
 
 .run-recommendation-btn {
   width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 14px 20px;
   font-size: 15px;
   font-weight: 700;
@@ -2152,4 +2166,297 @@ body {
 
 .pr-delta-decrease {
   color: #d9362e;
+}
+
+/* ---------- Recommendation page: left column compactness ---------- */
+/* The left column's cards (Patient Case, Input Parameters, Model
+   Settings) got tall enough that the whole column no longer fit a
+   1920x1080 viewport at 100% zoom. Every selector below is scoped to
+   #main-content .input-column - #main-content is unique to the
+   Recommendation page (Scenario/Test Exploration, Precomputed Remi, and
+   More Info each render into their own sibling `-view` container, never
+   into #main-content), and .input-column further excludes this page's
+   own recommendation-column/predictions-column - so these overrides
+   only ever apply to this one column, never to:
+     - this page's own middle/right columns (untouched, as requested)
+     - Scenario/Test Exploration's or Precomputed Remi's own cards, even
+       though they reuse the exact same .card/.te-card/.param-*/
+       .section-label/.card-subheading classes
+   Nothing here touches the base rules those classes already have
+   elsewhere in this file. */
+
+#main-content .input-column .card {
+  padding: 10px 14px 8px;
+  margin-bottom: 7px;
+}
+
+#main-content .input-column .te-card {
+  padding: 6px 12px;
+  margin-bottom: 7px;
+}
+
+#main-content .input-column .te-card-header {
+  gap: 9px;
+  margin-bottom: 2px;
+  padding-bottom: 2px;
+}
+
+#main-content .input-column .te-card-title {
+  font-size: 12px;
+}
+
+#main-content .input-column .section-label-icon,
+#main-content .input-column .card-subheading-icon {
+  width: 17px;
+  height: 17px;
+  margin-right: 9px;
+}
+
+#main-content .input-column .section-label {
+  font-size: 13px;
+  letter-spacing: 0.015em;
+  padding-bottom: 3px;
+  margin: 0 0 5px 2px;
+}
+
+#main-content .input-column .te-card-title {
+  letter-spacing: 0.02em;
+}
+
+#main-content .input-column .card-subheading {
+  font-size: 13px;
+  margin: 0 0 4px 0;
+}
+
+#main-content .input-column .card-subheading--divider {
+  margin-top: 6px;
+  padding-top: 6px;
+}
+
+#main-content .input-column .card-subheading--main {
+  letter-spacing: 0.02em;
+}
+
+#main-content .input-column .param-subsection-label {
+  font-size: 13px;
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+#main-content .input-column .param-subsection-label--first {
+  margin-top: 0;
+  padding-top: 0;
+}
+
+/* Value/Source narrower, Last Updated wider (enough for "01/07/26 08:00"
+   on one line at 10px - see .param-date below) - same total row width,
+   redistributed. */
+#main-content .input-column .param-table {
+  grid-template-columns: auto 66px 56px 90px;
+  column-gap: 8px;
+  row-gap: 5px;
+  margin-bottom: 3px;
+}
+
+#main-content .input-column .param-table--no-date {
+  grid-template-columns: auto 66px 56px;
+}
+
+#main-content .input-column .param-table-header {
+  font-size: 10px;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 2px;
+}
+
+#main-content .input-column .param-label {
+  font-size: 12px;
+}
+
+/* Dash's own dash-input-container/dash-dropdown bundle CSS hardcodes
+   height: 34px on both (not derived from padding/font-size at all), which
+   silently capped every numeric field and dropdown in this column
+   regardless of the padding/font tweaks above - !important is needed to
+   win over that bundled rule (same pattern .value-badge-wrapper
+   .dash-input-stepper already uses below for the same reason). */
+#main-content .input-column .value-badge {
+  height: 29px !important;
+  padding: 5px 8px;
+  font-size: 12px;
+  line-height: 1.2;
+  border-radius: 8px;
+}
+
+#main-content .input-column .param-source {
+  font-size: 10px;
+  color: #5b6472;
+  white-space: nowrap;
+}
+
+/* Must come after the plain .param-source color above (same specificity,
+   source order decides) so a manually-edited field's "Manual" badge
+   stays the app's orange manual-override accent instead of inheriting
+   the metadata grey just set above. */
+#main-content .input-column .param-source--manual {
+  color: #c2680f;
+}
+
+/* The single most important rule here: was wrapping "01/07/26 08:00"
+   onto two lines, which forced every parameter row to be tall enough to
+   hold both lines regardless of the value cell's own (much shorter)
+   height. white-space: nowrap + the widened 80px column above keep it on
+   one line. */
+#main-content .input-column .param-date {
+  font-size: 10px;
+  color: #5b6472;
+  white-space: nowrap;
+}
+
+#main-content .input-column .param-pair-row {
+  row-gap: 2px;
+}
+
+#main-content .input-column .param-pair-row .param-label {
+  font-size: 11px;
+}
+
+#main-content .input-column .derived-values {
+  gap: 3px;
+  margin-bottom: 2px;
+}
+
+#main-content .input-column .derived-value-row {
+  font-size: 12px;
+}
+
+#main-content .input-column .field-block {
+  margin-bottom: 5px;
+}
+
+#main-content .input-column .field-label {
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+
+#main-content .input-column .run-recommendation-btn {
+  padding: 10px 20px;
+  margin-top: 2px;
+}
+
+/* ---------- Recommendation page: left column visual polish ---------- */
+/* Same #main-content .input-column scoping rationale as the compactness
+   block above - Font Awesome Free has no regular/outline glyph for
+   "sliders" or "gear" (verified by rendering both), so the new header
+   icons below use nearby outline icons instead (clipboard/pen-to-square)
+   rather than falling back to solid weight. --text-label and
+   --subheading-navy are redefined here (not at :root) so every existing
+   rule that already reads var(--text-label)/var(--subheading-navy)
+   picks up the darker/lighter tier automatically inside this column,
+   without a repeat override per class. */
+
+#main-content .input-column {
+  --text-label: #333d4d;
+  /* +35px over the shared .input-column's 380px cap (also used by
+     Scenario/Test Exploration's own left columns, hence scoping the
+     widening here rather than editing that base rule) - there was
+     unused horizontal space to its right, and the extra room goes
+     toward the Parameter/Last Updated columns and both dropdowns below. */
+  flex: 1 1 375px;
+  max-width: 415px;
+}
+
+.section-label-icon,
+.card-subheading-icon {
+  width: 15px;
+  height: 15px;
+  margin-right: 7px;
+  vertical-align: -3px;
+}
+
+/* img.te-card-icon only ever matches the Recommendation page's own
+   Patient Case header (the sole html.Img among every other .te-card-icon
+   usage elsewhere, which are all Font Awesome <i> glyphs) - the element
+   type in the selector itself is what keeps this from touching Test
+   Exploration/Precomputed Remi's own icons, no #main-content scoping
+   needed. */
+img.te-card-icon {
+  width: 15px;
+  height: 15px;
+  vertical-align: -3px;
+}
+
+#main-content .input-column img.te-card-icon {
+  width: 17px;
+  height: 17px;
+}
+
+#main-content .input-column .te-card-title {
+  color: var(--heading-navy);
+  letter-spacing: 0.02em;
+}
+
+/* Patient Parameters/Derived Values (plain .card-subheading) and the
+   param-subsection-label group (Baseline Vitals/Concentrations/Target
+   BIS/Target MAP) read as the lighter "subsection" tier; Model Settings
+   opts back into the darker main-header tier via .card-subheading--main
+   (added only on that one H4, see build_model_settings_card) so it reads
+   at the same visual weight as Patient Case/Input Parameters above it. */
+#main-content .input-column .card-subheading,
+#main-content .input-column .param-subsection-label {
+  color: var(--subheading-navy);
+  letter-spacing: 0.01em;
+}
+
+#main-content .input-column .card-subheading--main {
+  display: flex;
+  align-items: center;
+  color: var(--heading-navy);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* Dash's own dash-dropdown-grid-container defaults to height:32px
+   regardless of the button's own height - left alone, that mismatch is
+   exactly what made the patient/opioid selectors feel "unbalanced"
+   (32px of content trying to center inside a shorter 28px box). Forcing
+   it to 100% keeps the two in lockstep at whatever height .dash-dropdown
+   below is set to. */
+#main-content .input-column .dash-dropdown-grid-container {
+  height: 100%;
+  padding: 0 10px;
+}
+
+#main-content .input-column .dash-dropdown {
+  height: 30px !important;
+  border-radius: 8px;
+  border-color: #a9c2f5;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(20, 32, 92, 0.04);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+#main-content .input-column .dash-dropdown:hover {
+  border-color: var(--blue-accent);
+}
+
+#main-content .input-column .dash-dropdown[data-state="open"],
+#main-content .input-column .dash-dropdown:focus-visible {
+  border-color: var(--blue-accent);
+  box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.15);
+  outline: none;
+}
+
+/* Slightly softer than --border-color, only for this column's own
+   dividers (card-subheading--divider, param-subsection-label's top
+   border, te-card-header's bottom border) - --border-color itself is
+   left untouched since it also draws card/input borders app-wide, not
+   just dividers. */
+#main-content .input-column .card-subheading--divider,
+#main-content .input-column .param-subsection-label,
+#main-content .input-column .te-card-header {
+  border-color: #eceef3;
+}
+
+#main-content .input-column .run-btn-play-icon {
+  margin-right: 7px;
 }

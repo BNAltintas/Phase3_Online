@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import quote
+
 from dash import dcc, html
 
 from propofol.more_info_content import MORE_INFO_SECTIONS, MORE_INFO_SUBTITLE, MORE_INFO_TITLE
@@ -12,6 +14,69 @@ from propofol.recommend_regimen2023 import (
     TARGET_BIS_HIGH,
     TARGET_BIS_LOW,
 )
+
+# ============================================================
+# Thin-stroke header icons (Recommendation page's own Patient Case/Input
+# Parameters/Model Settings headers only)
+#
+# Font Awesome Free (the icon set every other icon in this app uses) has
+# no regular/outline glyph at all for "sliders" or "gear" - rendering
+# fa-regular fa-sliders/fa-gear produces an empty/missing-glyph box, not a
+# thinner version of the icon. Rather than substitute a semantically
+# unrelated Font Awesome icon (a clipboard, a pencil) for these two, these
+# three icons are hand-built inline SVGs in the same Feather/Lucide-style
+# "thin outline" formula (24x24 viewBox, 1.8 stroke, round caps/joins) so
+# all three headers share one consistent, deliberately-chosen icon family
+# instead of two different icon sets bolted together. Rendered as
+# html.Img data-URIs (dash.html has no native <svg>/<path> components in
+# the installed Dash version) - the stroke color is baked into the SVG
+# markup itself for the same reason (a data-URI image can't read the
+# page's CSS custom properties), matching --blue-accent's #2f6fed exactly.
+# ============================================================
+
+_HEADER_ICON_STROKE = "#2f6fed"
+
+_HEADER_ICON_PATHS = {
+    "user": (
+        '<circle cx="12" cy="7.5" r="3.8"/>'
+        '<path d="M4.5 20c0-4.2 3.4-6.8 7.5-6.8s7.5 2.6 7.5 6.8"/>'
+    ),
+    "sliders": (
+        '<line x1="4" y1="6" x2="20" y2="6"/>'
+        '<circle cx="9" cy="6" r="2.1" fill="#ffffff"/>'
+        '<line x1="4" y1="12" x2="20" y2="12"/>'
+        '<circle cx="15" cy="12" r="2.1" fill="#ffffff"/>'
+        '<line x1="4" y1="18" x2="20" y2="18"/>'
+        '<circle cx="9" cy="18" r="2.1" fill="#ffffff"/>'
+    ),
+    "gear": (
+        '<path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/>'
+        '<path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 '
+        '1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 '
+        '11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 '
+        '9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51'
+        'V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 '
+        '1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/>'
+    ),
+}
+
+
+def _header_icon(name: str, class_name: str, size: int = 18):
+    """
+    Build one of the hand-drawn thin-outline header icons above as an
+    html.Img data-URI - see the module-level comment for why these three
+    are custom SVG rather than Font Awesome like every other icon in the
+    app. stroke-width 2.0 (up from an earlier 1.8) keeps the icon reading
+    at least as visually heavy as the semibold header text next to it,
+    now that both are rendered noticeably larger.
+    """
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" '
+        f'viewBox="0 0 24 24" fill="none" stroke="{_HEADER_ICON_STROKE}" stroke-width="2" '
+        f'stroke-linecap="round" stroke-linejoin="round">{_HEADER_ICON_PATHS[name]}</svg>'
+    )
+    return html.Img(src=f"data:image/svg+xml,{quote(svg)}", className=class_name)
+
 
 # Default patient/medication scenario used the first time the Scenario
 # Exploration page loads, and restored by "Restore original patient" - its
@@ -105,14 +170,14 @@ def derived_value_row(label: str, value_id: str, tooltip: str):
 
 
 def param_table_header(show_date: bool = True):
-    """Build the PARAMETER / VALUE / SOURCE (/ DATE-TIME) header row for a `.param-table`."""
+    """Build the Parameter / Value / Source (/ Last Updated) header row for a `.param-table`."""
     header = [
         html.Div("Parameter", className="param-table-header"),
         html.Div("Value", className="param-table-header"),
         html.Div("Source", className="param-table-header"),
     ]
     if show_date:
-        header.append(html.Div("Date/Time", className="param-table-header"))
+        header.append(html.Div("Last Updated", className="param-table-header"))
     return header
 
 
@@ -213,6 +278,7 @@ def editable_field_row(
                     [
                         html.Span(
                             f"Original {source_label} value: {original_value}",
+                            id=f"{field_id}-original-label",
                             className="popover-original",
                         ),
                         html.Button(
@@ -357,7 +423,7 @@ def build_patient_parameters_card():
     default_patient = PRESET_TEST_PATIENTS["1"]
     return html.Div(
         [
-            html.H4("Patient parameters", className="card-subheading"),
+            html.H4("Patient Parameters", className="card-subheading"),
             html.Div(
                 [
                     *param_table_header(),
@@ -392,7 +458,7 @@ def build_patient_parameters_card():
                         timestamp_display(EHR_RECORD_DATE, EHR_RECORD_TIME),
                         className="param-date",
                     ),
-                    param_subsection_label("Baseline vitals"),
+                    param_subsection_label("Baseline Vitals"),
                     *editable_field_row(
                         "SBP (mmHg)", "baseline_sap",
                         default_patient["baseline_sap"], default_patient["baseline_sap"],
@@ -411,7 +477,7 @@ def build_patient_parameters_card():
                 ],
                 className="param-table",
             ),
-            html.H4("Derived values", className="card-subheading card-subheading--divider"),
+            html.H4("Derived Values", className="card-subheading card-subheading--divider"),
             html.Div(
                 [
                     derived_value_row(
@@ -441,33 +507,50 @@ def build_model_settings_card():
     """
     return html.Div(
         [
-            html.H4("Model settings", className="card-subheading"),
-            field_block(
-                "Select opiate",
-                html.Div(
-                    dcc.Dropdown(
-                        id="opiate-dropdown",
-                        options=[
-                            {"label": "No opiate / propofol only", "value": "none"},
-                            {"label": "Remifentanil", "value": "remifentanil"},
-                            {
-                                "label": "Sufentanil (upcoming)",
-                                "value": "sufentanil",
-                                "disabled": True,
-                            },
-                            {
-                                "label": "Fentanyl (upcoming)",
-                                "value": "fentanyl",
-                                "disabled": True,
-                            },
-                        ],
-                        value="none",
-                        clearable=False,
-                        placeholder="Select opiate",
-                        style=DROPDOWN_STYLE,
+            html.H4(
+                [
+                    _header_icon("gear", "card-subheading-icon"),
+                    "Model Settings",
+                ],
+                className="card-subheading card-subheading--main",
+            ),
+            # Same label|dropdown row pattern _te_dropdown_field builds for
+            # "Select patient" on the Patient Case card above (.te-field-row/
+            # .te-field-label/.te-field-dropdown) rather than field_block's
+            # stacked label-above-control layout, so the two selectors read
+            # as one consistent component instead of two different ones.
+            # opiate-dropdown-wrapper is kept alongside .te-field-dropdown
+            # purely so this dropdown's own existing background/border
+            # styling (see style.css) still applies - the id, options, and
+            # value are all unchanged.
+            html.Div(
+                [
+                    html.Div("Select opiate", className="te-field-label"),
+                    html.Div(
+                        dcc.Dropdown(
+                            id="opiate-dropdown",
+                            options=[
+                                {"label": "No opiate / propofol only", "value": "none"},
+                                {"label": "Remifentanil", "value": "remifentanil"},
+                                {
+                                    "label": "Sufentanil (upcoming)",
+                                    "value": "sufentanil",
+                                    "disabled": True,
+                                },
+                                {
+                                    "label": "Fentanyl (upcoming)",
+                                    "value": "fentanyl",
+                                    "disabled": True,
+                                },
+                            ],
+                            value="none",
+                            clearable=False,
+                            placeholder="Select opiate",
+                        ),
+                        className="te-field-dropdown opiate-dropdown-wrapper",
                     ),
-                    className="opiate-dropdown-wrapper",
-                ),
+                ],
+                className="te-field-row",
             ),
             html.Div(
                 [
@@ -724,7 +807,7 @@ def build_patient_id_card():
     """
     return html.Div(
         [
-            _te_card_header("fa-id-card", "Patient case"),
+            _te_card_header(None, "Patient Case", icon=_header_icon("user", "te-card-icon")),
             _te_dropdown_field("Select patient", "rec-patient-dropdown", PR_CASE_OPTIONS, "1"),
         ],
         className="card te-card",
@@ -739,7 +822,13 @@ def build_input_column():
     return html.Div(
         [
             build_patient_id_card(),
-            html.Div("INPUT PARAMETERS", className="section-label"),
+            html.Div(
+                [
+                    _header_icon("sliders", "section-label-icon"),
+                    "INPUT PARAMETERS",
+                ],
+                className="section-label",
+            ),
             build_patient_parameters_card(),
             build_model_settings_card(),
             html.Button(
@@ -1365,11 +1454,20 @@ def _te_dropdown_field(label: str, dropdown_id: str, options: list, value, narro
     )
 
 
-def _te_card_header(icon_class: str, title: str):
-    """Icon + all-caps title shown at the top of every Test Exploration card, with a divider beneath it."""
+def _te_card_header(icon_class: str | None, title: str, icon: object = None):
+    """
+    Icon + all-caps title shown at the top of every Test Exploration card,
+    with a divider beneath it. Every existing caller passes a Font Awesome
+    icon_class string, unchanged. The Recommendation page's own Patient
+    Case card instead passes icon=_header_icon(...) (a pre-built
+    html.Img), with icon_class left as None, for the custom thin-outline
+    look shared with Input Parameters/Model Settings - see the
+    _header_icon comment above for why those three use hand-drawn SVG
+    instead of a Font Awesome class.
+    """
     return html.Div(
         [
-            html.I(className=f"fa-solid {icon_class} te-card-icon"),
+            icon if icon is not None else html.I(className=f"fa-solid {icon_class} te-card-icon"),
             html.Span(title, className="te-card-title"),
         ],
         className="te-card-header",

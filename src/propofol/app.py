@@ -1345,21 +1345,27 @@ def make_induction_dose_rationale_figure(
             layer="below",
         )
 
-        # Lower and upper target-dose limits.
+        # Lower and upper target-dose (optimal range) limits. Deliberately
+        # smaller/lighter than the Recommended dose/Manual dose annotations
+        # (which float above the plot) and labeled "Min ="/"Max =" rather
+        # than bare numbers, so they read as range boundaries rather than
+        # competing with the recommendation itself. Sits just inside the
+        # top of the plot area (not above it, where the dose annotations
+        # live) so the two never stack in the same spot.
         for x_value, label, x_anchor in [
-            (ok_start, f"{ok_start:.2f}", "right"),
-            (ok_end, f"{ok_end:.2f}", "left"),
+            (ok_start, f"Min = {ok_start:.2f} mg/kg", "right"),
+            (ok_end, f"Max = {ok_end:.2f} mg/kg", "left"),
         ]:
             fig.add_annotation(
                 x=x_value,
-                y=1.01,
+                y=0.97,
                 xref="x",
                 yref="paper",
-                text=f"<b>{label}</b>",
+                text=label,
                 showarrow=False,
                 xanchor=x_anchor,
-                yanchor="bottom",
-                font=dict(color="green", size=13),
+                yanchor="top",
+                font=dict(color="green", size=10),
             )
 
     fig.add_trace(
@@ -1369,7 +1375,7 @@ def make_induction_dose_rationale_figure(
             mode="lines+markers",
             line=dict(color="red", width=3),
             marker=dict(color="red", size=6),
-            name="MAP",
+            name="Predicted MAP",
             showlegend=True,
             hovertemplate="Dose %{x:.2f} mg/kg<br>Minimal MAP %{y:.1f} mmHg<extra></extra>",
         ),
@@ -1384,7 +1390,7 @@ def make_induction_dose_rationale_figure(
             mode="lines+markers",
             line=dict(color="blue", width=3),
             marker=dict(color="blue", size=6),
-            name="BIS",
+            name="Predicted BIS",
             showlegend=True,
             hovertemplate=(
                 "Dose %{x:.2f} mg/kg<br>"
@@ -1429,16 +1435,35 @@ def make_induction_dose_rationale_figure(
         secondary_y=True,
     )
 
-    # Legend-only entries for the shapes below (target band, recommendation
-    # line, manual-override line) - Plotly shapes never appear in the
-    # legend on their own, so a zero-data dummy trace styled to match is
-    # the standard way to add one. Purely presentational: none of these
-    # affect the plotted data.
+    # Legend-only entries for the shapes below (MAP/BIS target bands, optimal
+    # dose range, recommendation line, manual-override line) - Plotly shapes
+    # never appear in the legend on their own, so a zero-data dummy trace
+    # styled to match is the standard way to add one. Purely presentational:
+    # none of these affect the plotted data. Marker colors use a higher
+    # alpha than the actual bands (which are deliberately faint, ~0.10, so
+    # the curves stay readable) so each swatch still reads clearly at
+    # legend size.
+    fig.add_trace(
+        go.Scatter(
+            x=[None], y=[None], mode="markers",
+            marker=dict(symbol="square", size=10, color="rgba(220, 0, 0, 0.25)"),
+            name="MAP target zone",
+            showlegend=True,
+        ),
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=[None], y=[None], mode="markers",
+            marker=dict(symbol="square", size=10, color="rgba(0, 85, 220, 0.25)"),
+            name="BIS target zone",
+            showlegend=True,
+        ),
+    )
     fig.add_trace(
         go.Scatter(
             x=[None], y=[None], mode="markers",
             marker=dict(symbol="square", size=10, color="rgba(0, 150, 0, 0.25)"),
-            name="Target",
+            name="Optimal dose range",
             showlegend=True,
         ),
     )
@@ -1446,7 +1471,7 @@ def make_induction_dose_rationale_figure(
         go.Scatter(
             x=[None], y=[None], mode="lines",
             line=dict(color="green", width=3, dash="dash"),
-            name="Rec.",
+            name="Recommended dose",
             showlegend=True,
         ),
     )
@@ -1455,7 +1480,7 @@ def make_induction_dose_rationale_figure(
             go.Scatter(
                 x=[None], y=[None], mode="lines",
                 line=dict(color=MANUAL_OVERRIDE_COLOR, width=3, dash="dash"),
-                name="Manual",
+                name="Manual dose",
                 showlegend=True,
             ),
         )
@@ -1472,17 +1497,34 @@ def make_induction_dose_rationale_figure(
         line=dict(color="green", width=3, dash="dash"),
         layer="above",
     )
-    rec_annotation_y = 1.125 if compact else 1.07
+    # Recommended-dose annotation: a two-line "label / value" callout with a
+    # vertical arrow connecting it straight down to the dashed reference
+    # line, so it reads as one dominant, clearly-named annotation rather
+    # than another bare green number sitting next to the (deliberately
+    # smaller/lighter) Min=/Max= range labels near the top of the plot.
+    # compact mode's card is ~35-40% shorter than the Recommendation page's
+    # own card (see docstring), so its arrow/font are scaled down too - not
+    # just the margins - to keep both annotations (plus the two-row legend)
+    # fitting inside that much smaller absolute pixel budget.
+    rec_arrow_ay = -26 if compact else -46
+    rec_font_size = 11 if compact else 13
 
     fig.add_annotation(
         x=selected_dose_mgkg,
-        y=rec_annotation_y,
+        y=1,
         xref="x",
         yref="paper",
-        text=f"<b>Recommendation {selected_dose_mgkg:.2f} mg/kg</b>",
-        showarrow=False,
+        ax=0,
+        ay=rec_arrow_ay,
+        showarrow=True,
+        arrowhead=2,
+        arrowsize=1,
+        arrowwidth=2,
+        arrowcolor="green",
+        text=f"<b>Recommended dose</b><br>{selected_dose_mgkg:.2f} mg/kg",
+        align="center",
         yanchor="bottom",
-        font=dict(color="green", size=13),
+        font=dict(color="green", size=rec_font_size),
     )
 
     # Manual-override dose, shown in orange, when active.
@@ -1521,15 +1563,36 @@ def make_induction_dose_rationale_figure(
             line=dict(color=MANUAL_OVERRIDE_COLOR, width=3, dash="dash"),
             layer="above",
         )
+        # Manual-dose annotation: same two-line/arrow style as the
+        # recommendation, stacked above it by default (different arrow
+        # length, same x-referenced arrowhead) so the two never occupy the
+        # same spot. When the two doses sit close together on the x-axis,
+        # also nudge this label sideways (away from whichever side it's
+        # already leaning toward) so the two callouts/arrows don't visually
+        # collide even when their x-positions are nearly identical.
+        manual_close = abs(manual_dose_mgkg - selected_dose_mgkg) < 0.08 * (x_axis_max - x_axis_min)
+        manual_arrow_ax = 0
+        if manual_close:
+            manual_arrow_ax = -55 if manual_dose_mgkg <= selected_dose_mgkg else 55
+        manual_arrow_ay = rec_arrow_ay - (34 if compact else 64)
+        manual_font_size = 10 if compact else 12
+
         fig.add_annotation(
             x=manual_dose_mgkg,
-            y=1.24 if compact else 1.14,
+            y=1,
             xref="x",
             yref="paper",
-            text=f"<b>Manual dose {manual_dose_mgkg:.2f} mg/kg</b>",
-            showarrow=False,
+            ax=manual_arrow_ax,
+            ay=manual_arrow_ay,
+            showarrow=True,
+            arrowhead=2,
+            arrowsize=1,
+            arrowwidth=2,
+            arrowcolor=MANUAL_OVERRIDE_COLOR,
+            text=f"<b>Manual dose</b><br>{manual_dose_mgkg:.2f} mg/kg",
+            align="center",
             yanchor="bottom",
-            font=dict(color=MANUAL_OVERRIDE_COLOR, size=13),
+            font=dict(color=MANUAL_OVERRIDE_COLOR, size=manual_font_size),
         )
 
     # The legend sits above the plot, stacked above the "Recommendation"/
@@ -1541,12 +1604,12 @@ def make_induction_dose_rationale_figure(
     # match, so a much shorter card still has enough absolute pixels
     # between each stacked row to stay legible.
     if compact:
-        legend_y = 1.355 if manual_dose_mgkg is not None else 1.19
-        margin_t = 75 if manual_dose_mgkg is not None else 55
+        legend_y = 1.92 if manual_dose_mgkg is not None else 1.65
+        margin_t = 135 if manual_dose_mgkg is not None else 105
         margin_b = 35
     else:
-        legend_y = 1.26 if manual_dose_mgkg is not None else 1.19
-        margin_t = 90 if manual_dose_mgkg is not None else 70
+        legend_y = 2.41 if manual_dose_mgkg is not None else 1.50
+        margin_t = 205 if manual_dose_mgkg is not None else 140
         margin_b = 42
 
     fig.update_layout(
@@ -2391,16 +2454,42 @@ def _field_result(value, original_value, source_label, popover_open=False):
     )
 
 
+def _resolve_field_original(field_id: str, static_original_value, selected_patient_key):
+    """
+    Resolve the "original"/EHR value a field's Restore button and popover
+    footer should compare against.
+
+    For the 6 patient-derived fields (age/height/weight/baseline_sap/
+    baseline_dap/baseline_hr) this must track whichever test patient is
+    currently selected (selected-test-patient-store), not stay pinned to
+    Test Patient 1 forever - static_original_value was that fixed Patient-
+    1-at-import-time constant, and is now only a fallback for the field
+    ids that never dependent on patient selection in the first place
+    (bis-target-low/high, map-target-abs/rel, propofol/remifentanil
+    concentration - none of these are keys in PRESET_TEST_PATIENTS, so
+    they always fall through to their own fixed model default here,
+    unchanged from before).
+    """
+    preset = PRESET_TEST_PATIENTS.get(selected_patient_key)
+    if preset is not None and field_id in preset:
+        return preset[field_id]
+    return static_original_value
+
+
 def _register_editable_field_callback(field_id: str, original_value: float, source_label: str):
     """
     Register the Save/Cancel/Restore popover callback for one patient-parameter field.
 
     Output(field_id, "value") is allow_duplicate=True because the 6 patient-
     parameter fields (age/height/weight/baseline_sap/baseline_dap/
-    baseline_hr) are also written by toggle_test_patient_popover when a
-    preset test patient is selected - harmless for the other fields in
-    EDITABLE_FIELDS (targets/concentrations), which only this callback ever
-    writes.
+    baseline_hr) are also written by apply_test_patient when a preset test
+    patient is selected - harmless for the other fields in EDITABLE_FIELDS
+    (targets/concentrations), which only this callback ever writes.
+
+    selected-test-patient-store is read as a State (not just used inside
+    apply_test_patient) so that Save/Cancel/Restore/popover-open always
+    resolve "original" against whichever patient is selected *right now*
+    via _resolve_field_original - see that function's docstring.
     """
     cross_field = FIELD_RULES[field_id].get("cross_check_field")
 
@@ -2412,6 +2501,7 @@ def _register_editable_field_callback(field_id: str, original_value: float, sour
         Output(f"{field_id}-source", "className"),
         Output(f"{field_id}-date", "children"),
         Output(f"{field_id}-restore-btn", "className"),
+        Output(f"{field_id}-original-label", "children"),
     ]
     inputs = [
         Input(f"{field_id}-badge", "n_clicks"),
@@ -2420,7 +2510,11 @@ def _register_editable_field_callback(field_id: str, original_value: float, sour
         Input(f"{field_id}-restore-btn", "n_clicks"),
         Input(f"{field_id}-draft", "n_submit"),
     ]
-    states = [State(f"{field_id}-draft", "value"), State(field_id, "value")]
+    states = [
+        State(f"{field_id}-draft", "value"),
+        State(field_id, "value"),
+        State("selected-test-patient-store", "data"),
+    ]
     if cross_field:
         states.append(State(cross_field, "value"))
 
@@ -2429,26 +2523,29 @@ def _register_editable_field_callback(field_id: str, original_value: float, sour
         """
         Open/close the edit popover and apply Save/Cancel/Restore for this field.
         """
-        draft_value, current_value = extra_states[0], extra_states[1]
-        other_value = extra_states[2] if cross_field else None
+        draft_value, current_value, selected_patient_key = extra_states[0], extra_states[1], extra_states[2]
+        other_value = extra_states[3] if cross_field else None
         triggered = ctx.triggered_id
 
+        resolved_original = _resolve_field_original(field_id, original_value, selected_patient_key)
+        original_label = f"Original {source_label} value: {resolved_original}"
+
         if triggered == f"{field_id}-restore-btn":
-            return _field_result(original_value, original_value, source_label)
+            return (*_field_result(resolved_original, resolved_original, source_label), original_label)
 
         if triggered in (f"{field_id}-save-btn", f"{field_id}-draft"):
             status, _ = _validate_field_value(field_id, draft_value, other_value)
             if status == "error":
                 # Invalid value: refuse to commit, leave the popover open as-is.
                 # The live-validation callback already shows the error inline.
-                return (no_update,) * 7
-            return _field_result(float(draft_value), original_value, source_label)
+                return (no_update,) * 8
+            return (*_field_result(float(draft_value), resolved_original, source_label), original_label)
 
         if triggered == f"{field_id}-badge":
-            return _field_result(current_value, original_value, source_label, popover_open=True)
+            return (*_field_result(current_value, resolved_original, source_label, popover_open=True), original_label)
 
         # Cancel (or any other trigger): close the popover without changing the saved value.
-        return _field_result(current_value, original_value, source_label)
+        return (*_field_result(current_value, resolved_original, source_label), original_label)
 
     app.callback(*outputs, *inputs, *states, prevent_initial_call=True)(_update_field)
 
@@ -2463,28 +2560,57 @@ for _field_id, _original_value, _source_label in EDITABLE_FIELDS:
 # Picking one of the 3 presets from "Select patient" writes straight into
 # the same age/height/weight/baseline_sap/baseline_dap/baseline_hr/
 # sex-dropdown ids every other input already uses - run_model,
-# derived-map/derived-pp, and every editable-field popover are completely
-# unaffected by where a value came from. The dropdown itself defaults to
-# "1" directly in the layout (build_patient_id_card), matching
-# build_patient_parameters_card's own PRESET_TEST_PATIENTS["1"]-derived
-# field defaults, so Test Patient 1 is already fully in place on first
-# load with no callback needing to fire (prevent_initial_call=True below
-# is therefore correct, not just a performance nicety). The only extra
-# care needed when the dropdown *changes* is marking any existing
-# recommendation stale and clearing any active manual override (mirroring
-# mark_inputs_stale above) - selecting a new preset bypasses that
-# callback's own Save/Restore-button-click Inputs entirely, so without
-# this the old recommendation would otherwise keep displaying as if it
-# still belonged to the newly-selected patient.
+# derived-map/derived-pp, and every editable-field popover all read those
+# same ids, so they pick up the new patient automatically. What this
+# callback must also do - and previously didn't - is refresh each of
+# those 6 fields' Source/Last-Updated/Restore-button/popover-footer
+# badges immediately: they used to only reflect whichever patient was
+# selected when the page first loaded (Test Patient 1), because nothing
+# ever told them a different patient had been selected. See
+# _resolve_field_original's docstring for the other half of this fix
+# (Save/Cancel/Restore inside a field's own popover).
+#
+# The dropdown itself defaults to "1" directly in the layout
+# (build_patient_id_card), matching build_patient_parameters_card's own
+# PRESET_TEST_PATIENTS["1"]-derived field defaults, so Test Patient 1 is
+# already fully in place on first load with no callback needing to fire
+# (prevent_initial_call=True below is therefore correct, not just a
+# performance nicety). The only extra care needed when the dropdown
+# *changes* is marking any existing recommendation stale and clearing any
+# active manual override (mirroring mark_inputs_stale above) - selecting
+# a new preset bypasses that callback's own Save/Restore-button-click
+# Inputs entirely, so without this the old recommendation would otherwise
+# keep displaying as if it still belonged to the newly-selected patient.
 # ============================================================
 
+# (field_id, source_label) for the 6 fields whose value/source/date/
+# restore-button/popover-footer all reset to "fresh from this patient's
+# EHR" the instant a different preset is selected - built once so both
+# the Output list and the return-tuple builder below iterate the same
+# fields in the same order.
+_PATIENT_PRESET_FIELDS = [
+    ("age", "EHR"),
+    ("height", "EHR"),
+    ("weight", "EHR"),
+    ("baseline_sap", "Monitor"),
+    ("baseline_dap", "Monitor"),
+    ("baseline_hr", "Monitor"),
+]
+
+_patient_preset_field_outputs = []
+for _pf_id, _pf_source_label in _PATIENT_PRESET_FIELDS:
+    _patient_preset_field_outputs.extend([
+        Output(_pf_id, "value", allow_duplicate=True),
+        Output(f"{_pf_id}-source", "children", allow_duplicate=True),
+        Output(f"{_pf_id}-source", "className", allow_duplicate=True),
+        Output(f"{_pf_id}-date", "children", allow_duplicate=True),
+        Output(f"{_pf_id}-restore-btn", "className", allow_duplicate=True),
+        Output(f"{_pf_id}-original-label", "children", allow_duplicate=True),
+    ])
+
+
 @app.callback(
-    Output("age", "value", allow_duplicate=True),
-    Output("height", "value", allow_duplicate=True),
-    Output("weight", "value", allow_duplicate=True),
-    Output("baseline_sap", "value", allow_duplicate=True),
-    Output("baseline_dap", "value", allow_duplicate=True),
-    Output("baseline_hr", "value", allow_duplicate=True),
+    *_patient_preset_field_outputs,
     Output("sex-dropdown", "value"),
     Output("selected-test-patient-store", "data"),
     Output("recommendation-stale-store", "data", allow_duplicate=True),
@@ -2500,7 +2626,7 @@ def apply_test_patient(preset_key, rec_store, manual_store):
     mark_inputs_stale's own guard: only mark the recommendation stale /
     clear the manual override if a recommendation actually exists yet.
     """
-    no_change = (no_update,) * 10
+    no_change = (no_update,) * (len(_patient_preset_field_outputs) + 4)
 
     preset = PRESET_TEST_PATIENTS.get(preset_key)
     if preset is None:
@@ -2509,9 +2635,20 @@ def apply_test_patient(preset_key, rec_store, manual_store):
     stale = True if rec_store is not None else no_update
     clear_manual = None if manual_store is not None else no_update
 
+    field_results = []
+    for field_id, source_label in _PATIENT_PRESET_FIELDS:
+        value = preset[field_id]
+        field_results.extend([
+            value,
+            source_label,
+            "param-source",
+            timestamp_display(EHR_RECORD_DATE, EHR_RECORD_TIME),
+            "popover-restore popover-restore--hidden",
+            f"Original {source_label} value: {value}",
+        ])
+
     return (
-        preset["age"], preset["height"], preset["weight"],
-        preset["baseline_sap"], preset["baseline_dap"], preset["baseline_hr"],
+        *field_results,
         preset["sex"],
         preset_key,
         stale,
