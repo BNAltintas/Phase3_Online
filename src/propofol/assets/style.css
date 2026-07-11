@@ -246,6 +246,19 @@ input[type=number] {
   color: var(--text-label);
 }
 
+/* Derived (read-only, "Calculated") rows in the same .param-table grid -
+   see derived_param_row in dashboard_layout.py. Deliberately not boxed
+   like .value-badge (nothing here is editable/clickable), right-aligned
+   to sit under the same Value column boxed inputs above it end at, bold
+   for the "should be bold or semibold" requirement. */
+.param-derived-value {
+  display: block;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text-primary);
+  text-align: right;
+}
+
 .param-source {
   font-size: 12px;
   font-weight: 400;
@@ -2271,6 +2284,10 @@ body {
 
 #main-content .input-column .param-label {
   font-size: 12px;
+}
+
+#main-content .input-column .param-derived-value {
+  font-size: 13px;
 }
 
 /* Dash's own dash-input-container/dash-dropdown bundle CSS hardcodes

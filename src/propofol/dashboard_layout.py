@@ -16,22 +16,26 @@ from propofol.recommend_regimen2023 import (
 )
 
 # ============================================================
-# Thin-stroke header icons (Recommendation page's own Patient Case/Input
-# Parameters/Model Settings headers only)
+# Thin-stroke header icons (Recommendation page's own Patient Case/Patient
+# Parameters/Medication Settings/Model Targets card headers only)
 #
 # Font Awesome Free (the icon set every other icon in this app uses) has
 # no regular/outline glyph at all for "sliders" or "gear" - rendering
 # fa-regular fa-sliders/fa-gear produces an empty/missing-glyph box, not a
 # thinner version of the icon. Rather than substitute a semantically
-# unrelated Font Awesome icon (a clipboard, a pencil) for these two, these
-# three icons are hand-built inline SVGs in the same Feather/Lucide-style
-# "thin outline" formula (24x24 viewBox, 1.8 stroke, round caps/joins) so
-# all three headers share one consistent, deliberately-chosen icon family
-# instead of two different icon sets bolted together. Rendered as
-# html.Img data-URIs (dash.html has no native <svg>/<path> components in
-# the installed Dash version) - the stroke color is baked into the SVG
-# markup itself for the same reason (a data-URI image can't read the
-# page's CSS custom properties), matching --blue-accent's #2f6fed exactly.
+# unrelated Font Awesome icon (a clipboard, a pencil) for these, these
+# icons are hand-built inline SVGs in the same Feather/Lucide-style "thin
+# outline" formula (24x24 viewBox, 2px stroke, round caps/joins) so every
+# card header on this page shares one consistent, deliberately-chosen
+# icon family instead of several different icon sets bolted together.
+# Rendered as html.Img data-URIs (dash.html has no native <svg>/<path>
+# components in the installed Dash version) - the stroke color is baked
+# into the SVG markup itself for the same reason (a data-URI image can't
+# read the page's CSS custom properties), matching --blue-accent's
+# #2f6fed exactly. "sliders"/"gear" are no longer used by any card (the
+# old "Input Parameters" section header and "Model Settings" card they
+# were built for were both replaced) but are left defined here rather
+# than deleted, in case a future card wants that same icon language.
 # ============================================================
 
 _HEADER_ICON_STROKE = "#2f6fed"
@@ -57,6 +61,22 @@ _HEADER_ICON_PATHS = {
         '9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51'
         'V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 '
         '1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/>'
+    ),
+    "id-card": (
+        '<rect x="3" y="5" width="18" height="14" rx="2"/>'
+        '<circle cx="8.5" cy="11" r="2"/>'
+        '<path d="M5.5 16c0-1.7 1.3-3 3-3s3 1.3 3 3"/>'
+        '<line x1="14" y1="9" x2="18" y2="9"/>'
+        '<line x1="14" y1="13" x2="18" y2="13"/>'
+    ),
+    "pills": (
+        '<rect x="3" y="8" width="18" height="8" rx="4"/>'
+        '<line x1="12" y1="8" x2="12" y2="16"/>'
+    ),
+    "target": (
+        '<circle cx="12" cy="12" r="9"/>'
+        '<circle cx="12" cy="12" r="5"/>'
+        '<circle cx="12" cy="12" r="1.3" fill="#2f6fed"/>'
     ),
 }
 
@@ -167,6 +187,31 @@ def derived_value_row(label: str, value_id: str, tooltip: str):
         ],
         className="derived-value-row",
     )
+
+
+def derived_param_row(label: str, value_id: str, tooltip: str):
+    """
+    Build a derived (read-only, calculated) row that participates in the
+    same 4-column .param-table grid as the editable rows above it
+    (Parameter/Value/Source/Last Updated all aligned column-for-column),
+    instead of derived_value_row's own separate unboxed flex layout - so
+    MAP/Baseline PP visually line up with Age/Height/Weight/etc rather
+    than sitting in a visually disconnected block underneath them. Never
+    boxed (nothing here is editable/clickable) - Source is always
+    "Calculated" and Last Updated reuses the same baseline timestamp
+    every other row on this card shows. The value itself still updates
+    reactively exactly as before - update_derived_pressures in app.py
+    writes straight into value_id's own children, unchanged.
+    """
+    return [
+        html.Span(
+            [label, html.Span("i", title=tooltip, className="info-icon")],
+            className="param-label",
+        ),
+        html.Span(id=value_id, children="-", className="param-derived-value"),
+        html.Div("Calculated", className="param-source"),
+        html.Div(timestamp_display(EHR_RECORD_DATE, EHR_RECORD_TIME), className="param-date"),
+    ]
 
 
 def param_table_header(show_date: bool = True):
@@ -399,19 +444,21 @@ def _placeholder_card(
 
 def build_patient_parameters_card():
     """
-    Build the card containing patient, baseline vitals, and derived value
-    inputs.
-
-    Patient parameters and Baseline vitals share a single
-    PARAMETER/VALUE/SOURCE/DATE-TIME table instead of each repeating that
-    header. The Age/Height/Weight/Sex rows sit directly under the header
-    (no subsection label - "Patient parameters" is already the card's own
-    title just above), and a single param_subsection_label("Baseline
-    vitals") row marks where that second group starts within the same
-    shared `.param-table` grid, mirroring the Model Settings card's
-    layout. Derived values (MAP, Baseline PP) are calculated, read-only
-    figures with no Source/Date-Time of their own, so they keep their
-    existing simpler label/value layout rather than joining the grid.
+    Build the standalone "Patient Parameters" card: patient
+    characteristics, baseline vitals, and derived values, all sharing one
+    Parameter/Value/Source/Last Updated `.param-table` grid (three
+    param_subsection_label groups) so every row - editable or derived -
+    lines up in the same four columns. Own card (icon + title via
+    _te_card_header, "card te-card" classes) rather than a bare H4
+    subheading, matching Patient Case/Medication Settings/Model Targets -
+    previously this card doubled as the whole "Input Parameters"
+    section's only card, with its own H4 acting as both the card's title
+    and (via a second "Derived Values" H4 + unboxed .derived-values flex
+    rows) a second, visually disconnected layout for MAP/Baseline PP. Now
+    Derived values is a third param_subsection_label group in the very
+    same grid, via derived_param_row - see that function for why it's a
+    different shape from editable_field_row (read-only, "Calculated"
+    source, no popover) despite living in the same grid.
 
     Every default value below comes from PRESET_TEST_PATIENTS["1"] (the
     same dict the "Select patient" dropdown and the precompute script
@@ -423,21 +470,14 @@ def build_patient_parameters_card():
     default_patient = PRESET_TEST_PATIENTS["1"]
     return html.Div(
         [
-            html.H4("Patient Parameters", className="card-subheading"),
+            _te_card_header(None, "Patient Parameters", icon=_header_icon("user", "te-card-icon")),
             html.Div(
                 [
                     *param_table_header(),
+                    param_subsection_label("Patient characteristics", first=True),
                     *editable_field_row(
                         "Age (years)", "age", default_patient["age"], default_patient["age"],
                         min_value=0, step=1,
-                    ),
-                    *editable_field_row(
-                        "Height (cm)", "height", default_patient["height"], default_patient["height"],
-                        min_value=30, step=1,
-                    ),
-                    *editable_field_row(
-                        "Weight (kg)", "weight", default_patient["weight"], default_patient["weight"],
-                        min_value=0.5, step=0.1,
                     ),
                     html.Div("Sex", className="param-label"),
                     html.Div(
@@ -458,7 +498,15 @@ def build_patient_parameters_card():
                         timestamp_display(EHR_RECORD_DATE, EHR_RECORD_TIME),
                         className="param-date",
                     ),
-                    param_subsection_label("Baseline Vitals"),
+                    *editable_field_row(
+                        "Height (cm)", "height", default_patient["height"], default_patient["height"],
+                        min_value=30, step=1,
+                    ),
+                    *editable_field_row(
+                        "Weight (kg)", "weight", default_patient["weight"], default_patient["weight"],
+                        min_value=0.5, step=0.1,
+                    ),
+                    param_subsection_label("Baseline vitals"),
                     *editable_field_row(
                         "SBP (mmHg)", "baseline_sap",
                         default_patient["baseline_sap"], default_patient["baseline_sap"],
@@ -474,58 +522,44 @@ def build_patient_parameters_card():
                         default_patient["baseline_hr"], default_patient["baseline_hr"],
                         min_value=0, step=0.1, source_label="Monitor",
                     ),
-                ],
-                className="param-table",
-            ),
-            html.H4("Derived Values", className="card-subheading card-subheading--divider"),
-            html.Div(
-                [
-                    derived_value_row(
+                    param_subsection_label("Derived values"),
+                    *derived_param_row(
                         "MAP (mmHg)", "derived-map", "MAP = DBP + (SBP − DBP) / 3",
                     ),
-                    derived_value_row(
+                    *derived_param_row(
                         "Baseline PP (mmHg)", "derived-pp", "Baseline PP = SBP − DBP",
                     ),
                 ],
-                className="derived-values",
+                className="param-table",
             ),
         ],
-        className="card",
+        className="card te-card",
     )
 
 
-def build_model_settings_card():
+def build_medication_settings_card():
     """
-    Build the card containing opiate/concentration selection and read-only
-    model targets.
-
-    Concentrations, Target BIS, and Target MAP all share a single
-    PARAMETER/VALUE/SOURCE table instead of each repeating that header -
-    param_subsection_label() rows (spanning the full grid width, see
-    .param-subsection-label in style.css) mark where each group starts
-    within the one shared `.param-table` grid.
+    Build the standalone "Medication Settings" card: opioid selection +
+    propofol/remifentanil concentrations. Target BIS/Target MAP used to
+    share this same card and `.param-table` (as "Model settings") - split
+    off into their own build_model_targets_card() below, matching the
+    reference layout's 4 separate cards instead of one combined settings
+    card.
     """
     return html.Div(
         [
-            html.H4(
-                [
-                    _header_icon("gear", "card-subheading-icon"),
-                    "Model Settings",
-                ],
-                className="card-subheading card-subheading--main",
-            ),
+            _te_card_header(None, "Medication Settings", icon=_header_icon("pills", "te-card-icon")),
             # Same label|dropdown row pattern _te_dropdown_field builds for
             # "Select patient" on the Patient Case card above (.te-field-row/
             # .te-field-label/.te-field-dropdown) rather than field_block's
-            # stacked label-above-control layout, so the two selectors read
-            # as one consistent component instead of two different ones.
-            # opiate-dropdown-wrapper is kept alongside .te-field-dropdown
-            # purely so this dropdown's own existing background/border
-            # styling (see style.css) still applies - the id, options, and
-            # value are all unchanged.
+            # stacked label-above-control layout, so every selector on this
+            # page reads as one consistent component. opiate-dropdown-wrapper
+            # is kept alongside .te-field-dropdown purely so this dropdown's
+            # own existing background/border styling (see style.css) still
+            # applies - the id, options, and value are all unchanged.
             html.Div(
                 [
-                    html.Div("Select opiate", className="te-field-label"),
+                    html.Div("Select opioid", className="te-field-label"),
                     html.Div(
                         dcc.Dropdown(
                             id="opiate-dropdown",
@@ -545,7 +579,7 @@ def build_model_settings_card():
                             ],
                             value="none",
                             clearable=False,
-                            placeholder="Select opiate",
+                            placeholder="Select opioid",
                         ),
                         className="te-field-dropdown opiate-dropdown-wrapper",
                     ),
@@ -581,62 +615,64 @@ def build_model_settings_card():
                         className="param-row-group",
                         style={"display": "none"},
                     ),
-                    param_subsection_label("Target BIS"),
-                    # Lower/Upper side by side (Test Exploration's own
-                    # compact Target BIS layout) instead of stacked full
-                    # table rows - .param-pair-row is its own nested grid
-                    # (grid-column: 1/-1 so it still reads as one
-                    # full-width band within the outer .param-table), and
-                    # compact=True hides each field's Source cell so only
-                    # Label+Value show. Ids/values/callbacks are entirely
-                    # unchanged - purely a layout change.
-                    html.Div(
-                        [
-                            *editable_field_row(
-                                "Lower", "bis-target-low", TARGET_BIS_LOW, TARGET_BIS_LOW,
-                                min_value=0, step=1, source_label="Default", show_date=False,
-                                compact=True,
-                            ),
-                            *editable_field_row(
-                                "Upper", "bis-target-high", TARGET_BIS_HIGH, TARGET_BIS_HIGH,
-                                min_value=0, step=1, source_label="Default", show_date=False,
-                                compact=True,
-                            ),
-                        ],
-                        className="param-pair-row",
+                ],
+                className="param-table param-table--no-date",
+            ),
+        ],
+        className="card te-card",
+    )
+
+
+def build_model_targets_card():
+    """
+    Build the standalone "Model Targets" card: Target BIS/Target MAP,
+    split off from the old combined "Model settings" card (see
+    build_medication_settings_card above). Each field is now a plain
+    stacked editable_field_row (Parameter/Value/Source, no date) instead
+    of the side-by-side .param-pair-row layout the combined card used -
+    matching every other row on this page (Concentrations, Patient
+    Parameters) instead of a bespoke compact pairing. Ids/values/
+    validation/callbacks are entirely unchanged - purely a layout change.
+    """
+    return html.Div(
+        [
+            _te_card_header(None, "Model Targets", icon=_header_icon("target", "te-card-icon")),
+            html.Div(
+                [
+                    *param_table_header(show_date=False),
+                    param_subsection_label("Target BIS", first=True),
+                    *editable_field_row(
+                        "Lower BIS target", "bis-target-low", TARGET_BIS_LOW, TARGET_BIS_LOW,
+                        min_value=0, step=1, source_label="Default", show_date=False,
+                    ),
+                    *editable_field_row(
+                        "Upper BIS target", "bis-target-high", TARGET_BIS_HIGH, TARGET_BIS_HIGH,
+                        min_value=0, step=1, source_label="Default", show_date=False,
                     ),
                     param_subsection_label("Target MAP"),
-                    # Absolute/Relative side by side, same technique as
-                    # Target BIS above. Both fields stay simultaneously
-                    # live model inputs exactly as before (the model
-                    # combines them via map_lower_bound_from_baseline =
-                    # max(absolute, relative% x baseline MAP) - there is
-                    # no mode-toggle in the real model here, unlike Test
-                    # Exploration's own fake map_mode, so this is a
-                    # side-by-side pairing of both real fields rather than
-                    # a single-value-with-mode-dropdown control.
-                    html.Div(
-                        [
-                            *editable_field_row(
-                                "Absolute (mmHg)", "map-target-abs",
-                                MAP_ABS_MIN_TARGET, MAP_ABS_MIN_TARGET,
-                                min_value=30, step=1, source_label="Default", show_date=False,
-                                compact=True,
-                            ),
-                            *editable_field_row(
-                                "Relative (% baseline)", "map-target-rel",
-                                MAP_REL_FRAC_TARGET * 100, MAP_REL_FRAC_TARGET * 100,
-                                min_value=30, step=1, source_label="Default", show_date=False,
-                                compact=True,
-                            ),
-                        ],
-                        className="param-pair-row",
+                    # Both fields stay simultaneously live model inputs
+                    # exactly as before (the model combines them via
+                    # map_lower_bound_from_baseline = max(absolute,
+                    # relative% x baseline MAP) - there is no mode-toggle
+                    # in the real model here, unlike Test Exploration's
+                    # own fake map_mode, so both real fields are always
+                    # shown rather than a single-value-with-mode-dropdown
+                    # control.
+                    *editable_field_row(
+                        "Absolute (mmHg)", "map-target-abs",
+                        MAP_ABS_MIN_TARGET, MAP_ABS_MIN_TARGET,
+                        min_value=30, step=1, source_label="Default", show_date=False,
+                    ),
+                    *editable_field_row(
+                        "Relative (% baseline)", "map-target-rel",
+                        MAP_REL_FRAC_TARGET * 100, MAP_REL_FRAC_TARGET * 100,
+                        min_value=30, step=1, source_label="Default", show_date=False,
                     ),
                 ],
                 className="param-table param-table--no-date",
             ),
         ],
-        className="card",
+        className="card te-card",
     )
 
 
@@ -807,7 +843,7 @@ def build_patient_id_card():
     """
     return html.Div(
         [
-            _te_card_header(None, "Patient Case", icon=_header_icon("user", "te-card-icon")),
+            _te_card_header(None, "Patient Case", icon=_header_icon("id-card", "te-card-icon")),
             _te_dropdown_field("Select patient", "rec-patient-dropdown", PR_CASE_OPTIONS, "1"),
         ],
         className="card te-card",
@@ -816,21 +852,21 @@ def build_patient_id_card():
 
 def build_input_column():
     """
-    Build the left dashboard column: patient ID card, patient/model inputs,
-    and the run button.
+    Build the left dashboard column: Patient Case, Patient Parameters,
+    Medication Settings, Model Targets - each its own card - followed by
+    the Run recommendation button. The former "INPUT PARAMETERS" plain-
+    text section header that used to sit above the (2, not 4) cards is
+    gone: each card now carries its own icon+title header (via
+    _te_card_header, the same pattern Patient Case and every Precomputed
+    Remi card already use), so there's no longer a separate wrapping
+    section label needed above them.
     """
     return html.Div(
         [
             build_patient_id_card(),
-            html.Div(
-                [
-                    _header_icon("sliders", "section-label-icon"),
-                    "INPUT PARAMETERS",
-                ],
-                className="section-label",
-            ),
             build_patient_parameters_card(),
-            build_model_settings_card(),
+            build_medication_settings_card(),
+            build_model_targets_card(),
             html.Button(
                 [
                     html.I(className="fa-solid fa-play run-btn-play-icon"),
