@@ -2519,6 +2519,13 @@ def build_layout(precomputed_remi_available: bool = True):
     induction-dose rationale graph) and the predictions column are both
     inside one `dcc.Loading`, so every `run_model` output shows the same
     loading feedback it did previously.
+
+    That `dcc.Loading` is wrapped in one extra plain `output-column-wrap`
+    div together with `recommendation-loading-text` (the "Generating
+    personalized recommendation" caption shown/hidden by its own pair of
+    clientside callbacks in app.py) so the caption can be absolutely
+    positioned above the spinner without touching `dcc.Loading` itself in
+    any way.
     """
     return html.Div(
         [
@@ -2590,19 +2597,43 @@ def build_layout(precomputed_remi_available: bool = True):
                     html.Div(
                         [
                             build_input_column(),
-                            dcc.Loading(
-                                id="recommendation-loading",
-                                type="default",
-                                parent_className="output-column",
-                                children=[
+                            html.Div(
+                                [
                                     html.Div(
-                                        [
-                                            build_recommendation_column(),
-                                            build_predictions_column(),
+                                        "Generating personalized recommendation",
+                                        id="recommendation-loading-text",
+                                        className="recommendation-loading-text",
+                                        style={"display": "none"},
+                                    ),
+                                    dcc.Loading(
+                                        id="recommendation-loading",
+                                        type="default",
+                                        parent_className="output-column",
+                                        children=[
+                                            # Carries no data of its own - see
+                                            # run_model's docstring in app.py.
+                                            # Its sole purpose is to give
+                                            # run_model an Output inside this
+                                            # dcc.Loading subtree so the purple
+                                            # overlay stays active for the
+                                            # whole optimize -> render sequence
+                                            # instead of only appearing once
+                                            # render_recommendation starts.
+                                            html.Div(
+                                                id="recommendation-loading-anchor",
+                                                style={"display": "none"},
+                                            ),
+                                            html.Div(
+                                                [
+                                                    build_recommendation_column(),
+                                                    build_predictions_column(),
+                                                ],
+                                                className="content-grid",
+                                            ),
                                         ],
-                                        className="content-grid",
                                     ),
                                 ],
+                                className="output-column-wrap",
                             ),
                         ],
                         className="content-grid",

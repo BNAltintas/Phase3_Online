@@ -698,6 +698,60 @@ body {
   min-width: 0;
 }
 
+/* Scoped to the Recommendation page only (#main-content is unique to it -
+   Scenario Exploration/Test Exploration/Precomputed Remi each render their
+   own "output-column" instance inside their own sibling `-view` container,
+   untouched by this rule). dcc.Loading's own overlay div fills this box
+   at height:100%, so this box is dcc.Loading's actual positioning/sizing
+   context - not the extra .output-column-wrap below, which merely wraps
+   it. While loading, every card in the recommendation/predictions columns
+   is hidden (see toggle_loading_placeholders in app.py), leaving only the
+   "RECOMMENDATION"/"PREDICTIONS" section labels, so without this floor the
+   box - and the spinner overlay filling it - would collapse to ~50px and
+   sit right at the top of the page, leaving no room for a caption above
+   the spinner. Harmless the rest of the time since actual rendered content
+   is always much taller than this floor. */
+#main-content .output-column {
+  min-height: 480px;
+}
+
+/* Plain positioning wrapper around dcc.Loading + its "Generating
+   personalized recommendation" caption - carries the same flex-basis/
+   min-width .output-column used to carry directly, now one level up
+   since dcc.Loading's own auto-generated wrapper (parent_className=
+   "output-column") sits nested one level deeper. position: relative
+   anchors recommendation-loading-text's absolute positioning to this
+   box so it lines up with the (taller, per #main-content .output-column
+   above) box dcc.Loading itself now centers the spinner within. */
+.output-column-wrap {
+  flex: 1 1 0%;
+  min-width: 0;
+  position: relative;
+}
+
+/* Caption shown above the existing purple dcc.Loading spinner from the
+   instant "Run recommendation" is clicked until render_recommendation's
+   outputs land (see the two clientside callbacks around run-btn/map-graph
+   in app.py). Hidden by default; text only, no icon/card/border/
+   background, so it reads as part of the same loading state as the
+   spinner rather than a separate element. */
+.recommendation-loading-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, calc(-50% - 42px));
+  width: 100%;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--heading-navy, #1f3a68);
+  z-index: 5;
+  pointer-events: none;
+}
+
 .predictions-grid {
   display: flex;
   flex-direction: column;

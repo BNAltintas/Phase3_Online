@@ -2819,6 +2819,7 @@ def _patient_from_context(context: dict) -> Patient:
     Output("recommendation-store", "data"),
     Output("manual-scenario-store", "data"),
     Output("recommendation-stale-store", "data", allow_duplicate=True),
+    Output("recommendation-loading-anchor", "children"),
     Input("run-btn", "n_clicks"),
     State("age", "value"),
     State("height", "value"),
@@ -2856,6 +2857,16 @@ def run_model(
     """
     Run the pharmacokinetic model and store the recommendation. Rendering is
     handled separately by render_recommendation.
+
+    The 4th output, recommendation-loading-anchor, carries no data of its
+    own (its value is never read anywhere) - it exists purely so this
+    callback has an Output inside the dcc.Loading subtree (see
+    build_layout in dashboard_layout.py), which keeps the existing purple
+    loading overlay active for this callback's own (potentially several
+    seconds long) run, not just for render_recommendation's afterward.
+    Without it, the overlay only appeared once render_recommendation
+    started, since recommendation-store/manual-scenario-store/
+    recommendation-stale-store all live outside that subtree.
     """
     try:
         age = float(age)
@@ -2955,10 +2966,10 @@ def run_model(
             },
             "result": _rec_to_store_dict(rec),
         }
-        return store_data, None, False
+        return store_data, None, False, n_clicks
 
     except Exception as e:
-        return {"error": str(e), "context": None, "result": None}, None, False
+        return {"error": str(e), "context": None, "result": None}, None, False, n_clicks
 
 
 @app.callback(
@@ -3085,6 +3096,47 @@ app.clientside_callback(
 
 
 # ============================================================
+# Loading-overlay caption text
+#
+# "Generating personalized recommendation" is shown/hidden by its own pair
+# of clientside callbacks, independent of recommendation-loading-store
+# (which - see above - intentionally resets as soon as run_model finishes,
+# to restore the button; that is still correct button behavior and is left
+# untouched). The caption instead needs to stay visible for the *entire*
+# click -> render_recommendation-finished window, matching the purple
+# dcc.Loading overlay's own active span (recommendation-loading-anchor
+# keeps that overlay active through run_model; render_recommendation's own
+# outputs, already inside the same dcc.Loading subtree, keep it active
+# through rendering). map-graph is one of render_recommendation's six
+# Outputs, all six of which are always written together in a single
+# response (including the error path), so it reliably fires exactly once
+# rendering has finished, success or error alike.
+# ============================================================
+
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        return {display: "flex"};
+    }
+    """,
+    Output("recommendation-loading-text", "style"),
+    Input("run-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+
+app.clientside_callback(
+    """
+    function(figure) {
+        return {display: "none"};
+    }
+    """,
+    Output("recommendation-loading-text", "style", allow_duplicate=True),
+    Input("map-graph", "figure"),
+    prevent_initial_call=True,
+)
+
+
+# ============================================================
 # Before/after-run state
 #
 # Purely presentational: toggles which of {empty placeholder, stale
@@ -3154,6 +3206,16 @@ def update_result_visibility(rec_store, stale):
 # does. When loading ends, this callback only hides its own placeholders
 # and leaves every other Output as `no_update`, so it can never clobber
 # whatever update_result_visibility has already (correctly) set.
+#
+# The three *-loading-placeholder cards themselves are kept permanently
+# hidden below (never set back to `null`/visible) - the single continuous
+# dcc.Loading overlay (see recommendation-loading-anchor above and
+# recommendation-loading-text below) is now the only loading indicator
+# shown; the empty/stale/content sections are still hidden while loading
+# is in progress exactly as before, only the redundant card-level
+# "Generating..." messages were dropped. The placeholder components
+# themselves are untouched in dashboard_layout.py so this remains a
+# one-line-per-branch, fully reversible change.
 # ============================================================
 
 app.clientside_callback(
@@ -3163,9 +3225,9 @@ app.clientside_callback(
         var noUpdate = window.dash_clientside.no_update;
         if (loading) {
             return [
-                null, hidden, hidden, hidden,
-                null, hidden, hidden, hidden,
-                null, hidden, hidden, hidden
+                hidden, hidden, hidden, hidden,
+                hidden, hidden, hidden, hidden,
+                hidden, hidden, hidden, hidden
             ];
         }
         return [
