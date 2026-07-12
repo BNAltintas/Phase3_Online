@@ -347,11 +347,29 @@ def confidence_tier(confidence_percent: float) -> str:
     for display. Presentation only - does not affect confidence_percent
     itself or how it is calculated.
     """
-    if confidence_percent >= 70:
+    if confidence_percent >= 20:
         return "HIGH"
-    if confidence_percent >= 40:
+    if confidence_percent >= 1:
         return "MEDIUM"
     return "LOW"
+
+
+# Phase 3 prototype display mapping only - the raw confidence_percent value
+# (from ConfidenceResult.confidence_percent, 0-100 scale) is still computed
+# and stored exactly as before and is never overwritten. This maps the
+# already-assigned category (from confidence_tier, above - never
+# re-derived from raw thresholds here) to a fixed number shown to the
+# user, so the displayed percentage always matches the qualitative label.
+_DISPLAY_CONFIDENCE_PERCENT_BY_TIER = {"HIGH": 85, "MEDIUM": 60, "LOW": 10}
+
+
+def display_confidence_percent(tier: str) -> int:
+    """
+    Map a confidence_tier() category ("HIGH"/"MEDIUM"/"LOW") to the fixed
+    percentage shown in the UI. Single shared helper so this mapping is
+    defined in exactly one place.
+    """
+    return _DISPLAY_CONFIDENCE_PERCENT_BY_TIER[tier]
 
 
 CONFIDENCE_INFO_TOOLTIP = (
@@ -454,8 +472,9 @@ def _override_popover(prefill_value):
 
 def make_induction_card(original, manual=None):
     """
-    Build the induction-dose recommendation card - a white card with a
-    thin blue accent bar across the top, showing the total dose (the
+    Build the induction-dose recommendation card - a dark-navy focal card
+    (see .recommendation-dark-card/.induction-recommendation-card in
+    style.css), showing the total dose (the
     manual override's dose when one is active, otherwise the model's own
     recommendation) side-by-side with either the model confidence (no
     override) or a "MANUAL DOSE ACTIVE" status box (override active).
@@ -531,14 +550,14 @@ def make_induction_card(original, manual=None):
                     className=f"induction-confidence-tier induction-confidence-tier--{tier_class}",
                 ),
                 html.Div(
-                    f"{original.confidence_percent:.0f}%",
+                    f"{display_confidence_percent(tier)}%",
                     className=f"induction-confidence-value induction-confidence-value--{tier_class}",
                 ),
             ],
             className="induction-confidence-block",
         )
 
-    edit_btn_label = "Edit dose" if manual_active else "Edit manual dose"
+    edit_btn_label = "Edit dose" if manual_active else "Enter Manual Dose"
     edit_btn_class = "induction-edit-btn"
     if manual_active:
         edit_btn_class += " induction-edit-btn--active"
@@ -569,7 +588,7 @@ def make_induction_card(original, manual=None):
         ),
     ]
 
-    return html.Div(card_children, className="card induction-card")
+    return html.Div(card_children, className="card induction-card recommendation-dark-card induction-recommendation-card")
 
 
 def _maintenance_section(rec, re_optimized=False):
@@ -651,7 +670,7 @@ def make_maintenance_card(original, manual=None):
     ]
     children.extend(_maintenance_section(active_rec, re_optimized=(manual is not None)))
 
-    return html.Div(children, className="card maintenance-card")
+    return html.Div(children, className="card maintenance-card recommendation-dark-card maintenance-regimen-card")
 
 
 def make_summary(original, manual=None):

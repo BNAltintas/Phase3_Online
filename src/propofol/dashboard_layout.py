@@ -133,7 +133,7 @@ PRESET_TEST_PATIENTS = {
     },
     "2": {
         "label": "Test Patient 2",
-        "age": 67, "sex": "male", "weight": 90, "height": 170,
+        "age": 60, "sex": "male", "weight": 90, "height": 170,
         "baseline_sap": 180, "baseline_dap": 98, "baseline_hr": 78,
     },
     "3": {

@@ -24,6 +24,10 @@
   --heading-navy: #1f3a68;
   --subheading-navy: #244875;
   --text-label: #4a5568;
+  /* Induction recommendation / Early maintenance regimen dark focal cards
+     only (.recommendation-dark-card) - not used anywhere else. */
+  --recommendation-dark-navy: #0B235C;
+  --recommendation-dose-green: #63D471;
 }
 
 input[type=number]::-webkit-outer-spin-button,
@@ -1204,6 +1208,162 @@ body {
 .override-dose-section .edit-popover {
   margin-top: 12px;
   grid-column: unset;
+}
+
+/* Dark focal cards: Induction recommendation / Early maintenance regimen.
+   Additive only, isolated to these two cards via two new classes added
+   alongside the existing ones in app.py - no other card or page uses
+   .recommendation-dark-card / .induction-recommendation-card /
+   .maintenance-regimen-card. */
+
+.recommendation-dark-card {
+  background-color: var(--recommendation-dark-navy);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  padding: 18px 20px 16px;
+}
+
+/* Induction recommendation - title, labels, dose text, confidence block. */
+
+.induction-recommendation-card.induction-card {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.induction-recommendation-card .induction-card-title {
+  color: #ffffff;
+}
+
+.induction-recommendation-card .induction-dose-label {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.induction-recommendation-card .induction-dose-label--manual {
+  color: #f0a868;
+}
+
+.induction-recommendation-card .induction-dose-number,
+.induction-recommendation-card .induction-dose-unit,
+.induction-recommendation-card .induction-dose-mgkg {
+  color: var(--recommendation-dose-green);
+}
+
+.induction-recommendation-card .induction-dose-original-note {
+  color: var(--recommendation-dose-green);
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.induction-recommendation-card .induction-confidence-label {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Vertical divider between the dose block and the confidence block. */
+.induction-recommendation-card .induction-confidence-block {
+  border-left: 1px solid rgba(255, 255, 255, 0.16);
+  padding-left: 20px;
+}
+
+.induction-recommendation-card .induction-confidence-tier--high {
+  background-color: rgba(74, 222, 128, 0.18);
+  color: #4ade80;
+}
+
+.induction-recommendation-card .induction-confidence-tier--medium {
+  background-color: rgba(251, 191, 36, 0.18);
+  color: #fbbf24;
+}
+
+.induction-recommendation-card .induction-confidence-tier--low {
+  background-color: rgba(248, 113, 113, 0.18);
+  color: #f87171;
+}
+
+.induction-recommendation-card .induction-confidence-value--high {
+  color: #4ade80;
+}
+
+.induction-recommendation-card .induction-confidence-value--medium {
+  color: #fbbf24;
+}
+
+.induction-recommendation-card .induction-confidence-value--low {
+  color: #f87171;
+}
+
+.induction-recommendation-card .induction-manual-active-box {
+  color: #f0a868;
+  background-color: rgba(240, 168, 104, 0.14);
+  border-color: #f0a868;
+}
+
+.induction-recommendation-card .override-dose-section {
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.induction-recommendation-card .induction-return-btn {
+  background-color: transparent;
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.55);
+}
+
+.induction-recommendation-card .induction-return-btn:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Maintenance regimen - title, subtitle, drug headers, table rows. */
+
+.maintenance-regimen-card.maintenance-card {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.maintenance-regimen-card .maintenance-card-title {
+  color: #ffffff;
+}
+
+.maintenance-regimen-card .maintenance-card-subtitle {
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.maintenance-regimen-card .maintenance-drug-header--propofol {
+  border-color: var(--blue-accent);
+  color: #7fa8ff;
+}
+
+.maintenance-regimen-card .maintenance-drug-header--remifentanil {
+  border-color: #9f7aea;
+  color: #9f7aea;
+}
+
+.maintenance-regimen-card .maintenance-reoptimized-badge {
+  color: #f0a868;
+  background-color: rgba(240, 168, 104, 0.16);
+}
+
+.maintenance-regimen-card .maintenance-divider {
+  border-top: 1px dashed rgba(147, 197, 253, 0.3);
+}
+
+.maintenance-regimen-card .maintenance-interval,
+.maintenance-regimen-card .maintenance-arrow,
+.maintenance-regimen-card .maintenance-rate {
+  border-bottom: 1px solid rgba(147, 197, 253, 0.22);
+}
+
+.maintenance-regimen-card .maintenance-interval,
+.maintenance-regimen-card .maintenance-arrow {
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.maintenance-regimen-card .maintenance-rate {
+  color: #ffffff;
+}
+
+.maintenance-regimen-card .maintenance-rate--pause {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.maintenance-regimen-card .maintenance-empty {
+  color: rgba(255, 255, 255, 0.65);
 }
 
 /* Lightweight "Learn more about the model" link in the Predictions column
