@@ -1235,7 +1235,8 @@ body {
 }
 
 .induction-recommendation-card .induction-dose-label {
-  color: rgba(255, 255, 255, 0.7);
+  color: #ffffff;
+  font-weight: 700;
 }
 
 .induction-recommendation-card .induction-dose-label--manual {
@@ -1254,7 +1255,8 @@ body {
 }
 
 .induction-recommendation-card .induction-confidence-label {
-  color: rgba(255, 255, 255, 0.7);
+  color: #ffffff;
+  font-weight: 700;
 }
 
 /* Vertical divider between the dose block and the confidence block. */
@@ -1349,7 +1351,11 @@ body {
   border-bottom: 1px solid rgba(147, 197, 253, 0.22);
 }
 
-.maintenance-regimen-card .maintenance-interval,
+.maintenance-regimen-card .maintenance-interval {
+  color: #ffffff;
+  font-weight: 700;
+}
+
 .maintenance-regimen-card .maintenance-arrow {
   color: rgba(255, 255, 255, 0.65);
 }
@@ -1359,7 +1365,8 @@ body {
 }
 
 .maintenance-regimen-card .maintenance-rate--pause {
-  color: rgba(255, 255, 255, 0.55);
+  color: #ffffff;
+  font-weight: 700;
 }
 
 .maintenance-regimen-card .maintenance-empty {
