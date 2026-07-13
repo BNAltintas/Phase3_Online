@@ -191,6 +191,16 @@ input[type=number] {
   cursor: help;
 }
 
+/* Model Confidence's own info icon only (induction-confidence-label, in
+   the Recommendation page's dose card) - a little bigger than every other
+   .info-icon in the app so it's easier to see/click, without being
+   visually dominant next to the all-caps label text it sits beside. */
+.info-icon--confidence {
+  width: 15px;
+  height: 15px;
+  font-size: 10px;
+}
+
 /* ---------- Parameter table (click-to-edit) ---------- */
 
 .param-table {
@@ -1000,22 +1010,29 @@ body {
   color: #d9362e;
 }
 
+/* Compact rectangular status box (not a wide one-line pill): two stacked
+   lines ("Manual Dose" / "Active", each its own induction-manual-active-
+   line child) on a fully orange background with white text, sized to its
+   own (short) content rather than a fixed width. */
 .induction-manual-active-box {
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   align-self: flex-start;
   text-align: center;
   font-size: 13px;
   font-weight: 800;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: #c2680f;
-  background-color: rgba(194, 104, 15, 0.08);
+  letter-spacing: 0.02em;
+  color: #ffffff;
+  background-color: #c2680f;
   border: 1.5px solid #c2680f;
   border-radius: 8px;
-  padding: 8px 16px;
-  white-space: nowrap;
+  padding: 10px 20px;
+}
+
+.induction-manual-active-line {
+  line-height: 1.35;
 }
 
 /* ---------- Maintenance regimen card ---------- */
@@ -1249,6 +1266,21 @@ body {
   color: var(--recommendation-dose-green);
 }
 
+/* Manual dose active: the big dose number/unit/mg-kg now shows the manual
+   value, not the model's own recommendation, so it switches to the same
+   orange used everywhere else manual mode is indicated (induction-dose-
+   label--manual, induction-manual-active-box) - overrides the green rule
+   above via a more specific selector, higher priority regardless of
+   source order. induction-dose-original-note (the small "Model
+   recommendation: ..." note shown only in manual mode) intentionally
+   keeps the green rule above untouched - it is the actual model
+   recommendation, so it must stay green. */
+.induction-recommendation-card .induction-dose-value--manual .induction-dose-number,
+.induction-recommendation-card .induction-dose-value--manual .induction-dose-unit,
+.induction-recommendation-card .induction-dose-value--manual .induction-dose-mgkg {
+  color: #f0a868;
+}
+
 .induction-recommendation-card .induction-dose-original-note {
   color: var(--recommendation-dose-green);
   border-top: 1px solid rgba(255, 255, 255, 0.16);
@@ -1293,8 +1325,8 @@ body {
 }
 
 .induction-recommendation-card .induction-manual-active-box {
-  color: #f0a868;
-  background-color: rgba(240, 168, 104, 0.14);
+  color: #ffffff;
+  background-color: #f0a868;
   border-color: #f0a868;
 }
 

@@ -625,7 +625,12 @@ def make_induction_card(original, manual=None, test_patient_key=None):
     style.css), showing the total dose (the
     manual override's dose when one is active, otherwise the model's own
     recommendation) side-by-side with either the model confidence (no
-    override) or a "MANUAL DOSE ACTIVE" status box (override active).
+    override) or a compact two-line "Manual Dose / Active" status box
+    (override active). The big dose number/unit/mg-kg switch to orange
+    (induction-dose-value--manual in style.css) whenever they're showing
+    the manual dose instead of the model's own recommendation; the small
+    "Model recommendation: ..." note shown alongside them in manual mode
+    stays green, since it always names the actual model recommendation.
 
     Model confidence is computed only for the original (free-bolus)
     recommendation, never for a manual override (recommend_maintenance_
@@ -660,8 +665,10 @@ def make_induction_card(original, manual=None, test_patient_key=None):
 
     dose_label_text = "MANUAL TOTAL DOSE" if manual_active else "TOTAL DOSE"
     dose_label_class = "induction-dose-label"
+    dose_value_class = "induction-dose-value"
     if manual_active:
         dose_label_class += " induction-dose-label--manual"
+        dose_value_class += " induction-dose-value--manual"
 
     dose_block_children = [
         html.Div(dose_label_text, className=dose_label_class),
@@ -671,7 +678,7 @@ def make_induction_card(original, manual=None, test_patient_key=None):
                 html.Span(" mg", className="induction-dose-unit"),
                 html.Span(f"({dose_mgkg:.2f} mg/kg)", className="induction-dose-mgkg"),
             ],
-            className="induction-dose-value",
+            className=dose_value_class,
         ),
     ]
     if manual_active:
@@ -687,7 +694,13 @@ def make_induction_card(original, manual=None, test_patient_key=None):
     dose_block = html.Div(dose_block_children, className="induction-dose-block")
 
     if manual_active:
-        right_block = html.Div("MANUAL DOSE ACTIVE", className="induction-manual-active-box")
+        right_block = html.Div(
+            [
+                html.Div("Manual Dose", className="induction-manual-active-line"),
+                html.Div("Active", className="induction-manual-active-line"),
+            ],
+            className="induction-manual-active-box",
+        )
     else:
         tier, shown_percent = _display_confidence_for(test_patient_key, original.confidence_percent)
         tier_class = tier.lower()
@@ -699,7 +712,7 @@ def make_induction_card(original, manual=None, test_patient_key=None):
                         html.Span(
                             "i",
                             title=CONFIDENCE_INFO_TOOLTIP,
-                            className="info-icon",
+                            className="info-icon info-icon--confidence",
                         ),
                     ],
                     className="induction-confidence-label",

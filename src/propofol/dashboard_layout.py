@@ -470,7 +470,7 @@ def build_patient_parameters_card():
     default_patient = PRESET_TEST_PATIENTS["1"]
     return html.Div(
         [
-            _te_card_header(None, "Patient Parameters", icon=_header_icon("user", "te-card-icon")),
+            _te_card_header("fa-user", "Patient Parameters"),
             html.Div(
                 [
                     *param_table_header(),
@@ -548,7 +548,7 @@ def build_medication_settings_card():
     """
     return html.Div(
         [
-            _te_card_header(None, "Medication Settings", icon=_header_icon("pills", "te-card-icon")),
+            _te_card_header("fa-pills", "Medication Settings"),
             # Same label|dropdown row pattern _te_dropdown_field builds for
             # "Select patient" on the Patient Case card above (.te-field-row/
             # .te-field-label/.te-field-dropdown) rather than field_block's
@@ -636,7 +636,7 @@ def build_model_targets_card():
     """
     return html.Div(
         [
-            _te_card_header(None, "Model Targets", icon=_header_icon("target", "te-card-icon")),
+            _te_card_header("fa-bullseye", "Model Targets"),
             html.Div(
                 [
                     *param_table_header(show_date=False),
@@ -857,7 +857,7 @@ def build_patient_id_card():
     """
     return html.Div(
         [
-            _te_card_header(None, "Patient Case", icon=_header_icon("id-card", "te-card-icon")),
+            _te_card_header("fa-id-card", "Patient Case"),
             _te_dropdown_field("Select patient", "rec-patient-dropdown", PR_CASE_OPTIONS, "1"),
         ],
         className="card te-card",
@@ -1507,13 +1507,14 @@ def _te_dropdown_field(label: str, dropdown_id: str, options: list, value, narro
 def _te_card_header(icon_class: str | None, title: str, icon: object = None):
     """
     Icon + all-caps title shown at the top of every Test Exploration card,
-    with a divider beneath it. Every existing caller passes a Font Awesome
-    icon_class string, unchanged. The Recommendation page's own Patient
-    Case card instead passes icon=_header_icon(...) (a pre-built
-    html.Img), with icon_class left as None, for the custom thin-outline
-    look shared with Input Parameters/Model Settings - see the
-    _header_icon comment above for why those three use hand-drawn SVG
-    instead of a Font Awesome class.
+    with a divider beneath it. Every caller now passes a Font Awesome
+    icon_class string (the Recommendation page's Patient Case/Patient
+    Parameters/Medication Settings/Model Targets cards included, matching
+    the same fa-id-card/fa-user/fa-pills/fa-bullseye icons the Precomputed
+    Remi page's own equivalent cards already use). The optional icon
+    argument (a pre-built component, e.g. from _header_icon) still exists
+    for any future caller that needs something other than a plain Font
+    Awesome glyph, but nothing currently passes it.
     """
     return html.Div(
         [
