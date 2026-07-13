@@ -13,9 +13,13 @@ from propofol.config import (
 )
 from propofol.haemo_pd_su2023 import SuHaemoPD
 from propofol.patient import EleveldPatient as Patient
-from propofol.propofol_pkpd import EleveldPD
 from propofol.propofol_pkpd import EleveldPK as PropofolPK
+from propofol.propofol_pkpd import EleveldPD as PropofolPD
 from propofol.remifentanil_pkpd import EleveldPK as RemifentanilPK
+from propofol.remifentanil_pkpd import EleveldPD as RemifentanilPD
+from propofol.remifentanil_pkpd import PKPDSolver as RemifentanilPKPDSolver
+from propofol.propofol_remi_BIS import ResponseSurfaceBIS
+from propofol.propofol_remi_laryngoscopy import ResponseSurfaceLaryngoscopy
 
 # ============================================================
 # Fixed recommendation settings
@@ -31,6 +35,22 @@ TARGET_ASSESSMENT_START_MIN = 2.5
 TARGET_BIS_LOW = 40.0
 TARGET_BIS_HIGH = 60.0
 TARGET_BIS_MID = 50.0
+
+# Stricter BIS-shaping settings.
+# The optimizer treats BIS > 60 after 2.5 min as a near-hard failure.
+# Within the acceptable 40-60 range it strongly prefers trajectories close to 50,
+# and especially discourages "barely acceptable" light anaesthesia around 55-60.
+TARGET_BIS_SOFT_LOW = 45.0
+TARGET_BIS_SOFT_HIGH = 55.0
+BIS_HARD_HIGH_BASE_PENALTY = 1e15
+BIS_HARD_LOW_BASE_PENALTY = 1e12
+BIS_MAP_BASE_PENALTY = 1e10
+
+# Target probability of tolerance to laryngoscopy/intubation.
+# This is evaluated after TARGET_ASSESSMENT_START_MIN and has the same
+# hierarchy level as the haemodynamic MAP target.
+TARGET_LARYNGOSCOPY_TOLERANCE_PERCENT = 50.0
+
 MAP_ABS_MIN_TARGET = 65.0
 MAP_REL_FRAC_TARGET = 0.70
 
@@ -43,13 +63,13 @@ CONFIDENCE_HIGH_PERCENTILE = 95.0
 # the number of Powell starts, never more than 5.
 OPTIMIZATION_MODE = "auto"
 OPTIMIZATION_BASE_SEED = 42
-POWELL_MAXITER_PROPOFOL_ONLY = 65
-POWELL_MAXITER_WITH_REMI = 85
-POWELL_MAXFEV_PROPOFOL_ONLY = 260
-POWELL_MAXFEV_WITH_REMI = 390
+POWELL_MAXITER_PROPOFOL_ONLY = 80
+POWELL_MAXITER_WITH_REMI = 110
+POWELL_MAXFEV_PROPOFOL_ONLY = 340
+POWELL_MAXFEV_WITH_REMI = 560
 
-# At most two active maintenance segments are allowed. A zero-rate pause at the
-# start is allowed before segment 1.
+# At most two active propofol maintenance segments are allowed. A zero-rate
+# propofol pause is allowed only at the beginning before segment 1.
 MAX_MAINTENANCE_RATE_CHANGES = 2
 MAX_INITIAL_PAUSE_MIN = 3.0
 MIN_SWITCH_MIN = TARGET_ASSESSMENT_START_MIN
@@ -59,11 +79,16 @@ MAX_SWITCH_MIN = float(SIM_MINUTES)
 PROPOFOL_BOLUS_STEP_MG = 5.0
 PUMP_RATE_STEP_ML_H = 1.0
 
+# Propofol maintenance may have an optional initial pause only. Once the
+# maintenance infusion has started, active propofol segments are not allowed
+# to round down to 0 mL/h, because that would create a later unintended pause.
+PROPOFOL_MIN_ACTIVE_PUMP_RATE_ML_H = 1.0
+
 # Default concentrations. The app can override these.
 DEFAULT_PROPOFOL_CONC_MG_ML = 10.0
 DEFAULT_REMI_CONC_MCG_ML = 50.0
 
-# Remifentanil is maintenance-only in this version.
+# Remifentanil is maintenance-only in this version: optional initial pause, then one constant rate.
 REMI_INFUSION_MCGKGMIN_BOUNDS = (0.0, 0.50)
 
 PROPOFOL_BOLUS_DURATION_MIN = 1.0 / 60.0
@@ -153,6 +178,30 @@ def validate_concentrations(
     return prop, remi
 
 
+def prop_min_active_mgkgh(
+    weight_kg: float,
+    conc_mg_ml: float,
+    min_active_pump_rate_ml_h: float = PROPOFOL_MIN_ACTIVE_PUMP_RATE_ML_H,
+) -> float:
+    """Return the minimum active propofol rate in mg/kg/h.
+
+    This corresponds to the smallest non-zero pump rate allowed after rounding.
+    It is used to prevent a second propofol pause after maintenance has started.
+    """
+    weight_kg = float(weight_kg)
+    conc_mg_ml = float(conc_mg_ml)
+    min_active_pump_rate_ml_h = float(min_active_pump_rate_ml_h)
+
+    if weight_kg <= 0:
+        raise ValueError("weight_kg must be positive.")
+    if conc_mg_ml <= 0:
+        raise ValueError("conc_mg_ml must be positive.")
+    if min_active_pump_rate_ml_h <= 0:
+        raise ValueError("min_active_pump_rate_ml_h must be positive.")
+
+    return min_active_pump_rate_ml_h * conc_mg_ml / weight_kg
+
+
 # ============================================================
 # Unit conversions
 # ============================================================
@@ -227,8 +276,10 @@ def make_pause_two_segment_schedule(
         3. active segment 2, rate_2
 
     This permits at most two active maintenance segments while allowing a pause
-    immediately after induction. Minute intervals are assigned using their
-    midpoint, so a pause of 1.5 min pauses approximately the first two minutes.
+    immediately after induction only. To avoid later unintended pauses, the
+    optimizer should pass strictly positive active rates for rate_1 and rate_2.
+    Minute intervals are assigned using their midpoint, so a pause of 1.5 min
+    pauses approximately the first two minutes.
     """
     pause_min = float(np.clip(pause_min, 0.0, float(n_minutes)))
     switch_min = float(np.clip(switch_min, 0.0, float(n_minutes)))
@@ -242,6 +293,28 @@ def make_pause_two_segment_schedule(
     rates = np.zeros(n_minutes, dtype=float)
     rates[(midpoints >= pause_min) & (midpoints < switch_min)] = rate_1
     rates[midpoints >= switch_min] = rate_2
+    return rates
+
+
+def make_pause_constant_schedule(
+    pause_min: float,
+    rate: float,
+    n_minutes: int = N_INTERVALS,
+) -> np.ndarray:
+    """
+    Make a minute-wise schedule with:
+        1. optional initial pause, rate = 0
+        2. one constant maintenance rate for the remainder of the window
+
+    This is used for remifentanil. It returns an array of length n_minutes so
+    downstream dosing, plotting, and reporting code can stay unchanged.
+    """
+    pause_min = float(np.clip(pause_min, 0.0, float(n_minutes)))
+    rate = max(float(rate), 0.0)
+
+    midpoints = np.arange(n_minutes, dtype=float) + 0.5
+    rates = np.zeros(n_minutes, dtype=float)
+    rates[midpoints >= pause_min] = rate
     return rates
 
 
@@ -405,6 +478,10 @@ class ConfidenceResult:
     cp_remifentanil_p50: Optional[np.ndarray] = None
     cp_remifentanil_p95: Optional[np.ndarray] = None
 
+    laryngoscopy_tolerance_p05: Optional[np.ndarray] = None
+    laryngoscopy_tolerance_p50: Optional[np.ndarray] = None
+    laryngoscopy_tolerance_p95: Optional[np.ndarray] = None
+
 
 @dataclass
 class RecommendationResult:
@@ -443,10 +520,12 @@ class RecommendationResult:
     cp_remifentanil: Optional[np.ndarray]
     bis: np.ndarray
     map_mmhg: np.ndarray
+    laryngoscopy_tolerance_percent: np.ndarray
 
     map_lower_bound_mmhg: float
     feasible_bis: bool
     feasible_map: bool
+    feasible_laryngoscopy: bool
     feasible: bool
 
     # Actual target values used for this specific run (may differ from the
@@ -457,6 +536,7 @@ class RecommendationResult:
     target_bis_high: float
     map_abs_min_target_mmhg: float
     map_rel_frac_target: float
+    target_laryngoscopy_tolerance_percent: float
 
     confidence: ConfidenceResult
     confidence_percent: float
@@ -523,18 +603,61 @@ def extract_su2023_output(
     return a1_prop, ce_prop, map_model, a1_remi
 
 
+def solve_remifentanil_effect_site_for_bis(
+    t_grid: np.ndarray,
+    dosing_remi: Optional[PiecewiseWeightScaledDosing],
+    pk_remi: RemifentanilPK,
+    pd_remi: RemifentanilPD,
+) -> tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    """Simulate remifentanil Cp and Ce for the BIS response-surface model.
+
+    The Su2023 model is still used for MAP. This helper uses the dedicated
+    remifentanil PK/PD solver to compute remifentanil effect-site
+    concentration for the additive BIS response surface.
+
+    Units
+    -----
+    A1, A2, A3 : microgram
+    Cp, Ce     : microgram/L, numerically equal to ng/mL
+    """
+    if dosing_remi is None:
+        return None, None
+
+    solver = RemifentanilPKPDSolver(
+        patient=getattr(pk_remi, "patient", None),
+        pk=pk_remi,
+        pd=pd_remi,
+    )
+
+    states = solver(
+        t=np.asarray(t_grid, dtype=float),
+        y0=[0.0, 0.0, 0.0, 0.0],
+        dosing=dosing_remi,
+    )
+
+    cp_remi = solver.central_concentration(states)
+    ce_remi = solver.effect_site_concentration(states)
+
+    return cp_remi, ce_remi
+
 def trajectory_target_flags(
     t: Sequence[float],
     bis: Sequence[float],
     map_mmhg: Sequence[float],
     map_lower_bound: float,
+    laryngoscopy_tolerance_percent: Optional[Sequence[float]] = None,
     bis_low: float = TARGET_BIS_LOW,
     bis_high: float = TARGET_BIS_HIGH,
-) -> tuple[bool, bool, bool]:
+    target_laryngoscopy_tolerance_percent: float = TARGET_LARYNGOSCOPY_TOLERANCE_PERCENT,
+) -> tuple[bool, bool, bool, bool]:
     """
     Target definition after the post-induction onset period:
         BIS trajectory must stay between bis_low and bis_high.
         MAP trajectory must stay >= map_lower_bound.
+        Laryngoscopy tolerance probability must stay >= target percentage.
+
+    If laryngoscopy_tolerance_percent is None, the laryngoscopy target is
+    treated as satisfied. In normal recommender use this array is provided.
     """
     t = np.asarray(t, dtype=float)
     bis = np.asarray(bis, dtype=float)
@@ -542,22 +665,34 @@ def trajectory_target_flags(
     mask = assessment_mask(t)
 
     if not np.any(mask):
-        return False, False, False
+        return False, False, False, False
 
     bis_eval = bis[mask]
     map_eval = map_mmhg[mask]
 
     if len(bis_eval) == 0 or len(map_eval) == 0:
-        return False, False, False
+        return False, False, False, False
 
     if np.any(~np.isfinite(bis_eval)) or np.any(~np.isfinite(map_eval)):
-        return False, False, False
+        return False, False, False, False
 
     feasible_bis = bool(np.all((bis_eval >= bis_low) & (bis_eval <= bis_high)))
     feasible_map = bool(np.all(map_eval >= float(map_lower_bound)))
-    feasible = bool(feasible_bis and feasible_map)
 
-    return feasible_bis, feasible_map, feasible
+    feasible_laryngoscopy = True
+    if laryngoscopy_tolerance_percent is not None:
+        lary = np.asarray(laryngoscopy_tolerance_percent, dtype=float)
+        lary_eval = lary[mask]
+        if len(lary_eval) == 0 or np.any(~np.isfinite(lary_eval)):
+            feasible_laryngoscopy = False
+        else:
+            feasible_laryngoscopy = bool(
+                np.all(lary_eval >= float(target_laryngoscopy_tolerance_percent))
+            )
+
+    feasible = bool(feasible_bis and feasible_map and feasible_laryngoscopy)
+
+    return feasible_bis, feasible_map, feasible_laryngoscopy, feasible
 
 
 def percentile_band(values: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -604,6 +739,9 @@ def _skipped_confidence_result(time_min: np.ndarray) -> ConfidenceResult:
         cp_remifentanil_p05=nan_arr.copy(),
         cp_remifentanil_p50=nan_arr.copy(),
         cp_remifentanil_p95=nan_arr.copy(),
+        laryngoscopy_tolerance_p05=nan_arr.copy(),
+        laryngoscopy_tolerance_p50=nan_arr.copy(),
+        laryngoscopy_tolerance_p95=nan_arr.copy(),
     )
 
 
@@ -626,6 +764,7 @@ class Su2023PropofolRemifentanilRecommender:
         target_bis_high: float = TARGET_BIS_HIGH,
         map_abs_min_target: float = MAP_ABS_MIN_TARGET,
         map_rel_frac_target: float = MAP_REL_FRAC_TARGET,
+        target_laryngoscopy_tolerance_percent: float = TARGET_LARYNGOSCOPY_TOLERANCE_PERCENT,
         fixed_bolus_mgkg: Optional[float] = None,
         fixed_remi_rate_mcgkgmin: Optional[float] = None,
         map_output_index: int = SU2023_MAP_OUTPUT_INDEX,
@@ -641,11 +780,8 @@ class Su2023PropofolRemifentanilRecommender:
         )
 
         # When set (and use_remifentanil is True), the remifentanil
-        # maintenance rate is pinned to this single constant value (mcg/kg/
-        # min, no pause, one rate for the full 15 minutes) and only the
-        # propofol bolus + propofol maintenance are optimized - see
-        # build_bounds(). None (the default) preserves the original, fully
-        # free remifentanil-schedule search used by every existing call site.
+        # maintenance rate is pinned to this single constant value (mcg/kg/min).
+        # The initial remifentanil pause may still be optimized.
         self.fixed_remi_rate_mcgkgmin = (
             float(fixed_remi_rate_mcgkgmin) if fixed_remi_rate_mcgkgmin is not None else None
         )
@@ -666,14 +802,25 @@ class Su2023PropofolRemifentanilRecommender:
         self.target_bis_mid = (self.target_bis_low + self.target_bis_high) / 2.0
         self.map_abs_min_target = float(map_abs_min_target)
         self.map_rel_frac_target = float(map_rel_frac_target)
+        self.target_laryngoscopy_tolerance_percent = float(target_laryngoscopy_tolerance_percent)
+        if not (0.0 <= self.target_laryngoscopy_tolerance_percent <= 100.0):
+            raise ValueError("target_laryngoscopy_tolerance_percent must be between 0 and 100.")
 
         self.map_output_index = int(map_output_index)
         self.remi_a1_output_index = int(remi_a1_output_index)
         self.seed = int(seed)
         self._objective_cache: dict[tuple[float, ...], float] = {}
 
-        self.opiates_for_bis_pd = bool(self.use_remifentanil)
-        self.patient = set_patient_opiates(patient, self.opiates_for_bis_pd)
+        # General patient object used for PK and the haemodynamic Su2023 model.
+        # If remifentanil is selected, this flag can still be available to the
+        # haemodynamic pathway.
+        self.patient = set_patient_opiates(patient, bool(self.use_remifentanil))
+
+        # Separate BIS patient object: do NOT use the binary Eleveld opioid
+        # covariate for BIS. Remifentanil is attached explicitly through the
+        # response-surface multiplier in predict_bis().
+        self.opiates_for_bis_pd = False
+        self.patient_for_bis = set_patient_opiates(patient, False)
 
         self.weight_kg = float(self.patient.weight)
         self.baseline_map = float(self.patient.base_map)
@@ -682,8 +829,33 @@ class Su2023PropofolRemifentanilRecommender:
         )
 
         self.pk_prop = PropofolPK(patient=self.patient, use_bsv=self.use_bsv)
-        self.pd_prop = EleveldPD(patient=self.patient, use_bsv=self.use_bsv)
+        self.pd_prop = PropofolPD(patient=self.patient, use_bsv=self.use_bsv)
+
+        # BIS backbone: Eleveld propofol PD without binary opioid-present effect.
+        self.pd_prop_bis = PropofolPD(patient=self.patient_for_bis, use_bsv=self.use_bsv)
+
         self.pk_remi = RemifentanilPK(patient=self.patient, use_bsv=self.use_bsv)
+        self.pd_remi = self._instantiate_remifentanil_pd()
+
+        # Used only for the incremental remifentanil effect on BIS. The final
+        # BIS trajectory is:
+        #   Eleveld_propofol_BIS(Ce_prop)
+        #   * [ResponseSurfaceBIS(Ce_prop, Ce_remi) /
+        #      ResponseSurfaceBIS(Ce_prop, 0)]
+        self.bis_response_surface = (
+            ResponseSurfaceBIS(patient=self.patient_for_bis, use_bsv=self.use_bsv)
+            if self.use_remifentanil
+            else None
+        )
+
+        # Separate response surface for the probability of tolerance to
+        # laryngoscopy/intubation. It is evaluated for propofol-only and
+        # propofol-remifentanil regimens. For propofol-only, Ce_remi = 0.
+        self.laryngoscopy_tolerance_model = ResponseSurfaceLaryngoscopy(
+            patient=self.patient_for_bis,
+            use_bsv=self.use_bsv,
+        )
+
         self.haemo = self._instantiate_haemo()
 
     def _instantiate_haemo(self) -> SuHaemoPD:
@@ -713,12 +885,129 @@ class Su2023PropofolRemifentanilRecommender:
                     pd_propofol=self.pd_prop,
                 )
 
+    def _instantiate_remifentanil_pd(self) -> RemifentanilPD:
+        """Instantiate remifentanil PD while tolerating local signature differences."""
+        try:
+            return RemifentanilPD(patient=self.patient, use_bsv=self.use_bsv)
+        except TypeError:
+            return RemifentanilPD(patient=self.patient)
+
+    def _predict_response_surface_bis(
+        self,
+        ce_prop: Sequence[float],
+        ce_remi: Sequence[float],
+    ) -> np.ndarray:
+        """Call ResponseSurfaceBIS while tolerating local method-name differences."""
+        ce_prop = np.asarray(ce_prop, dtype=float)
+        ce_remi = np.asarray(ce_remi, dtype=float)
+
+        if self.bis_response_surface is None:
+            raise RuntimeError("BIS response-surface model was not initialized.")
+
+        if hasattr(self.bis_response_surface, "compute_bis"):
+            return np.asarray(
+                self.bis_response_surface.compute_bis(
+                    Ce_prop=ce_prop,
+                    Ce_remi=ce_remi,
+                ),
+                dtype=float,
+            )
+
+        return np.asarray(
+            self.bis_response_surface(ce_prop, ce_remi),
+            dtype=float,
+        )
+
+    def predict_bis(
+        self,
+        ce_prop: Sequence[float],
+        ce_remi: Optional[Sequence[float]] = None,
+    ) -> np.ndarray:
+        """Predict BIS using Eleveld propofol BIS with response-surface remifentanil attachment.
+
+        Propofol only:
+            BIS = Eleveld propofol BIS(Ce_prop)
+
+        Propofol + remifentanil:
+            1. Predict propofol-only BIS with Eleveld.
+            2. Use ResponseSurfaceBIS to estimate the relative BIS-lowering
+               effect of remifentanil at the same propofol Ce.
+            3. Attach that relative effect to the Eleveld propofol BIS trajectory.
+
+        This preserves the Eleveld propofol-only BIS prediction exactly while
+        making remifentanil concentration-dependent.
+        """
+        ce_prop = np.asarray(ce_prop, dtype=float)
+
+        # Base BIS trajectory: Eleveld propofol-only PD, without binary opioid
+        # covariate.
+        bis_eleveld_prop = np.asarray(self.pd_prop_bis.bis(ce_prop), dtype=float)
+
+        if not self.use_remifentanil or ce_remi is None:
+            return np.clip(bis_eleveld_prop, 0.0, 100.0)
+
+        ce_remi = np.asarray(ce_remi, dtype=float)
+
+        # Response-surface propofol-only prediction.
+        bis_rs_prop_only = self._predict_response_surface_bis(
+            ce_prop=ce_prop,
+            ce_remi=np.zeros_like(ce_prop, dtype=float),
+        )
+
+        # Response-surface propofol + remifentanil prediction.
+        bis_rs_prop_remi = self._predict_response_surface_bis(
+            ce_prop=ce_prop,
+            ce_remi=ce_remi,
+        )
+
+        # Incremental remifentanil effect according to the response surface.
+        # If remifentanil lowers BIS, this multiplier is between 0 and 1.
+        denominator = np.maximum(bis_rs_prop_only, 1e-6)
+        remi_multiplier = bis_rs_prop_remi / denominator
+        remi_multiplier = np.clip(remi_multiplier, 0.0, 1.0)
+
+        bis = bis_eleveld_prop * remi_multiplier
+
+        return np.clip(bis, 0.0, 100.0)
+
+
+    def predict_laryngoscopy_tolerance(
+        self,
+        ce_prop: Sequence[float],
+        ce_remi: Optional[Sequence[float]] = None,
+    ) -> np.ndarray:
+        """Predict probability of tolerance to laryngoscopy/intubation.
+
+        Returns
+        -------
+        numpy.ndarray
+            Probability of tolerance as percentage from 0 to 100.
+
+        Notes
+        -----
+        For propofol-only regimens, Ce_remi is set to zero. For
+        propofol-remifentanil regimens, raw remifentanil Ce is used in ng/mL.
+        """
+        ce_prop = np.asarray(ce_prop, dtype=float)
+
+        if ce_remi is None:
+            ce_remi_arr = np.zeros_like(ce_prop, dtype=float)
+        else:
+            ce_remi_arr = np.asarray(ce_remi, dtype=float)
+
+        p_tolerance = self.laryngoscopy_tolerance_model.compute_probability(
+            Ce_prop=ce_prop,
+            Ce_remi=ce_remi_arr,
+        )
+
+        return np.asarray(np.clip(p_tolerance, 0.0, 100.0), dtype=float)
+
     @property
     def n_parameters(self) -> int:
         """Return the number of optimization parameters for the active model."""
-        # Propofol: bolus, pause, switch, rate1, rate2.
-        # Remifentanil, if selected: pause, switch, rate1, rate2.
-        return 5 + (4 if self.use_remifentanil else 0)
+        # Propofol: bolus, initial pause, switch, active rate1, active rate2.
+        # Remifentanil, if selected: pause, one constant rate.
+        return 5 + (2 if self.use_remifentanil else 0)
 
     def build_bounds(self) -> list[tuple[float, float]]:
         """
@@ -726,14 +1015,9 @@ class Su2023PropofolRemifentanilRecommender:
 
         When self.fixed_bolus_mgkg is set, the bolus bound collapses to a
         single point. When self.fixed_remi_rate_mcgkgmin is set, the
-        remifentanil pause bound collapses to 0 (no pause - a single
-        constant rate from t=0) and both remifentanil rate bounds collapse
-        to that same point (so rate_1 == rate_2, a flat rate for the whole
-        window regardless of the free "switch" time). clip_x_to_bounds()
-        (used by every downstream consumer of the parameter vector:
-        _split_x, initial_vectors, the Powell search itself) then pins
-        those parameters to their fixed values on every iteration, so only
-        the remaining free parameters are actually searched.
+        remifentanil rate bound collapses to that value, while the initial
+        pause remains free. clip_x_to_bounds() is used by every downstream
+        consumer of the parameter vector.
         """
         bolus_bounds = (
             (self.fixed_bolus_mgkg, self.fixed_bolus_mgkg)
@@ -741,30 +1025,44 @@ class Su2023PropofolRemifentanilRecommender:
             else BOLUS_MGKG_BOUNDS
         )
 
+        prop_active_min_mgkgh = max(
+            float(INFUSION_MGKGH_BOUNDS[0]),
+            prop_min_active_mgkgh(
+                weight_kg=self.weight_kg,
+                conc_mg_ml=self.propofol_conc_mg_ml,
+            ),
+        )
+        prop_active_bounds = (
+            prop_active_min_mgkgh,
+            float(INFUSION_MGKGH_BOUNDS[1]),
+        )
+        if prop_active_bounds[0] > prop_active_bounds[1]:
+            raise ValueError(
+                "Minimum active propofol rate exceeds the configured upper infusion bound."
+            )
+
         bounds: list[tuple[float, float]] = [
             bolus_bounds,
             (0.0, MAX_INITIAL_PAUSE_MIN),
             (MIN_SWITCH_MIN, MAX_SWITCH_MIN),
-            INFUSION_MGKGH_BOUNDS,
-            INFUSION_MGKGH_BOUNDS,
+            prop_active_bounds,
+            prop_active_bounds,
         ]
 
         if self.use_remifentanil:
-            if self.fixed_remi_rate_mcgkgmin is not None:
-                remi_rate_bounds = (self.fixed_remi_rate_mcgkgmin, self.fixed_remi_rate_mcgkgmin)
-                bounds += [
-                    (0.0, 0.0),
-                    (MIN_SWITCH_MIN, MAX_SWITCH_MIN),
-                    remi_rate_bounds,
-                    remi_rate_bounds,
-                ]
-            else:
-                bounds += [
-                    (0.0, MAX_INITIAL_PAUSE_MIN),
-                    (MIN_SWITCH_MIN, MAX_SWITCH_MIN),
-                    REMI_INFUSION_MCGKGMIN_BOUNDS,
-                    REMI_INFUSION_MCGKGMIN_BOUNDS,
-                ]
+            remi_rate_bounds = (
+                (self.fixed_remi_rate_mcgkgmin, self.fixed_remi_rate_mcgkgmin)
+                if self.fixed_remi_rate_mcgkgmin is not None
+                else REMI_INFUSION_MCGKGMIN_BOUNDS
+            )
+
+            # Remifentanil has only two optimization parameters:
+            #   1. optional initial pause
+            #   2. one constant maintenance rate after the pause
+            bounds += [
+                (0.0, MAX_INITIAL_PAUSE_MIN),
+                remi_rate_bounds,
+            ]
 
         return bounds
 
@@ -790,7 +1088,7 @@ class Su2023PropofolRemifentanilRecommender:
     def _split_x(
         self,
         x: Sequence[float],
-    ) -> tuple[float, float, float, float, float, Optional[tuple[float, float, float, float]]]:
+    ) -> tuple[float, float, float, float, float, Optional[tuple[float, float]]]:
         """
         Split the optimization parameter vector into individual components.
         """
@@ -805,10 +1103,8 @@ class Su2023PropofolRemifentanilRecommender:
         remi_params = None
         if self.use_remifentanil:
             remi_params = (
-                float(x[5]),
-                float(x[6]),
-                float(x[7]),
-                float(x[8]),
+                float(x[5]),  # initial pause in minutes
+                float(x[6]),  # one constant rate after pause
             )
 
         return (
@@ -863,6 +1159,18 @@ class Su2023PropofolRemifentanilRecommender:
             else prop_rates_ml_h_raw
         )
         prop_rates_ml_h = np.clip(prop_rates_ml_h, 0.0, None)
+
+        # Allow zero only during the explicit initial propofol pause. Once the
+        # propofol maintenance infusion starts, active segments must remain
+        # non-zero; otherwise clinical rounding can create an unintended later
+        # pause when a small positive optimizer rate rounds to 0 mL/h.
+        prop_active_mask = prop_rates_mgkgh_raw > 0.0
+        if np.any(prop_active_mask):
+            prop_rates_ml_h[prop_active_mask] = np.maximum(
+                prop_rates_ml_h[prop_active_mask],
+                PROPOFOL_MIN_ACTIVE_PUMP_RATE_ML_H,
+            )
+
         prop_rates_mgkgh = prop_ml_h_to_mgkgh(
             prop_rates_ml_h,
             self.weight_kg,
@@ -883,14 +1191,13 @@ class Su2023PropofolRemifentanilRecommender:
         if remi_params is None:
             raise RuntimeError("Remifentanil selected but maintenance parameters are missing.")
 
-        remi_pause_min, remi_switch_min, remi_rate_1, remi_rate_2 = remi_params
+        remi_pause_min, remi_rate = remi_params
 
         # Remifentanil maintenance only. There is deliberately no bolus.
-        remi_rates_mcgkgmin_raw = make_pause_two_segment_schedule(
+        # Only one rate is recommended, with an optional initial pause.
+        remi_rates_mcgkgmin_raw = make_pause_constant_schedule(
             pause_min=remi_pause_min,
-            switch_min=remi_switch_min,
-            rate_1=remi_rate_1,
-            rate_2=remi_rate_2,
+            rate=remi_rate,
         )
         remi_rates_ml_h_raw = remi_mcgkgmin_to_ml_h(
             remi_rates_mcgkgmin_raw,
@@ -924,12 +1231,12 @@ class Su2023PropofolRemifentanilRecommender:
             remifentanil_rates_ngkgmin=remi_rates_ngkgmin,
         )
 
-    def simulate_regimen(
+    def _simulate_regimen_full(
         self,
         regimen: DecodedRegimen,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, Optional[np.ndarray], np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, Optional[np.ndarray], np.ndarray, np.ndarray, np.ndarray]:
         """
-        Simulate the PK/PD and MAP response for a given regimen.
+        Simulate the PK/PD, BIS, laryngoscopy tolerance, and MAP response for a given regimen.
         """
         dosing_prop = PiecewiseWeightScaledDosing(
             bolus_amount=regimen.propofol_bolus_mg,
@@ -968,22 +1275,68 @@ class Su2023PropofolRemifentanilRecommender:
 
         cp_prop = np.asarray(a1_prop, dtype=float) / float(self.pk_prop.V1)
         ce_prop = np.asarray(ce_prop, dtype=float)
-        bis = np.asarray(self.pd_prop.bis(ce_prop), dtype=float)
+
+        cp_remi = None
+        ce_remi = None
+        if regimen.remifentanil_selected:
+            # For BIS we need remifentanil effect-site concentration, not only Cp.
+            # Units returned here are ng/mL because microgram/L == ng/mL.
+            cp_remi, ce_remi = solve_remifentanil_effect_site_for_bis(
+                t_grid=TIME,
+                dosing_remi=dosing_remi,
+                pk_remi=self.pk_remi,
+                pd_remi=self.pd_remi,
+            )
+
+            # Fallback only for display if the separate solve failed but Su2023
+            # returned remifentanil A1. BIS then uses the propofol-only Eleveld
+            # backbone because ce_remi is unavailable.
+            if cp_remi is None and a1_remi is not None:
+                cp_remi = np.asarray(a1_remi, dtype=float) / float(self.pk_remi.V1)
+
+        bis = self.predict_bis(ce_prop=ce_prop, ce_remi=ce_remi)
+        laryngoscopy_tolerance_percent = self.predict_laryngoscopy_tolerance(
+            ce_prop=ce_prop,
+            ce_remi=ce_remi,
+        )
 
         map_model = np.asarray(map_model, dtype=float)
         if len(map_model) == 0 or not np.isfinite(map_model[0]) or map_model[0] <= 0:
             raise ValueError("Initial Su2023 MAP model output is non-positive or invalid.")
         map_mmhg = self.baseline_map * (map_model / map_model[0])
 
-        cp_remi = None
-        if regimen.remifentanil_selected:
-            if a1_remi is not None:
-                # A1_remi is in microgram and V1 is in L; microgram/L = ng/mL.
-                cp_remi = np.asarray(a1_remi, dtype=float) / float(self.pk_remi.V1)
-            else:
-                cp_remi = np.full_like(TIME, np.nan, dtype=float)
+        return TIME, cp_prop, ce_prop, cp_remi, bis, map_mmhg, laryngoscopy_tolerance_percent
 
-        return TIME, cp_prop, ce_prop, cp_remi, bis, map_mmhg
+    def _simulate_x_full(
+        self,
+        x: Sequence[float],
+        apply_final_rounding: bool,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, Optional[np.ndarray], np.ndarray, np.ndarray,
+               np.ndarray, DecodedRegimen]:
+        """
+        Simulate the PK/PD and MAP response for a given optimization parameter vector.
+        """
+        regimen = self.decode_regimen(x, apply_final_rounding=apply_final_rounding)
+        t, cp_prop, ce_prop, cp_remi, bis, map_mmhg, laryngoscopy_tolerance_percent = self._simulate_regimen_full(regimen)
+        return t, cp_prop, ce_prop, cp_remi, bis, map_mmhg, laryngoscopy_tolerance_percent, regimen
+
+    def simulate_regimen(
+        self,
+        regimen: DecodedRegimen,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, Optional[np.ndarray], np.ndarray, np.ndarray]:
+        """
+        Backward-compatible public simulation method.
+
+        Returns the original six outputs expected by existing plotting code:
+            time, Cp_prop, Ce_prop, Cp_remi, BIS, MAP
+
+        The laryngoscopy-tolerance trajectory is still computed internally by
+        _simulate_regimen_full() for optimization and confidence simulation.
+        """
+        t, cp_prop, ce_prop, cp_remi, bis, map_mmhg, _lary = self._simulate_regimen_full(
+            regimen
+        )
+        return t, cp_prop, ce_prop, cp_remi, bis, map_mmhg
 
     def simulate_x(
         self,
@@ -992,60 +1345,78 @@ class Su2023PropofolRemifentanilRecommender:
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, Optional[np.ndarray], np.ndarray, np.ndarray,
                DecodedRegimen]:
         """
-        Simulate the PK/PD and MAP response for a given optimization parameter vector.
+        Backward-compatible public parameter-vector simulation method.
+
+        Returns the original seven outputs expected by older plotting/debug code:
+            time, Cp_prop, Ce_prop, Cp_remi, BIS, MAP, decoded_regimen
         """
-        regimen = self.decode_regimen(x, apply_final_rounding=apply_final_rounding)
-        t, cp_prop, ce_prop, cp_remi, bis, map_mmhg = self.simulate_regimen(regimen)
+        (
+            t,
+            cp_prop,
+            ce_prop,
+            cp_remi,
+            bis,
+            map_mmhg,
+            _lary,
+            regimen,
+        ) = self._simulate_x_full(x, apply_final_rounding=apply_final_rounding)
         return t, cp_prop, ce_prop, cp_remi, bis, map_mmhg, regimen
+
 
     def trajectory_penalty(  # noqa: C901
         self,
         t: np.ndarray,
         bis: np.ndarray,
         map_mmhg: np.ndarray,
+        laryngoscopy_tolerance_percent: np.ndarray,
         regimen: DecodedRegimen,
     ) -> float:
         """
-        Hierarchical objective for the deterministic optimizer.
+        Strict hierarchical objective for the deterministic optimizer.
 
-        Priority order after TARGET_ASSESSMENT_START_MIN (bounds are
-        self.target_bis_low/high and self.map_lower_bound, which default to
-        the module constants but may be user-configured per run):
-            1. Avoid BIS above the upper target at any time point. This is
-               the highest-priority violation and receives a near-hard
-               penalty.
-            2. Avoid BIS below the lower target at any time point. This is
-               still strongly penalized, but less strongly than #1.
-            3. Avoid MAP below the MAP lower bound.
-            4. Among target-satisfying regimens, prefer BIS around the
-               target midpoint, lower drug exposure, and simpler pump
-               schedules.
+        Priority order after TARGET_ASSESSMENT_START_MIN:
+            1. Near-hard constraint: BIS must never exceed target_bis_high.
+               BIS > 60 after 2.5 min receives an enormous penalty.
+            2. Strong constraint: BIS should not fall below target_bis_low.
+            3. MAP must remain above the patient-specific lower bound.
+            4. Once all hard targets are met, strongly prefer BIS around 50,
+               with an extra penalty for drifting into the 55-60 light range.
 
-        This hierarchy means MAP, dose, and smoothness penalties cannot dominate
-        a regimen that leaves the patient too light after the onset period.
+        Drug-exposure penalties are deliberately weak. They only decide between
+        trajectories that are already clinically acceptable and similarly close
+        to the BIS target midpoint.
         """
+        t = np.asarray(t, dtype=float)
+        bis = np.asarray(bis, dtype=float)
+        map_mmhg = np.asarray(map_mmhg, dtype=float)
+        laryngoscopy_tolerance_percent = np.asarray(laryngoscopy_tolerance_percent, dtype=float)
+
         mask = assessment_mask(t)
         if not np.any(mask):
-            return 1e12
+            return 1e18
 
-        bis_eval = np.asarray(bis, dtype=float)[mask]
-        map_eval = np.asarray(map_mmhg, dtype=float)[mask]
+        bis_eval = bis[mask]
+        map_eval = map_mmhg[mask]
+        laryngoscopy_eval = laryngoscopy_tolerance_percent[mask]
 
         if (
             len(bis_eval) == 0
             or len(map_eval) == 0
+            or len(laryngoscopy_eval) == 0
             or np.any(~np.isfinite(bis_eval))
             or np.any(~np.isfinite(map_eval))
+            or np.any(~np.isfinite(laryngoscopy_eval))
         ):
-            return 1e12
+            return 1e18
 
         # ----------------------------------------------------
-        # 1) Highest priority: BIS > 60 after 2.5 minutes
+        # 1) Near-hard failure: BIS > upper target after 2.5 min
         # ----------------------------------------------------
-        # Any point above 60 means insufficient hypnotic depth. This must be
-        # more important than MAP, dose, smoothness, or BIS < 40.
+        # This branch should dominate everything else. It is intentionally
+        # several orders of magnitude larger than MAP, oversedation, and dose
+        # penalties. In practice this means the optimizer should never accept a
+        # trajectory with BIS > 60 after 2.5 min if an alternative exists.
         bis_over = np.clip(bis_eval - self.target_bis_high, 0.0, None)
-
         if np.any(bis_over > 0.0):
             max_over = float(np.max(bis_over))
             mean_over = float(np.mean(bis_over))
@@ -1053,33 +1424,36 @@ class Su2023PropofolRemifentanilRecommender:
             n_over = float(np.sum(bis_over > 0.0))
             frac_over = n_over / float(len(bis_eval))
 
-            # Small early-onset term, so the optimizer also learns to reach
-            # the upper BIS target before the assessment window begins.
+            # Pre-assessment warning: encourages the trajectory to be moving
+            # decisively below 60 before the formal 2.5-min assessment point,
+            # but without making the first 2.5 min a hard constraint.
             early_mask = (t >= 1.0) & (t < TARGET_ASSESSMENT_START_MIN)
             early_penalty = 0.0
             if np.any(early_mask):
-                early_bis = np.asarray(bis, dtype=float)[early_mask]
+                early_bis = bis[early_mask]
                 if np.any(np.isfinite(early_bis)):
-                    early_min = float(np.nanmin(early_bis))
-                    early_penalty = 50_000.0 * max(early_min - self.target_bis_high, 0.0) ** 2
+                    early_over = np.clip(early_bis - self.target_bis_high, 0.0, None)
+                    early_penalty = (
+                        5.0e9 * float(np.max(early_over)) ** 2
+                        + 1.0e8 * float(np.sum(early_over ** 2))
+                    )
 
             return float(
-                1e11
-                + 1_000_000_000.0 * max_over ** 2
-                + 250_000_000.0 * mean_over ** 2
-                + 25_000_000.0 * sumsq_over
-                + 100_000_000.0 * frac_over ** 2
+                BIS_HARD_HIGH_BASE_PENALTY
+                + 1.0e14 * max_over ** 4
+                + 1.0e13 * max_over ** 2
+                + 2.5e12 * mean_over ** 2
+                + 1.0e11 * sumsq_over
+                + 1.0e13 * frac_over ** 2
                 + early_penalty
             )
 
         # ----------------------------------------------------
-        # 2) Second priority: BIS < 40 after 2.5 minutes
+        # 2) Strong failure: BIS < lower target after 2.5 min
         # ----------------------------------------------------
-        # Oversedation is important, but the user explicitly wants BIS > 60 to
-        # dominate. Therefore the base penalty is two orders of magnitude lower
-        # than the BIS > 60 branch.
+        # Still very undesirable, but lower priority than awareness risk /
+        # insufficient hypnotic depth.
         bis_under = np.clip(self.target_bis_low - bis_eval, 0.0, None)
-
         if np.any(bis_under > 0.0):
             max_under = float(np.max(bis_under))
             mean_under = float(np.mean(bis_under))
@@ -1088,76 +1462,141 @@ class Su2023PropofolRemifentanilRecommender:
             frac_under = n_under / float(len(bis_eval))
 
             return float(
-                1e9
-                + 75_000_000.0 * max_under ** 2
-                + 20_000_000.0 * mean_under ** 2
-                + 2_500_000.0 * sumsq_under
-                + 10_000_000.0 * frac_under ** 2
+                BIS_HARD_LOW_BASE_PENALTY
+                + 1.0e11 * max_under ** 4
+                + 2.5e10 * max_under ** 2
+                + 5.0e9 * mean_under ** 2
+                + 5.0e8 * sumsq_under
+                + 2.5e10 * frac_under ** 2
             )
 
         # ----------------------------------------------------
-        # 3) Third priority: MAP target after BIS is fully within target
+        # 3) MAP and laryngoscopy-tolerance targets
         # ----------------------------------------------------
+        # These are evaluated after the BIS trajectory is within 40-60. MAP
+        # and laryngoscopy tolerance have the same hierarchy level: neither
+        # one should dominate the other structurally.
         map_violation = np.clip(self.map_lower_bound - map_eval, 0.0, None)
+        laryngoscopy_violation = np.clip(
+            self.target_laryngoscopy_tolerance_percent - laryngoscopy_eval,
+            0.0,
+            None,
+        )
 
-        if np.any(map_violation > 0.0):
+        if np.any(map_violation > 0.0) or np.any(laryngoscopy_violation > 0.0):
             max_map_violation = float(np.max(map_violation))
             mean_map_violation = float(np.mean(map_violation))
             sumsq_map_violation = float(np.sum(map_violation ** 2))
             n_map_violation = float(np.sum(map_violation > 0.0))
             frac_map_violation = n_map_violation / float(len(map_eval))
 
-            # This is intentionally lower than BIS<40 and much lower than BIS>60.
+            max_lary_violation = float(np.max(laryngoscopy_violation))
+            mean_lary_violation = float(np.mean(laryngoscopy_violation))
+            sumsq_lary_violation = float(np.sum(laryngoscopy_violation ** 2))
+            n_lary_violation = float(np.sum(laryngoscopy_violation > 0.0))
+            frac_lary_violation = n_lary_violation / float(len(laryngoscopy_eval))
+
+            map_penalty = (
+                2.5e8 * max_map_violation ** 2
+                + 5.0e7 * mean_map_violation ** 2
+                + 1.0e7 * sumsq_map_violation
+                + 2.5e8 * frac_map_violation ** 2
+            )
+
+            # Same mathematical priority as MAP, but expressed in percentage
+            # points below the required tolerance probability.
+            laryngoscopy_penalty = (
+                2.5e8 * max_lary_violation ** 2
+                + 5.0e7 * mean_lary_violation ** 2
+                + 1.0e7 * sumsq_lary_violation
+                + 2.5e8 * frac_lary_violation ** 2
+            )
+
             return float(
-                1e7
-                + 1_000_000.0 * max_map_violation ** 2
-                + 250_000.0 * mean_map_violation ** 2
-                + 50_000.0 * sumsq_map_violation
-                + 1_000_000.0 * frac_map_violation ** 2
+                BIS_MAP_BASE_PENALTY
+                + map_penalty
+                + laryngoscopy_penalty
             )
 
         # ----------------------------------------------------
-        # 4) Tie-breakers once BIS and MAP are both feasible
+        # 4) Feasible trajectory shaping: prefer BIS around 50
         # ----------------------------------------------------
-        # Prefer BIS centered around the midpoint of the target range, but keep
-        # this much weaker than any actual target violation.
+        # This is now the dominant tie-breaker. It prevents the optimizer from
+        # choosing the lightest possible regimen that barely remains below 60.
         bis_target_dev = bis_eval - self.target_bis_mid
-        bis_centering_penalty = 2_500.0 * float(np.mean(bis_target_dev ** 2))
 
-        # Encourage reaching the upper BIS target before the assessment
-        # window, but only as a weak tie-breaker once post-onset targets are
-        # satisfied.
-        adequate_idx = np.where(np.asarray(bis, dtype=float) <= self.target_bis_high)[0]
+        mean_centering = float(np.mean(bis_target_dev ** 2))
+        max_abs_dev = float(np.max(np.abs(bis_target_dev)))
+        terminal_dev = float((bis_eval[-1] - self.target_bis_mid) ** 2)
+
+        bis_centering_penalty = (
+            60_000.0 * mean_centering
+            + 25_000.0 * max_abs_dev ** 2
+            + 10_000.0 * terminal_dev
+        )
+
+        # Extra "too light but technically feasible" penalty for BIS 55-60.
+        # This is intentionally stronger than the corresponding 40-45 penalty,
+        # because the user wants to avoid drifting toward the upper boundary.
+        bis_soft_high = np.clip(bis_eval - TARGET_BIS_SOFT_HIGH, 0.0, None)
+        soft_high_penalty = (
+            400_000.0 * float(np.mean(bis_soft_high ** 2))
+            + 150_000.0 * float(np.max(bis_soft_high)) ** 2
+            + 25_000.0 * float(np.sum(bis_soft_high ** 2))
+        )
+
+        # Mild "too deep but still feasible" shaping for BIS 40-45.
+        bis_soft_low = np.clip(TARGET_BIS_SOFT_LOW - bis_eval, 0.0, None)
+        soft_low_penalty = (
+            120_000.0 * float(np.mean(bis_soft_low ** 2))
+            + 40_000.0 * float(np.max(bis_soft_low)) ** 2
+            + 8_000.0 * float(np.sum(bis_soft_low ** 2))
+        )
+
+        # Weak tie-breaker: once the 90% threshold is met, prefer some
+        # stimulation reserve toward 95%, but keep this weaker than BIS
+        # centering and much weaker than any true target violation.
+        laryngoscopy_margin = np.clip(95.0 - laryngoscopy_eval, 0.0, None)
+        laryngoscopy_margin_penalty = 2_500.0 * float(np.mean(laryngoscopy_margin ** 2))
+
+        # Encourage reaching BIS <= 60 before the formal assessment window.
+        adequate_idx = np.where(bis <= self.target_bis_high)[0]
         if len(adequate_idx) == 0:
-            onset_penalty = 50_000.0
+            onset_penalty = 5_000_000.0
         else:
             time_to_bis60 = float(t[adequate_idx[0]])
-            onset_penalty = 500.0 * max(time_to_bis60 - TARGET_ASSESSMENT_START_MIN, 0.0) ** 2
+            onset_penalty = 250_000.0 * max(time_to_bis60 - 2.0, 0.0) ** 2
 
-        # Exposure and complexity penalties remain lowest priority. They only
-        # decide between regimens that already meet BIS and MAP targets.
-        prop_rates_mgkgh = regimen.propofol_rates_mgkgh
-        prop_total_mg = regimen.propofol_bolus_mg + np.sum(prop_rates_mgkgh * self.weight_kg / 60.0)
+        # Weak drug exposure and schedule-complexity penalties.
+        # These should not pull the solution toward BIS 58-60 just to save dose.
+        prop_rates_mgkgh = np.asarray(regimen.propofol_rates_mgkgh, dtype=float)
+        prop_total_mg = regimen.propofol_bolus_mg + np.sum(
+            prop_rates_mgkgh * self.weight_kg / 60.0
+        )
         prop_penalty = (
-            1.8 * np.sum(np.diff(prop_rates_mgkgh) ** 2)
-            + 0.45 * np.sum(prop_rates_mgkgh)
-            + 0.06 * prop_total_mg
+            0.25 * float(np.sum(np.diff(prop_rates_mgkgh) ** 2))
+            + 0.035 * float(np.sum(prop_rates_mgkgh))
+            + 0.006 * float(prop_total_mg)
         )
 
         remi_penalty = 0.0
         if self.use_remifentanil:
             remi_rates = regimen.remifentanil_rates_mcgkgmin
             if remi_rates is None:
-                return 1e12
-            remi_total_mcg = np.sum(remi_rates * self.weight_kg)  # 1-min intervals
+                return 1e18
+            remi_rates = np.asarray(remi_rates, dtype=float)
+            remi_total_mcg = float(np.sum(remi_rates * self.weight_kg))  # 1-min intervals
             remi_penalty = (
-                120.0 * np.sum(np.diff(remi_rates) ** 2)
-                + 30.0 * np.sum(remi_rates)
-                + 0.022 * remi_total_mcg
+                8.0 * float(np.sum(np.diff(remi_rates) ** 2))
+                + 1.0 * float(np.sum(remi_rates))
+                + 0.001 * remi_total_mcg
             )
 
         return float(
             bis_centering_penalty
+            + soft_high_penalty
+            + soft_low_penalty
+            + laryngoscopy_margin_penalty
             + onset_penalty
             + prop_penalty
             + remi_penalty
@@ -1176,13 +1615,19 @@ class Su2023PropofolRemifentanilRecommender:
             return cached
 
         try:
-            t, _, _, _, bis, map_mmhg, regimen = self.simulate_x(
+            t, _, _, _, bis, map_mmhg, laryngoscopy_tolerance_percent, regimen = self._simulate_x_full(
                 x,
                 apply_final_rounding=False,
             )
-            value = self.trajectory_penalty(t=t, bis=bis, map_mmhg=map_mmhg, regimen=regimen)
+            value = self.trajectory_penalty(
+                t=t,
+                bis=bis,
+                map_mmhg=map_mmhg,
+                laryngoscopy_tolerance_percent=laryngoscopy_tolerance_percent,
+                regimen=regimen,
+            )
         except Exception:
-            value = 1e12
+            value = 1e18
 
         self._objective_cache[cache_key] = float(value)
         return float(value)
@@ -1193,14 +1638,20 @@ class Su2023PropofolRemifentanilRecommender:
         after applying final rounding to the regimen.
         """
         try:
-            t, _, _, _, bis, map_mmhg, regimen = self.simulate_x(
+            t, _, _, _, bis, map_mmhg, laryngoscopy_tolerance_percent, regimen = self._simulate_x_full(
                 x,
                 apply_final_rounding=True,
             )
         except Exception:
-            return 1e12
+            return 1e18
 
-        return self.trajectory_penalty(t=t, bis=bis, map_mmhg=map_mmhg, regimen=regimen)
+        return self.trajectory_penalty(
+            t=t,
+            bis=bis,
+            map_mmhg=map_mmhg,
+            laryngoscopy_tolerance_percent=laryngoscopy_tolerance_percent,
+            regimen=regimen,
+        )
 
     def initial_vectors(self) -> list[np.ndarray]:
         """Clinical multi-start guesses for Powell. Always returns at most 5 starts."""
@@ -1215,12 +1666,12 @@ class Su2023PropofolRemifentanilRecommender:
 
         if self.use_remifentanil:
             remi_starts = [
-                # remi_pause, remi_switch, remi_rate1, remi_rate2
-                [0.0, 7.0, 0.10, 0.06],
-                [0.0, 6.0, 0.15, 0.08],
-                [1.0, 8.0, 0.08, 0.06],
-                [0.5, 10.0, 0.12, 0.12],
-                [0.0, 5.0, 0.20, 0.10],
+                # remi_pause, one constant remi_rate_mcgkgmin
+                [0.0, 0.08],
+                [0.0, 0.10],
+                [0.5, 0.12],
+                [1.0, 0.15],
+                [0.0, 0.20],
             ]
             starts = [p + r for p, r in zip(starts, remi_starts, strict=False)]
 
@@ -1257,8 +1708,8 @@ class Su2023PropofolRemifentanilRecommender:
                     if self.use_remifentanil
                     else POWELL_MAXFEV_PROPOFOL_ONLY
                 ),
-                "xtol": 0.035,
-                "ftol": 0.035,
+                "xtol": 0.02,
+                "ftol": 0.02,
                 "disp": False,
             },
         )
@@ -1271,7 +1722,9 @@ class Su2023PropofolRemifentanilRecommender:
         """
         Run 3-5 deterministic Powell starts and choose the candidate with the
         lowest rounded-regimen objective. Confidence is then estimated with 100
-        BSV simulations of the chosen rounded regimen only once.
+        BSV simulations of the chosen rounded regimen only once. Confidence
+        counts BIS and MAP success only; laryngoscopy tolerance is optimized
+        deterministically and reported as a simulated band, but is not counted.
 
         skip_confidence=True bypasses the (expensive, 100-simulation)
         confidence Monte Carlo entirely and returns a placeholder
@@ -1292,15 +1745,17 @@ class Su2023PropofolRemifentanilRecommender:
             raise RuntimeError("Optimization failed to produce a candidate regimen.")
 
         regimen = self.decode_regimen(best_x, apply_final_rounding=True)
-        t, cp_prop, ce_prop, cp_remi, bis, map_mmhg = self.simulate_regimen(regimen)
+        t, cp_prop, ce_prop, cp_remi, bis, map_mmhg, laryngoscopy_tolerance_percent = self._simulate_regimen_full(regimen)
 
-        feasible_bis, feasible_map, feasible = trajectory_target_flags(
+        feasible_bis, feasible_map, feasible_laryngoscopy, feasible = trajectory_target_flags(
             t=t,
             bis=bis,
             map_mmhg=map_mmhg,
             map_lower_bound=self.map_lower_bound,
+            laryngoscopy_tolerance_percent=laryngoscopy_tolerance_percent,
             bis_low=self.target_bis_low,
             bis_high=self.target_bis_high,
+            target_laryngoscopy_tolerance_percent=self.target_laryngoscopy_tolerance_percent,
         )
 
         if skip_confidence:
@@ -1316,6 +1771,7 @@ class Su2023PropofolRemifentanilRecommender:
                 target_bis_high=self.target_bis_high,
                 map_abs_min_target=self.map_abs_min_target,
                 map_rel_frac_target=self.map_rel_frac_target,
+                target_laryngoscopy_tolerance_percent=self.target_laryngoscopy_tolerance_percent,
                 map_output_index=self.map_output_index,
                 remi_a1_output_index=self.remi_a1_output_index,
                 base_seed=self.seed + 10_000,
@@ -1341,14 +1797,17 @@ class Su2023PropofolRemifentanilRecommender:
             cp_remifentanil=cp_remi,
             bis=bis,
             map_mmhg=map_mmhg,
+            laryngoscopy_tolerance_percent=laryngoscopy_tolerance_percent,
             map_lower_bound_mmhg=self.map_lower_bound,
             feasible_bis=feasible_bis,
             feasible_map=feasible_map,
+            feasible_laryngoscopy=feasible_laryngoscopy,
             feasible=feasible,
             target_bis_low=self.target_bis_low,
             target_bis_high=self.target_bis_high,
             map_abs_min_target_mmhg=self.map_abs_min_target,
             map_rel_frac_target=self.map_rel_frac_target,
+            target_laryngoscopy_tolerance_percent=self.target_laryngoscopy_tolerance_percent,
             confidence=confidence,
             confidence_percent=confidence.confidence_percent,
             objective_value=float(best_loss),
@@ -1379,6 +1838,7 @@ def simulate_regimen_once(
     target_bis_high: float = TARGET_BIS_HIGH,
     map_abs_min_target: float = MAP_ABS_MIN_TARGET,
     map_rel_frac_target: float = MAP_REL_FRAC_TARGET,
+    target_laryngoscopy_tolerance_percent: float = TARGET_LARYNGOSCOPY_TOLERANCE_PERCENT,
     seed: Optional[int] = None,
 ):
     """
@@ -1398,12 +1858,13 @@ def simulate_regimen_once(
         target_bis_high=target_bis_high,
         map_abs_min_target=map_abs_min_target,
         map_rel_frac_target=map_rel_frac_target,
+        target_laryngoscopy_tolerance_percent=target_laryngoscopy_tolerance_percent,
         map_output_index=map_output_index,
         remi_a1_output_index=remi_a1_output_index,
         seed=seed or OPTIMIZATION_BASE_SEED,
     )
 
-    return runner.simulate_regimen(regimen), runner.map_lower_bound
+    return runner._simulate_regimen_full(regimen), runner.map_lower_bound
 
 
 def simulate_confidence(
@@ -1416,25 +1877,34 @@ def simulate_confidence(
     target_bis_high: float = TARGET_BIS_HIGH,
     map_abs_min_target: float = MAP_ABS_MIN_TARGET,
     map_rel_frac_target: float = MAP_REL_FRAC_TARGET,
+    target_laryngoscopy_tolerance_percent: float = TARGET_LARYNGOSCOPY_TOLERANCE_PERCENT,
     map_output_index: int = SU2023_MAP_OUTPUT_INDEX,
     remi_a1_output_index: int = SU2023_REMI_A1_OUTPUT_INDEX,
     base_seed: int = 10_000,
 ) -> ConfidenceResult:
     """
-    Simulate multiple regimens to estimate the confidence in meeting the target BIS and MAP values.
+    Simulate multiple regimens to estimate confidence in meeting BIS and MAP targets.
+
+    Important
+    ---------
+    Laryngoscopy-tolerance probability is simulated and returned as percentile
+    bands, but it is NOT counted in n_target_met or confidence_percent.
+    The confidence percentage therefore remains directly comparable to the
+    earlier app definition: BIS target + MAP target only.
     """
     bis_values: list[np.ndarray] = []
     map_values: list[np.ndarray] = []
     cp_prop_values: list[np.ndarray] = []
     ce_prop_values: list[np.ndarray] = []
     cp_remi_values: list[np.ndarray] = []
+    laryngoscopy_tolerance_values: list[np.ndarray] = []
 
     n_target_met = 0
     n_failed = 0
 
     for i in range(CONFIDENCE_N_SIMULATIONS):
         try:
-            (t, cp_prop, ce_prop, cp_remi, bis, map_mmhg), map_lower_bound = simulate_regimen_once(
+            (t, cp_prop, ce_prop, cp_remi, bis, map_mmhg, laryngoscopy_tolerance_percent), map_lower_bound = simulate_regimen_once(
                 patient=patient,
                 regimen=regimen,
                 use_remifentanil=use_remifentanil,
@@ -1445,25 +1915,36 @@ def simulate_confidence(
                 target_bis_high=target_bis_high,
                 map_abs_min_target=map_abs_min_target,
                 map_rel_frac_target=map_rel_frac_target,
+                target_laryngoscopy_tolerance_percent=target_laryngoscopy_tolerance_percent,
                 map_output_index=map_output_index,
                 remi_a1_output_index=remi_a1_output_index,
                 seed=base_seed + i,
             )
 
-            _, _, feasible = trajectory_target_flags(
+            # Confidence intentionally uses only BIS and MAP targets.
+            # Laryngoscopy-tolerance probability is still simulated and stored
+            # as percentile bands, but it is not counted as part of Monte Carlo
+            # "success". This keeps confidence comparable to the previous app
+            # definition.
+            feasible_bis, feasible_map, _, _ = trajectory_target_flags(
                 t=t,
                 bis=bis,
                 map_mmhg=map_mmhg,
                 map_lower_bound=map_lower_bound,
+                laryngoscopy_tolerance_percent=laryngoscopy_tolerance_percent,
                 bis_low=target_bis_low,
                 bis_high=target_bis_high,
+                target_laryngoscopy_tolerance_percent=target_laryngoscopy_tolerance_percent,
             )
 
-            n_target_met += int(feasible)
+            n_target_met += int(feasible_bis and feasible_map)
             bis_values.append(np.asarray(bis, dtype=float))
             map_values.append(np.asarray(map_mmhg, dtype=float))
             cp_prop_values.append(np.asarray(cp_prop, dtype=float))
             ce_prop_values.append(np.asarray(ce_prop, dtype=float))
+            laryngoscopy_tolerance_values.append(
+                np.asarray(laryngoscopy_tolerance_percent, dtype=float)
+            )
 
             if use_remifentanil and cp_remi is not None:
                 cp_remi_values.append(np.asarray(cp_remi, dtype=float))
@@ -1483,6 +1964,10 @@ def simulate_confidence(
     cp_remi_p05 = cp_remi_p50 = cp_remi_p95 = None
     if use_remifentanil:
         cp_remi_p05, cp_remi_p50, cp_remi_p95 = percentile_band(cp_remi_values)
+
+    laryngoscopy_p05, laryngoscopy_p50, laryngoscopy_p95 = percentile_band(
+        laryngoscopy_tolerance_values
+    )
 
     return ConfidenceResult(
         n_simulations=CONFIDENCE_N_SIMULATIONS,
@@ -1506,6 +1991,9 @@ def simulate_confidence(
         cp_remifentanil_p05=cp_remi_p05,
         cp_remifentanil_p50=cp_remi_p50,
         cp_remifentanil_p95=cp_remi_p95,
+        laryngoscopy_tolerance_p05=laryngoscopy_p05,
+        laryngoscopy_tolerance_p50=laryngoscopy_p50,
+        laryngoscopy_tolerance_p95=laryngoscopy_p95,
     )
 
 
@@ -1523,6 +2011,7 @@ def recommend_su2023_regimen(
     target_bis_high: float = TARGET_BIS_HIGH,
     map_abs_min_target: float = MAP_ABS_MIN_TARGET,
     map_rel_frac_target: float = MAP_REL_FRAC_TARGET,
+    target_laryngoscopy_tolerance_percent: float = TARGET_LARYNGOSCOPY_TOLERANCE_PERCENT,
     mode: str = OPTIMIZATION_MODE,
     seed: int = OPTIMIZATION_BASE_SEED,
 ) -> RecommendationResult:
@@ -1563,6 +2052,7 @@ def recommend_su2023_regimen(
         target_bis_high=target_bis_high,
         map_abs_min_target=map_abs_min_target,
         map_rel_frac_target=map_rel_frac_target,
+        target_laryngoscopy_tolerance_percent=target_laryngoscopy_tolerance_percent,
         seed=seed,
     )
 
@@ -1580,6 +2070,7 @@ def recommend_maintenance_for_fixed_propofol_bolus(
     target_bis_high: float = TARGET_BIS_HIGH,
     map_abs_min_target: float = MAP_ABS_MIN_TARGET,
     map_rel_frac_target: float = MAP_REL_FRAC_TARGET,
+    target_laryngoscopy_tolerance_percent: float = TARGET_LARYNGOSCOPY_TOLERANCE_PERCENT,
     mode: str = OPTIMIZATION_MODE,
     seed: int = OPTIMIZATION_BASE_SEED,
 ) -> RecommendationResult:
@@ -1634,6 +2125,7 @@ def recommend_maintenance_for_fixed_propofol_bolus(
         target_bis_high=target_bis_high,
         map_abs_min_target=map_abs_min_target,
         map_rel_frac_target=map_rel_frac_target,
+        target_laryngoscopy_tolerance_percent=target_laryngoscopy_tolerance_percent,
         fixed_bolus_mgkg=fixed_bolus_mgkg,
         seed=seed,
     )
@@ -1650,14 +2142,15 @@ def recommend_propofol_for_fixed_remifentanil_rate(
     target_bis_high: float = TARGET_BIS_HIGH,
     map_abs_min_target: float = MAP_ABS_MIN_TARGET,
     map_rel_frac_target: float = MAP_REL_FRAC_TARGET,
+    target_laryngoscopy_tolerance_percent: float = TARGET_LARYNGOSCOPY_TOLERANCE_PERCENT,
     mode: str = OPTIMIZATION_MODE,
     seed: int = OPTIMIZATION_BASE_SEED,
 ) -> RecommendationResult:
     """
     Re-optimize the propofol induction bolus AND its own maintenance
     schedule for a fixed, user-chosen remifentanil maintenance rate
-    (mcg/kg/min, held constant for the full 15-minute window - no pause,
-    one rate throughout). This is the inverse of
+    (mcg/kg/min). The remifentanil rate is constant after an optional
+    optimized initial pause. This is the inverse of
     recommend_maintenance_for_fixed_propofol_bolus: here remifentanil is
     the fixed input and propofol is the free output, for pages where the
     opioid strategy is what the user manipulates and the propofol
@@ -1688,6 +2181,7 @@ def recommend_propofol_for_fixed_remifentanil_rate(
         target_bis_high=target_bis_high,
         map_abs_min_target=map_abs_min_target,
         map_rel_frac_target=map_rel_frac_target,
+        target_laryngoscopy_tolerance_percent=target_laryngoscopy_tolerance_percent,
         fixed_remi_rate_mcgkgmin=fixed_remi_rate_mcgkgmin,
         seed=seed,
     )
