@@ -484,6 +484,42 @@ def display_confidence_percent(tier: str) -> int:
     return _DISPLAY_CONFIDENCE_PERCENT_BY_TIER[tier]
 
 
+# User-testing override: for the three preset test patients, the displayed
+# confidence must stay pinned to a fixed tier/percentage for the whole
+# scenario, regardless of the actual computed confidence_percent and
+# regardless of any patient/target/opioid/manual-dose edits made afterward.
+# Keyed by the same identifier PRESET_TEST_PATIENTS and
+# selected-test-patient-store already use ("1"/"2"/"3" - not the patient's
+# field values, and not a new id scheme), so switching which preset is
+# selected is the only thing that changes which override applies. Any
+# patient key not in this mapping (including None) falls through to the
+# normal confidence_tier()/display_confidence_percent() logic in
+# _display_confidence_for below, completely unaffected by this override.
+TEST_PATIENT_CONFIDENCE_OVERRIDES = {
+    "1": {"tier": "HIGH", "percent": 80},
+    "2": {"tier": "MEDIUM", "percent": 60},
+    "3": {"tier": "LOW", "percent": 10},
+}
+
+
+def _display_confidence_for(test_patient_key: Optional[str], confidence_percent: float) -> tuple[str, int]:
+    """
+    Return the (tier, displayed_percent) pair for the confidence badge.
+
+    Presentation only, same as confidence_tier()/display_confidence_percent()
+    above - confidence_percent itself (the real simulated value already
+    sitting in recommendation-store/manual-scenario-store/
+    PRECOMPUTED_REMI_DATA) is never read into, or overwritten by, this
+    function; it is only used as a fallback input for patients that are
+    not one of the three preset test patients.
+    """
+    override = TEST_PATIENT_CONFIDENCE_OVERRIDES.get(test_patient_key)
+    if override is not None:
+        return override["tier"], override["percent"]
+    tier = confidence_tier(confidence_percent)
+    return tier, display_confidence_percent(tier)
+
+
 CONFIDENCE_INFO_TOOLTIP = (
     "Confidence indicates how consistently the recommended dose is expected "
     "to achieve both the BIS and MAP targets despite natural patient "
@@ -582,7 +618,7 @@ def _override_popover(prefill_value):
     )
 
 
-def make_induction_card(original, manual=None):
+def make_induction_card(original, manual=None, test_patient_key=None):
     """
     Build the induction-dose recommendation card - a dark-navy focal card
     (see .recommendation-dark-card/.induction-recommendation-card in
@@ -598,7 +634,18 @@ def make_induction_card(original, manual=None):
     there is nothing confidence-shaped to show, and the right-hand column
     shows the status box instead. This is a display choice, not a
     calculation change: confidence_percent is still computed exactly the
-    same way as before, only its visibility changed.
+    same way as before, only its visibility changed. Manual-dose mode
+    hides confidence entirely regardless of test_patient_key - the same
+    as before this parameter existed - and returning to the recommendation
+    (manual=None) naturally re-applies whichever tier/percent
+    _display_confidence_for resolves for test_patient_key.
+
+    test_patient_key (selected-test-patient-store's current value, e.g.
+    "1"/"2"/"3", or None/anything else for a non-preset patient) selects
+    the fixed user-testing confidence override via _display_confidence_for
+    - see TEST_PATIENT_CONFIDENCE_OVERRIDES above. It never changes which
+    dose is shown, only which (tier, percent) pair the confidence badge
+    below displays.
 
     "Return to recommendation" is always rendered (never conditionally
     excluded), only ever hidden via inline display:none, because it's a
@@ -642,7 +689,7 @@ def make_induction_card(original, manual=None):
     if manual_active:
         right_block = html.Div("MANUAL DOSE ACTIVE", className="induction-manual-active-box")
     else:
-        tier = confidence_tier(original.confidence_percent)
+        tier, shown_percent = _display_confidence_for(test_patient_key, original.confidence_percent)
         tier_class = tier.lower()
         right_block = html.Div(
             [
@@ -662,7 +709,7 @@ def make_induction_card(original, manual=None):
                     className=f"induction-confidence-tier induction-confidence-tier--{tier_class}",
                 ),
                 html.Div(
-                    f"{display_confidence_percent(tier)}%",
+                    f"{shown_percent}%",
                     className=f"induction-confidence-value induction-confidence-value--{tier_class}",
                 ),
             ],
@@ -785,14 +832,16 @@ def make_maintenance_card(original, manual=None):
     return html.Div(children, className="card maintenance-card recommendation-dark-card maintenance-regimen-card")
 
 
-def make_summary(original, manual=None):
+def make_summary(original, manual=None, test_patient_key=None):
     """
     Build the recommendation output: an induction-dose card followed by a
     maintenance-regimen card. `manual`, when provided, is the re-optimized
     manual-override scenario shown alongside the original recommendation.
+    test_patient_key is passed straight through to make_induction_card's
+    own confidence-override lookup - see its docstring.
     """
     return [
-        make_induction_card(original, manual),
+        make_induction_card(original, manual, test_patient_key),
         make_maintenance_card(original, manual),
     ]
 
@@ -3112,9 +3161,10 @@ def run_model(
     Output("map-graph", "figure"),
     Input("recommendation-store", "data"),
     Input("manual-scenario-store", "data"),
+    State("selected-test-patient-store", "data"),
     prevent_initial_call=True,
 )
-def render_recommendation(rec_store, manual_store):
+def render_recommendation(rec_store, manual_store, test_patient_key):
     """
     Render the recommendation card(s) and the 5 prediction graphs from
     recommendation-store (the original recommendation, never overwritten)
@@ -3122,6 +3172,17 @@ def render_recommendation(rec_store, manual_store):
     the single owner of these outputs - it fires both when a new
     recommendation is run and when the manual-override state changes, so
     there is exactly one rendering code path for both cases.
+
+    test_patient_key (selected-test-patient-store, State not Input - this
+    callback should only re-fire on an actual new recommendation/manual-
+    override, not merely from switching the patient dropdown) is read here
+    and passed to make_summary purely for the confidence-badge override -
+    see make_induction_card's docstring. Whichever preset was selected at
+    the moment this recommendation/manual override was produced is what
+    render_recommendation reads, so editing inputs afterward (without
+    switching patient or re-running) can never change which override
+    applies, and switching patients then re-running immediately reflects
+    the newly-selected patient's own override.
     """
     if rec_store is None:
         return no_update, no_update, no_update, no_update, no_update, no_update
@@ -3149,7 +3210,7 @@ def render_recommendation(rec_store, manual_store):
 
     patient = _patient_from_context(context)
 
-    summary = make_summary(original, manual)
+    summary = make_summary(original, manual, test_patient_key)
 
     dose_rationale_fig = make_induction_dose_rationale_figure(
         patient=patient,
