@@ -2294,10 +2294,6 @@ def build_pr_scenario_result_card():
     return html.Div(
         [
             _te_card_header("fa-code-compare", "Scenario result"),
-            html.P(
-                "Compare the selected remifentanil grid scenario against the chosen baseline reference - both are real, precomputed model outputs.",
-                className="te-card-subtitle",
-            ),
             html.Div(
                 [
                     html.Div(
