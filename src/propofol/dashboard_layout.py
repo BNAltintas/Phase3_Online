@@ -767,6 +767,18 @@ def build_sidebar():
     Font Awesome glyph + the existing label text) - none of the ids,
     n_clicks, or className-driven active/disabled styling changed, so
     navigation and active-page highlighting work exactly as before.
+
+    Scenario Exploration and Test Exploration are hidden from this sidebar
+    for the user study (style={"display": "none"}) while everything else
+    about them stays wired up exactly as before: the ids, n_clicks, and
+    className are untouched, so app.py's set_active_page/render_active_page/
+    compute_scenario_baseline callbacks (which reference nav-scenario-btn/
+    nav-test-exploration-btn as Inputs) still resolve at layout-validation
+    time and still work if triggered some other way - the pages, their
+    views (scenario-exploration-view/test-exploration-view), and their own
+    callbacks are completely untouched. render_active_page only ever
+    outputs these buttons' className, never their style, so this inline
+    style is never overwritten by a callback.
     """
     return html.Div(
         [
@@ -790,6 +802,7 @@ def build_sidebar():
                         id="nav-scenario-btn",
                         n_clicks=0,
                         className="sidebar-nav-item",
+                        style={"display": "none"},
                     ),
                     html.Div(
                         [
@@ -799,6 +812,7 @@ def build_sidebar():
                         id="nav-test-exploration-btn",
                         n_clicks=0,
                         className="sidebar-nav-item",
+                        style={"display": "none"},
                     ),
                     html.Div(
                         [
