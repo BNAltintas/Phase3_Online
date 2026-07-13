@@ -5,25 +5,31 @@ Run manually, before a Phase 3 testing session - never imported by the
 running app and never invoked during participant interaction. It calls the
 same real model the Recommendation page already uses
 (recommend_su2023_regimen / Su2023PropofolRemifentanilRecommender from
-recommend_regimen2023.py, completely unmodified), for each of the three
-fixed Phase 3 patient cases already defined once in app.py
-(PRESET_TEST_PATIENTS, reused here rather than re-typing the same numbers
-a second time and risking the two definitions drifting apart), and writes
-the results to src/propofol/data/precomputed_remi_cases.json.
+recommend_regimen2023.py, completely unmodified), for Test Patient 1 only
+(the Precomputed Remi page's own PR_CASE_IDS below - a fixed Phase 3
+patient case defined once in dashboard_layout.py's PRESET_TEST_PATIENTS,
+reused here rather than re-typing the same numbers a second time and
+risking the two definitions drifting apart; Test Patient 2/3 remain in
+PRESET_TEST_PATIENTS for the Recommendation/other pages but are no longer
+precomputed for this page), and writes the results to
+src/propofol/data/precomputed_remi_cases.json.
 
-For each case this computes:
+For Test Patient 1 this computes:
     - a "no opioid" baseline recommendation (opiate="none", confidence
       computed)
     - a "remifentanil" baseline recommendation (opiate="remifentanil",
       confidence computed)
-    - a 20-point remifentanil rate grid (0.02-0.20 mcg/kg/min), each point
-      a full propofol-bolus + propofol-maintenance re-optimization for that
-      fixed remifentanil rate (Su2023PropofolRemifentanilRecommender's
-      existing fixed_remi_rate_mcgkgmin parameter), confidence skipped
-      (skip_confidence=True) since 20 x 100-simulation Monte Carlo runs
-      per case is unnecessary cost for exploratory grid points - only the
-      two baselines need a real confidence estimate.
-    - for every one of those regimens (both baselines + all 20 grid
+    - a 41-point remifentanil rate grid (0.00-2.00 mcg/kg/min in exact
+      0.05 steps - no intermediate rates like 0.01/0.02/0.03 are computed,
+      only the 41 values actually selectable on the slider), each point a
+      full propofol-bolus + propofol-maintenance re-optimization for that
+      fixed remifentanil rate (Su2023Propofol RemifentanilRecommender's
+      existing fixed_remi_rate_mcgkgmin parameter, which accepts 0.00 as
+      a genuine "flat zero rate" constraint - not a special case),
+      confidence skipped (skip_confidence=True) since 41 x 100-simulation
+      Monte Carlo runs is unnecessary cost for exploratory grid points -
+      only the two baselines need a real confidence estimate.
+    - for every one of those regimens (both baselines + all 41 grid
       points), a propofol induction-dose sweep (_dose_sweep) - the same
       forward-simulation the Recommendation page's own
       make_induction_dose_rationale_figure computes live, run once here
@@ -38,6 +44,12 @@ writes is byte-for-byte the same shape the app already knows how to turn
 back into Plotly figures via _store_dict_to_namespace + make_bis_figure /
 make_bis_figure_dual / etc. No new serialization format, no drift risk
 between "what the script writes" and "what the app expects to read".
+
+app.py's own _validate_precomputed_remi_data (run once, at import time)
+raises if the output this script writes doesn't actually match what the
+running app expects (wrong case ids, wrong grid range/point count, missing
+fields) - so a stale JSON from before this script's Test-Patient-1-only /
+0.00-2.00 change can never be silently loaded again.
 
 Usage:
     python scripts/precompute_remi_cases.py
@@ -77,13 +89,21 @@ from propofol.recommend_regimen2023 import (
 
 OUTPUT_PATH = REPO_ROOT / "src" / "propofol" / "data" / "precomputed_remi_cases.json"
 
-GRID_MIN_MCGKGMIN = 0.02
-GRID_MAX_MCGKGMIN = 0.20
-GRID_POINTS = 20
+GRID_MIN_MCGKGMIN = 0.00
+GRID_MAX_MCGKGMIN = 2.00
+# 41 points across 0.00-2.00 inclusive = exact 0.05 steps
+# ((2.00 - 0.00) / (41 - 1) = 0.05).
+GRID_POINTS = 41
 
-# "TEST-001"/"TEST-002"/"TEST-003", matching the Recommendation page's own
-# Test Patient card labeling for the same 3 presets.
-CASE_PATIENT_IDS = {"1": "TEST-001", "2": "TEST-002", "3": "TEST-003"}
+# The Precomputed Remi page only offers Test Patient 1 (see
+# dashboard_layout.PR_ONLY_CASE_OPTIONS) - PRESET_TEST_PATIENTS itself
+# still has all 3 presets (Recommendation/other pages need them), this is
+# just which of those this script actually precomputes for this page.
+PR_CASE_IDS = ["1"]
+
+# "TEST-001", matching the Recommendation page's own Test Patient card
+# labeling for the same preset.
+CASE_PATIENT_IDS = {"1": "TEST-001"}
 
 
 def _build_patient(preset: dict) -> Patient:
@@ -215,14 +235,19 @@ def precompute_case(case_id: str, preset: dict) -> dict:
     )
     print(f"[case {case_id}] baseline (remifentanil) done in {time.perf_counter() - t0:.1f}s")
 
-    rates = np.linspace(GRID_MIN_MCGKGMIN, GRID_MAX_MCGKGMIN, GRID_POINTS)
+    # Rounded to 2 decimals (not raw np.linspace output) so 0.00-2.00 in
+    # 0.05 steps lands on exact, clean values - dashboard_layout._pr_grid_
+    # rates() (the slider's own source of the same coordinates) generates
+    # rates the identical way, so the two never drift apart.
+    step = (GRID_MAX_MCGKGMIN - GRID_MIN_MCGKGMIN) / (GRID_POINTS - 1)
+    rates = [round(GRID_MIN_MCGKGMIN + i * step, 2) for i in range(GRID_POINTS)]
     grid_results = []
     for i, rate in enumerate(rates):
         t0 = time.perf_counter()
         grid_results.append(_grid_point(patient, rate))
         print(
             f"[case {case_id}] grid {i + 1}/{GRID_POINTS} "
-            f"(rate={rate:.4f} mcg/kg/min) done in {time.perf_counter() - t0:.1f}s"
+            f"(rate={rate:.2f} mcg/kg/min) done in {time.perf_counter() - t0:.1f}s"
         )
 
     return {
@@ -252,7 +277,8 @@ def main() -> None:
     cases = {}
     failed = []
 
-    for case_id, preset in PRESET_TEST_PATIENTS.items():
+    for case_id in PR_CASE_IDS:
+        preset = PRESET_TEST_PATIENTS[case_id]
         try:
             cases[case_id] = precompute_case(case_id, preset)
         except Exception as exc:  # noqa: BLE001 - a script, not a callback: fail loud, keep going

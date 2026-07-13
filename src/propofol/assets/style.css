@@ -2402,6 +2402,152 @@ body {
   color: #d9362e;
 }
 
+/* ---------- Precomputed Remi: Dose-Response Interaction card ----------
+   Wraps graph_card()'s own output (never modified - shared with every
+   other graph card on every other page) with two static vertical
+   axis-title+arrow labels (_pr_dose_response_axis_label in
+   dashboard_layout.py, standing in for Plotly's own yaxis/yaxis2 title,
+   left empty - see make_pr_induction_dose_rationale_figure in app.py)
+   and three dynamic info boxes below it, replacing the old in-plot
+   legend and in-plot target-range numbers.
+
+   The axis labels are plain HTML/CSS (writing-mode: vertical-rl), not a
+   fixed-viewBox SVG image stretched to fit - that was the previous
+   implementation and its non-uniform stretch scaling is what caused the
+   arrows/text to clip and misalign once the card's real rendered height
+   diverged from the hardcoded 480px the SVG assumed. The card itself
+   also gets a taller scoped .graph-card--tall override below so the
+   larger Plotly margins (see make_pr_induction_dose_rationale_figure's
+   own margin=dict(...) in app.py) have room without cramping the plot. */
+
+#pr-dose-response-card-wrapper .graph-card--tall {
+  height: 620px;
+}
+
+/* Its "Show" checkbox unchecked: same id-scoped-selector-beats-source-
+   order problem the shared .graph-card--collapsed rule's own comment
+   warns about (see above) - #pr-dose-response-card-wrapper's ID raises
+   the specificity of the height override above past plain
+   .graph-card--collapsed, so it would win and keep the card full height
+   even while collapsed unless matched here. */
+#pr-dose-response-card-wrapper .graph-card--tall.graph-card--collapsed {
+  height: auto;
+}
+
+.pr-dose-response-plot-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.pr-dose-response-plot-row > .graph-card {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.pr-dose-response-axis-label {
+  flex: 0 0 22px;
+  width: 22px;
+  /* height:0 + min-height:100% (not just align-self:stretch) so this
+     column's own vertical-rl text - which, unlike the old fixed-size SVG
+     img it replaced, has real intrinsic height - never dictates the
+     row's height itself; it only ever *follows* whatever height the
+     graph card next to it ends up with, collapsed or expanded. */
+  height: 0;
+  min-height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  align-self: stretch;
+}
+
+.pr-dose-response-axis-label--left {
+  color: #dc0000;
+}
+
+.pr-dose-response-axis-label--right {
+  color: #0055dc;
+}
+
+.pr-dose-response-axis-arrow {
+  flex: 0 0 auto;
+  font-size: 15px;
+  line-height: 1;
+  font-weight: 700;
+}
+
+.pr-dose-response-axis-text {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  letter-spacing: 0.2px;
+}
+
+.pr-dose-response-legend-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.pr-dose-response-legend-item {
+  flex: 1 1 0;
+  min-width: 160px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background-color: var(--bg-card);
+}
+
+.pr-dose-response-legend-swatch {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+}
+
+.pr-dose-response-swatch--map {
+  background-color: rgba(220, 0, 0, 0.25);
+}
+
+.pr-dose-response-swatch--bis {
+  background-color: rgba(0, 85, 220, 0.25);
+}
+
+.pr-dose-response-swatch--dose {
+  background-color: rgba(0, 150, 0, 0.25);
+}
+
+.pr-dose-response-legend-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.pr-dose-response-legend-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.pr-dose-response-legend-value {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
 /* ---------- Recommendation page: left column compactness ---------- */
 /* The left column's cards (Patient Case, Input Parameters, Model
    Settings) got tall enough that the whole column no longer fit a

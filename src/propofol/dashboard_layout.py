@@ -2077,37 +2077,83 @@ PR_CASE_OPTIONS = [
     {"label": "Test Patient 3 (TEST-003)", "value": "3"},
 ]
 
+# Precomputed Remi's own dropdown options - only Test Patient 1, since this
+# page's precomputed dataset (see scripts/precompute_remi_cases.py) now
+# only covers that one case. NOT the same list as PR_CASE_OPTIONS above,
+# which is still all 3 presets and must stay that way - it is also used by
+# the Recommendation page's own "Select patient" dropdown
+# (build_patient_id_card), which keeps all 3 test patients unchanged.
+PR_ONLY_CASE_OPTIONS = [
+    {"label": "Test Patient 1 (TEST-001)", "value": "1"},
+]
+
 # Mirrors scripts/precompute_remi_cases.py's own GRID_MIN/MAX/POINTS -
 # used only to draw the slider's static bounds/marks at layout-build time.
 # The callback in app.py sources the actual selectable rates from the
 # loaded JSON itself, never from this Python-side copy, so if the two
 # ever drift this would be a display-only quirk (e.g. a mark not lining
 # up exactly), not a crash.
-PR_GRID_MIN_MCGKGMIN = 0.02
-PR_GRID_MAX_MCGKGMIN = 0.20
-PR_GRID_POINTS = 20
+PR_GRID_MIN_MCGKGMIN = 0.00
+PR_GRID_MAX_MCGKGMIN = 2.00
+# 41 points across 0.00-2.00 inclusive = exact 0.05 steps
+# ((2.00 - 0.00) / (41 - 1) = 0.05) - the coarser precision requested for
+# this page: 0.00, 0.05, 0.10, ..., 1.95, 2.00, not 0.01 steps.
+PR_GRID_POINTS = 41
+
+# The slider's own default explored rate - deliberately NOT rates[0] (which
+# is 0.00, the grid's minimum): defaulting to 0.00 would silently start
+# every session on "no remifentanil infusion" despite Remifentanil being
+# selected, which is confusing. 0.05 is the smallest non-zero value in the
+# 0.05-step grid - kept as the default explored rate. Also used by
+# run_pr_scenario in app.py, which resets the slider to this same rate on
+# every "Run Scenario" click.
+PR_DEFAULT_EXPLORE_RATE_MCGKGMIN = 0.05
 
 
 def _pr_grid_rates() -> list[float]:
-    """Pure-Python linspace (this file has no numpy dependency) matching the precompute script's own grid."""
+    """
+    Pure-Python linspace (this file has no numpy dependency) matching the
+    precompute script's own grid. Each point is rounded to 2 decimals so
+    the 0.00-2.00 range in exact 0.05 steps never drifts into something
+    like 1.9500000000000002 - both endpoints, and every coordinate in
+    between, come out as exact, clean 2-decimal values.
+    """
     step = (PR_GRID_MAX_MCGKGMIN - PR_GRID_MIN_MCGKGMIN) / (PR_GRID_POINTS - 1)
-    return [round(PR_GRID_MIN_MCGKGMIN + i * step, 4) for i in range(PR_GRID_POINTS)]
+    return [round(PR_GRID_MIN_MCGKGMIN + i * step, 2) for i in range(PR_GRID_POINTS)]
 
 
 def _pr_slider_marks() -> dict:
+    """
+    One entry per precomputed grid rate (41, in exact 0.05 steps) - every
+    entry is a valid snap point (step=None on the slider itself means it
+    can only land on a marks key), but only every 0.50 carries a visible
+    text label (0.00, 0.50, 1.00, 1.50, 2.00). Labeling all 41 would be
+    too crowded; this does not change which values are selectable, only
+    which ones show a number next to the tick.
+    """
     rates = _pr_grid_rates()
-    marks = {r: "" for r in rates}
-    marks[rates[0]] = f"{rates[0]:.2f}"
-    marks[rates[-1]] = f"{rates[-1]:.2f}"
+    marks = {}
+    for r in rates:
+        hundredths = round(r * 100)
+        marks[r] = f"{r:.2f}" if hundredths % 50 == 0 else ""
     return marks
 
 
 def build_pr_case_card():
-    """The case-selector card - the only free-choice control on this page (together with the Medication scenario dropdown below). Everything else is read-only, driven by whichever case is selected here."""
+    """
+    The case-selector card - the only free-choice control on this page
+    (together with the Medication scenario dropdown below). Everything
+    else is read-only, driven by whichever case is selected here.
+
+    Only Test Patient 1 is offered (PR_ONLY_CASE_OPTIONS, not the 3-patient
+    PR_CASE_OPTIONS - see its own docstring), pre-selected ("1", not None)
+    so the Patient scenario/Targets preview cards populate immediately on
+    page load without the user needing to touch this dropdown at all.
+    """
     return html.Div(
         [
             _te_card_header("fa-id-card", "Patient case"),
-            _te_dropdown_field("Select patient", "pr-case-dropdown", PR_CASE_OPTIONS, None),
+            _te_dropdown_field("Select patient", "pr-case-dropdown", PR_ONLY_CASE_OPTIONS, "1"),
         ],
         className="card te-card",
     )
@@ -2356,7 +2402,8 @@ def build_pr_explore_card():
                     html.Div("", id="pr-rate-label", className="te-explore-rate-value"),
                     dcc.Slider(
                         id="pr-rate-slider",
-                        min=rates[0], max=rates[-1], step=None, marks=marks, value=rates[0],
+                        min=rates[0], max=rates[-1], step=None, marks=marks,
+                        value=PR_DEFAULT_EXPLORE_RATE_MCGKGMIN,
                         tooltip={"placement": "bottom", "always_visible": False},
                         className="scenario-slider te-explore-slider",
                     ),
@@ -2369,6 +2416,49 @@ def build_pr_explore_card():
     )
 
 
+def _pr_dose_response_axis_label(text: str, side: str, arrow_points_down: bool):
+    """
+    Vertical axis-title replacement for the Dose-Response Interaction
+    graph, standing in for Plotly's own yaxis/yaxis2 title (left empty on
+    purpose - see make_pr_induction_dose_rationale_figure in app.py).
+
+    Plain compact HTML/CSS, not the fixed-viewBox SVG image this used
+    originally - that approach non-uniformly stretched a fixed 32x480
+    canvas to whatever height the row actually rendered at, which is what
+    caused the clipped/misaligned arrows once the card's real height
+    diverged from that assumption. This version is just an arrow glyph
+    (plain text, not rotated) next to a `writing-mode: vertical-rl`
+    title (see style.css's own .pr-dose-response-axis-label rules) inside
+    a flex column that stretches to match the graph card's actual
+    rendered height - no fixed canvas size or aspect ratio to keep in
+    sync with anything, so it can't drift out of alignment.
+    """
+    arrow = html.Span("↓" if arrow_points_down else "↑", className="pr-dose-response-axis-arrow")
+    label = html.Span(text, className="pr-dose-response-axis-text")
+    # BIS's arrow points down, at the bottom of its label - order the
+    # children so the arrow always sits at the end the line is pointing
+    # toward (arrow last when pointing down, first when pointing up).
+    children = [label, arrow] if arrow_points_down else [arrow, label]
+    return html.Div(children, className=f"pr-dose-response-axis-label pr-dose-response-axis-label--{side}")
+
+
+def _pr_dose_response_legend_item(value_id: str, label: str, swatch_class: str):
+    """One of the three explanatory info boxes below the Dose-Response Interaction graph - a colored swatch, a static label, and a dynamically-populated value (see update_pr_results in app.py)."""
+    return html.Div(
+        [
+            html.Span(className=f"pr-dose-response-legend-swatch {swatch_class}"),
+            html.Div(
+                [
+                    html.Div(label, className="pr-dose-response-legend-label"),
+                    html.Div("-", id=value_id, className="pr-dose-response-legend-value"),
+                ],
+                className="pr-dose-response-legend-text",
+            ),
+        ],
+        className="pr-dose-response-legend-item",
+    )
+
+
 def build_pr_dose_response_card():
     """
     Dose-Response Interaction - visually matches the Recommendation
@@ -2377,9 +2467,52 @@ def build_pr_dose_response_card():
     built from each regimen's own precomputed dose-sweep data (see
     scripts/precompute_remi_cases.py's own _dose_sweep()). See
     make_pr_induction_dose_rationale_figure in app.py.
+
+    Unlike that Plotly figure's own generic internals, three things around
+    it are plain Dash/HTML, not Plotly: the two vertical axis-title+arrow
+    labels (_pr_dose_response_axis_label, flanking the graph left/right -
+    Plotly can't thread an arrow through rotated axis-title text), and the
+    three explanatory info boxes below it (_pr_dose_response_legend_item -
+    MAP target zone / BIS target zone / Target dose range, replacing the
+    old in-plot legend and in-plot target-range numbers). The MAP/BIS
+    target-zone and dose-range *values* shown in those boxes are still
+    dynamic, populated by update_pr_results in app.py from the same
+    precomputed sweep data the graph itself uses - only their swatches
+    and labels are static markup.
     """
     card = graph_card("Dose-Response Interaction", "pr-dose-response-graph", tall=True)
-    return html.Div([card], id="pr-dose-response-card-wrapper")
+    return html.Div(
+        [
+            html.Div(
+                [
+                    _pr_dose_response_axis_label(
+                        "Minimal MAP (mmHg)", "left", arrow_points_down=False,
+                    ),
+                    card,
+                    _pr_dose_response_axis_label(
+                        "Maximal BIS", "right", arrow_points_down=True,
+                    ),
+                ],
+                className="pr-dose-response-plot-row",
+            ),
+            html.Div(
+                [
+                    _pr_dose_response_legend_item(
+                        "pr-dose-response-map-zone-value", "MAP target zone", "pr-dose-response-swatch--map",
+                    ),
+                    _pr_dose_response_legend_item(
+                        "pr-dose-response-bis-zone-value", "BIS target zone", "pr-dose-response-swatch--bis",
+                    ),
+                    _pr_dose_response_legend_item(
+                        "pr-dose-response-dose-range-value", "Target dose range", "pr-dose-response-swatch--dose",
+                    ),
+                ],
+                className="pr-dose-response-legend-row",
+            ),
+        ],
+        id="pr-dose-response-card-wrapper",
+        className="pr-dose-response-wrapper",
+    )
 
 
 def build_pr_center_column():

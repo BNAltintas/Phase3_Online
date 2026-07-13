@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import math
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
@@ -16,6 +17,10 @@ from propofol.config import BOLUS_MGKG_BOUNDS
 from propofol.dashboard_layout import (
     EHR_RECORD_DATE,
     EHR_RECORD_TIME,
+    PR_DEFAULT_EXPLORE_RATE_MCGKGMIN,
+    PR_GRID_MAX_MCGKGMIN,
+    PR_GRID_MIN_MCGKGMIN,
+    PR_GRID_POINTS,
     PRESET_TEST_PATIENTS,
     SCENARIO_DEFAULT_PATIENT,
     SCENARIO_DEFAULT_REMI_MCGKGMIN,
@@ -67,8 +72,90 @@ FONT_AWESOME_CDN = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/cs
 # still starts up and every other page keeps working; the page itself
 # (build_precomputed_remi_page in dashboard_layout.py) renders a clear
 # "not generated yet" message in that case instead of a case picker.
+#
+# A file that DOES load as valid JSON but doesn't match what this build of
+# the app expects (stale data from before the Precomputed Remi page was
+# restricted to Test Patient 1 / the 0.00-2.00 grid, most obviously) is a
+# different failure mode from "not generated yet" - _validate_precomputed_
+# remi_data raises instead of returning None, so a mismatch is a loud
+# startup crash a developer will immediately notice and fix by re-running
+# the precompute script, not a page that silently shows Test Patient 2/3
+# or the old 0.02-0.20 range again.
 # ------------------------------------------------------------
 PRECOMPUTED_REMI_PATH = Path(__file__).resolve().parent / "data" / "precomputed_remi_cases.json"
+
+PR_REQUIRED_REGIMEN_FIELDS = (
+    "propofol_bolus_mg", "propofol_bolus_mgkg", "propofol_inf_rates_mcgkgmin",
+    "remifentanil_selected", "remifentanil_inf_rates_mcgkgmin",
+    "time_min", "bis", "map_mmhg", "cp_propofol", "dose_sweep",
+)
+PR_REQUIRED_DOSE_SWEEP_FIELDS = ("dose_grid_mgkg", "min_map_mmhg", "min_bis", "max_bis")
+
+
+def _validate_precomputed_remi_regimen(regimen: dict, where: str) -> None:
+    for field in PR_REQUIRED_REGIMEN_FIELDS:
+        if field not in regimen:
+            raise ValueError(f"Precomputed Remi data: {where} is missing required field {field!r}.")
+    sweep = regimen["dose_sweep"]
+    for field in PR_REQUIRED_DOSE_SWEEP_FIELDS:
+        if field not in sweep:
+            raise ValueError(f"Precomputed Remi data: {where}.dose_sweep is missing required field {field!r}.")
+
+
+def _validate_precomputed_remi_data(data: dict) -> None:
+    """
+    Development-time guard against silently loading stale Precomputed Remi
+    data (see the module comment above PRECOMPUTED_REMI_PATH). Checked
+    once, at import time, right after a successful JSON parse - raises
+    ValueError with a specific, actionable message rather than letting the
+    app start up with wrong patients/rates/missing fields.
+    """
+    cases = data.get("cases")
+    if not isinstance(cases, dict):
+        raise ValueError("Precomputed Remi data: missing or malformed 'cases' object.")
+
+    expected_case_ids = {"1"}
+    actual_case_ids = set(cases.keys())
+    if actual_case_ids != expected_case_ids:
+        raise ValueError(
+            "Precomputed Remi data: expected only Test Patient 1 (case '1'), "
+            f"found case ids {sorted(actual_case_ids)!r}. Re-run "
+            "scripts/precompute_remi_cases.py to regenerate a Test-Patient-1-only dataset."
+        )
+
+    case = cases["1"]
+    grid = case.get("remifentanil_grid") or {}
+    rates = grid.get("rates_mcgkgmin")
+    results = grid.get("results")
+    if not rates or not results:
+        raise ValueError("Precomputed Remi data: case '1' has no remifentanil grid rates/results.")
+    if len(rates) != len(results):
+        raise ValueError(
+            f"Precomputed Remi data: case '1' has {len(rates)} grid rates but {len(results)} results."
+        )
+    if len(rates) != PR_GRID_POINTS:
+        raise ValueError(
+            f"Precomputed Remi data: case '1' has {len(rates)} grid points, expected {PR_GRID_POINTS}."
+        )
+    if not math.isclose(rates[0], PR_GRID_MIN_MCGKGMIN, abs_tol=1e-9):
+        raise ValueError(
+            f"Precomputed Remi data: minimum grid rate is {rates[0]}, expected {PR_GRID_MIN_MCGKGMIN}."
+        )
+    if not math.isclose(rates[-1], PR_GRID_MAX_MCGKGMIN, abs_tol=1e-9):
+        raise ValueError(
+            f"Precomputed Remi data: maximum grid rate is {rates[-1]}, expected {PR_GRID_MAX_MCGKGMIN}."
+        )
+    if rates != sorted(rates):
+        raise ValueError("Precomputed Remi data: case '1' grid rates are not sorted ascending.")
+
+    for baseline_key in ("baseline_none", "baseline_remifentanil"):
+        baseline = case.get(baseline_key)
+        if not isinstance(baseline, dict):
+            raise ValueError(f"Precomputed Remi data: case '1' is missing '{baseline_key}'.")
+        _validate_precomputed_remi_regimen(baseline, f"case '1'.{baseline_key}")
+
+    for i, result in enumerate(results):
+        _validate_precomputed_remi_regimen(result, f"case '1'.remifentanil_grid.results[{i}]")
 
 
 def _load_precomputed_remi_data() -> Optional[dict]:
@@ -76,9 +163,11 @@ def _load_precomputed_remi_data() -> Optional[dict]:
         return None
     try:
         with PRECOMPUTED_REMI_PATH.open("r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
     except (OSError, json.JSONDecodeError):
         return None
+    _validate_precomputed_remi_data(data)
+    return data
 
 
 PRECOMPUTED_REMI_DATA = _load_precomputed_remi_data()
@@ -89,6 +178,29 @@ def _pr_case(case_id: Optional[str]) -> Optional[dict]:
     if PRECOMPUTED_REMI_DATA is None or not case_id:
         return None
     return PRECOMPUTED_REMI_DATA.get("cases", {}).get(case_id)
+
+
+def _pr_rate_to_index(rates: list, rate: Optional[float]) -> int:
+    """
+    Exact-match lookup from a requested remifentanil rate to its index in
+    the precomputed grid's own rates list - not nearest-value/interpolated
+    matching. Every selectable rate is one of the grid's own 41 exact
+    values (the slider's step=None + marks means it can only land on one
+    of them), so this always finds a true exact match in normal use;
+    comparing integer hundredths (0, 5, 10, ..., 200) rather than the raw
+    floats is purely to stay immune to float representation noise (e.g.
+    0.15000000000000002), never to pick a "close enough" value that isn't
+    the one actually requested. Falls back to index 0 only defensively
+    (rate is None, or - should never happen - an unexpected rate outside
+    the grid), mirroring the previous None-rate default.
+    """
+    if rate is None:
+        return 0
+    target = round(rate * 100)
+    for i, r in enumerate(rates):
+        if round(r * 100) == target:
+            return i
+    return 0
 
 
 app = dash.Dash(__name__, external_stylesheets=[FONT_AWESOME_CDN])
@@ -4178,10 +4290,18 @@ def make_pr_induction_dose_rationale_figure(baseline_ns, baseline_map: float, ex
         & (min_maps >= map_target) & (min_maps <= map_target_upper)
         & (min_bis_values >= target_bis_low) & (max_bis_values <= target_bis_high)
     )
+    # Text version of the target-dose-range boundaries, returned alongside
+    # the figure for the "Target dose range" info box below the graph
+    # (build_pr_dose_response_card in dashboard_layout.py) - no boundary
+    # numbers are drawn inside the plot itself any more (see the removed
+    # per-boundary annotations that used to sit just above the green
+    # band); "-" when no dose achieves both targets simultaneously.
+    dose_range_text = "–"
     if np.any(both_targets_ok):
         ok_doses = dose_grid_mgkg[both_targets_ok]
         ok_start = float(np.min(ok_doses))
         ok_end = float(np.max(ok_doses))
+        dose_range_text = f"{ok_start:.2f}–{ok_end:.2f} mg/kg"
 
         if ok_end > ok_start:
             band_x0, band_x1 = ok_start, ok_end
@@ -4195,11 +4315,6 @@ def make_pr_induction_dose_rationale_figure(baseline_ns, baseline_map: float, ex
             type="rect", xref="x", yref="paper", x0=band_x0, x1=band_x1, y0=0, y1=1,
             fillcolor="rgba(0, 150, 0, 0.10)", line=dict(width=0), layer="below",
         )
-        for x_value, label, x_anchor in [(ok_start, f"{ok_start:.2f}", "right"), (ok_end, f"{ok_end:.2f}", "left")]:
-            fig.add_annotation(
-                x=x_value, y=1.01, xref="x", yref="paper", text=f"<b>{label}</b>",
-                showarrow=False, xanchor=x_anchor, yanchor="bottom", font=dict(color="green", size=13),
-            )
 
     fig.add_trace(
         go.Scatter(
@@ -4246,29 +4361,40 @@ def make_pr_induction_dose_rationale_figure(baseline_ns, baseline_map: float, ex
         secondary_y=True,
     )
 
-    fig.add_trace(go.Scatter(
-        x=[None], y=[None], mode="markers",
-        marker=dict(symbol="square", size=10, color="rgba(0, 150, 0, 0.25)"),
-        name="Target", showlegend=True,
-    ))
-    fig.add_trace(go.Scatter(
-        x=[None], y=[None], mode="lines", line=dict(color=RECOMMENDED_COLOR, width=3, dash="dash"),
-        name="Baseline", showlegend=True,
-    ))
-    if explored_ns is not None:
-        fig.add_trace(go.Scatter(
-            x=[None], y=[None], mode="lines", line=dict(color=MANUAL_OVERRIDE_COLOR, width=3, dash="dash"),
-            name="Explored", showlegend=True,
-        ))
-
     fig.add_shape(
         type="line", xref="x", yref="paper", x0=selected_dose_mgkg, x1=selected_dose_mgkg, y0=0, y1=1,
         line=dict(color=RECOMMENDED_COLOR, width=3, dash="dash"), layer="above",
     )
-    fig.add_annotation(
-        x=selected_dose_mgkg, y=1.07, xref="x", yref="paper",
-        text=f"<b>Baseline {selected_dose_mgkg:.2f} mg/kg</b>", showarrow=False, yanchor="bottom",
-        font=dict(color=RECOMMENDED_COLOR, size=13),
+    # Two-line "<label>\n<dose>" annotations (label colored, dose value in
+    # a neutral dark color). Both normally sit at the same y, each
+    # centered above its own dose's x position - but when the baseline and
+    # explored doses are close together on the x-axis, same-y placement
+    # makes the two (2-line-tall) labels visually collide. baseline_y/
+    # explored_y are computed once below, as a fraction of the *actual*
+    # x-axis range (not a fixed pixel/dose threshold), so the labels never
+    # overlap regardless of the current dose values or how narrow/wide the
+    # rendered plot is - close doses stagger vertically instead, still
+    # each directly above its own dashed line (no horizontal shift).
+    dose_label_value_color = "#1f2330"
+
+    def _dose_label_annotation(x_value: float, y_value: float, label: str, color: str, value_text: str) -> None:
+        fig.add_annotation(
+            x=x_value, y=y_value, xref="x", yref="paper",
+            text=f'<span style="color:{color}"><b>{label}</b></span><br><b>{value_text}</b>',
+            showarrow=False, yanchor="bottom", align="center",
+            font=dict(color=dose_label_value_color, size=13),
+        )
+
+    baseline_y = 1.05
+    explored_y = 1.05
+    if explored_dose_mgkg is not None:
+        x_range = x_axis_max - x_axis_min
+        dose_gap_frac = abs(explored_dose_mgkg - selected_dose_mgkg) / x_range if x_range > 0 else 0.0
+        if dose_gap_frac < 0.22:
+            explored_y = 1.34
+
+    _dose_label_annotation(
+        selected_dose_mgkg, baseline_y, "Baseline dose", RECOMMENDED_COLOR, f"{selected_dose_mgkg:.2f} mg/kg",
     )
 
     if explored_ns is not None:
@@ -4298,42 +4424,63 @@ def make_pr_induction_dose_rationale_figure(baseline_ns, baseline_map: float, ex
             type="line", xref="x", yref="paper", x0=explored_dose_mgkg, x1=explored_dose_mgkg, y0=0, y1=1,
             line=dict(color=MANUAL_OVERRIDE_COLOR, width=3, dash="dash"), layer="above",
         )
-        fig.add_annotation(
-            x=explored_dose_mgkg, y=1.14, xref="x", yref="paper",
-            text=f"<b>Explored {explored_dose_mgkg:.2f} mg/kg</b>", showarrow=False, yanchor="bottom",
-            font=dict(color=MANUAL_OVERRIDE_COLOR, size=13),
+        _dose_label_annotation(
+            explored_dose_mgkg, explored_y, "Explored dose", MANUAL_OVERRIDE_COLOR, f"{explored_dose_mgkg:.2f} mg/kg",
         )
 
-    legend_y = 1.26 if explored_ns is not None else 1.19
-    margin_t = 90 if explored_ns is not None else 70
-
+    # No more top legend (the old MAP/BIS/Target/Baseline/Explored legend
+    # row) - showlegend=False suppresses it regardless of any trace's own
+    # showlegend value, so the MAP/BIS data traces above (still name="MAP"
+    # /"BIS" for hover/debugging purposes) never render a legend either.
+    # yaxis/yaxis2 titles are intentionally empty: the axis-title text and
+    # its arrow are now drawn as a compact HTML/CSS overlay beside the
+    # graph (see build_pr_dose_response_card in dashboard_layout.py).
+    #
+    # Margins: yref="paper" annotation y-values above 1.0 only stay on
+    # canvas if the top margin (an absolute pixel count) covers that
+    # excess once translated through the plot area's own pixel height -
+    # and that pixel height grows with the card (#pr-dose-response-
+    # card-wrapper .graph-card--tall in style.css sets it to 620px), so
+    # the margin has to be sized for that card height, not guessed.
+    # Worked backwards from the actual rendered card: content area is
+    # roughly 560px tall, so with a 46px bottom margin the plot area
+    # (paper y 0-to-1) is (560 - t - 46) px tall; the staggered label's
+    # anchor at y=1.34 sits t - 0.34*(560-t-46) px below the figure's own
+    # top edge, and since the annotation is yanchor="bottom" its 2-line
+    # text then grows *upward* from that anchor by another ~35px - so
+    # t=185 leaves that whole 2-line block comfortably on-canvas instead
+    # of overlapping the card header above it. l/r=54 leaves room for
+    # the y tick labels next to the now much narrower (~22px) CSS
+    # arrow-label columns; b=46 fits the x-axis title without touching
+    # the bottom info boxes, which live outside the graph entirely.
     fig.update_layout(
         template="plotly_white",
-        showlegend=True,
-        legend=dict(
-            orientation="h", yanchor="bottom", y=legend_y, xanchor="left", x=0,
-            font=dict(size=9), tracegroupgap=2,
-        ),
-        margin=dict(t=margin_t, b=42, l=48, r=38),
+        showlegend=False,
+        margin=dict(t=185, b=46, l=54, r=54),
         xaxis=dict(
             title=dict(text="Propofol induction dose (mg/kg)", font=dict(color="green")),
             tickfont=dict(color="green"), color="green",
             range=[x_axis_min, x_axis_max],
         ),
         yaxis=dict(
-            title=dict(text="Minimal MAP (mmHg) ↑", font=dict(color="red")),
+            title=dict(text=""),
             tickfont=dict(color="red"), color="red",
             range=[map_axis_min, map_axis_max],
         ),
         yaxis2=dict(
-            title=dict(text="Maximal BIS ↓", font=dict(color="blue")),
+            title=dict(text=""),
             tickfont=dict(color="blue"), color="blue",
             range=[max_bis_axis_max, max_bis_axis_min],
             overlaying="y", side="right",
         ),
     )
 
-    return fig
+    return SimpleNamespace(
+        figure=fig,
+        map_zone_text=f"≥ {map_target:.0f} mmHg",
+        bis_zone_text=f"{target_bis_low:.0f}–{target_bis_high:.0f}",
+        dose_range_text=dose_range_text,
+    )
 
 
 def _pr_delta(baseline_val: float, explored_val: float) -> tuple[str, str]:
@@ -4629,7 +4776,6 @@ def toggle_pr_explore_slider(explore_opioid):
     Output("pr-case-error-banner", "style"),
     Output("pr-case-error-banner", "children"),
     Input("pr-case-dropdown", "value"),
-    prevent_initial_call=True,
 )
 def update_pr_patient_preview(case_id):
     """
@@ -4641,6 +4787,11 @@ def update_pr_patient_preview(case_id):
     app or silently show stale/wrong numbers). Deliberately does not
     touch pr-results-area/pr-selected-case-store/pr-rate-slider - those
     are only committed by run_pr_scenario, below, on "Run Scenario".
+
+    No longer prevent_initial_call: pr-case-dropdown now defaults to "1"
+    (Test Patient 1 is the only option), so this callback firing once on
+    page load is exactly what populates the Patient scenario/Targets
+    cards immediately, without requiring the user to touch the dropdown.
     """
     hidden = {"display": "none"}
     blank = ("-",) * 13 + ("none",)
@@ -4735,7 +4886,11 @@ def run_pr_scenario(_n_clicks, case_id, baseline_choice):
         return None, no_update, no_update, False
 
     rates = grid["rates_mcgkgmin"]
-    return case_id, baseline_choice, rates[0], True
+    # PR_DEFAULT_EXPLORE_RATE_MCGKGMIN, not rates[0]: rates[0] is now 0.00
+    # (the grid's minimum), and silently resetting to "no remifentanil
+    # infusion" on every Run Scenario click would be confusing.
+    default_rate = rates[_pr_rate_to_index(rates, PR_DEFAULT_EXPLORE_RATE_MCGKGMIN)]
+    return case_id, baseline_choice, default_rate, True
 
 
 @app.callback(
@@ -4757,6 +4912,9 @@ def render_pr_results_area(is_active):
     Output("pr-propofol-pk-graph", "figure"),
     Output("pr-remifentanil-pk-graph", "figure"),
     Output("pr-dose-response-graph", "figure"),
+    Output("pr-dose-response-map-zone-value", "children"),
+    Output("pr-dose-response-bis-zone-value", "children"),
+    Output("pr-dose-response-dose-range-value", "children"),
     Input("pr-rate-slider", "value"),
     Input("pr-selected-case-store", "data"),
     Input("pr-committed-baseline-store", "data"),
@@ -4766,14 +4924,16 @@ def render_pr_results_area(is_active):
 def update_pr_results(rate, case_id, baseline_choice, explore_opioid):
     """
     Everything shown for the committed case + committed baseline
-    reference + current grid rate - all 9 outputs are read straight from
+    reference + current grid rate - all 12 outputs are read straight from
     PRECOMPUTED_REMI_DATA (already loaded, module-level, at startup) and
     reused figure-building functions. No model call happens here or
     anywhere else on this page - the slider only ever selects among the
-    20 already-computed grid results (step=None + marks on the slider
-    itself guarantees it can only land exactly on one of those 20 values,
-    never an in-between one). case/baseline are the *committed* values
-    (set only by run_pr_scenario, above, on "Run Scenario"), not the raw
+    41 already-computed grid results (step=None + marks on the slider
+    itself guarantees it can only land exactly on one of those 41 values,
+    never an in-between one, and _pr_rate_to_index above does an exact -
+    not nearest-value - lookup from that landed value to its grid index).
+    case/baseline are the *committed* values (set only by run_pr_scenario,
+    above, on "Run Scenario"), not the raw
     dropdown values, so pr-results-area's content only ever changes on a
     deliberate Run Scenario click, a rate-slider move, or a change to
     "Opioid to explore".
@@ -4793,7 +4953,7 @@ def update_pr_results(rate, case_id, baseline_choice, explore_opioid):
     """
     case = _pr_case(case_id)
     if case is None:
-        return (no_update,) * 9
+        return (no_update,) * 12
 
     grid = case.get("remifentanil_grid", {})
     rates = grid.get("rates_mcgkgmin") or []
@@ -4803,7 +4963,7 @@ def update_pr_results(rate, case_id, baseline_choice, explore_opioid):
 
     if not rates or not results or baseline_dict is None:
         empty = make_empty_figure("No precomputed data for this selection")
-        return "-", "-", [], "-", empty, empty, empty, empty, empty
+        return "-", "-", [], "-", empty, empty, empty, empty, empty, "-", "-", "-"
 
     baseline_ns = _store_dict_to_namespace(baseline_dict)
     baseline_label = _pr_remi_rate_display(baseline_ns)
@@ -4816,14 +4976,15 @@ def update_pr_results(rate, case_id, baseline_choice, explore_opioid):
         map_fig = make_map_figure(baseline_ns)
         propofol_fig = make_propofol_pk_figure(baseline_ns)
         remifentanil_fig = make_remifentanil_pk_figure(baseline_ns)
-        dose_response_fig = make_pr_induction_dose_rationale_figure(baseline_ns, baseline_map)
+        dose_response = make_pr_induction_dose_rationale_figure(baseline_ns, baseline_map)
         grid_children = _build_pr_result_grid_baseline_only(baseline_ns)
         return (
             baseline_label, "Not selected", grid_children, "-",
-            bis_fig, map_fig, propofol_fig, remifentanil_fig, dose_response_fig,
+            bis_fig, map_fig, propofol_fig, remifentanil_fig, dose_response.figure,
+            dose_response.map_zone_text, dose_response.bis_zone_text, dose_response.dose_range_text,
         )
 
-    idx = min(range(len(rates)), key=lambda i: abs(rates[i] - rate)) if rate is not None else 0
+    idx = _pr_rate_to_index(rates, rate)
     explored_dict = results[idx]
     explored_ns = _store_dict_to_namespace(explored_dict)
 
@@ -4834,7 +4995,7 @@ def update_pr_results(rate, case_id, baseline_choice, explore_opioid):
         manual_cp_name="Explored Scenario (Cp)", manual_ce_name="Explored Scenario (Ce)",
     )
     remifentanil_fig = make_pr_remifentanil_pk_figure(baseline_ns, explored_ns)
-    dose_response_fig = make_pr_induction_dose_rationale_figure(baseline_ns, baseline_map, explored_ns)
+    dose_response = make_pr_induction_dose_rationale_figure(baseline_ns, baseline_map, explored_ns)
 
     explored_label = _pr_remi_rate_display(explored_ns)
     grid_children = _build_pr_result_grid(baseline_ns, explored_ns)
@@ -4842,7 +5003,8 @@ def update_pr_results(rate, case_id, baseline_choice, explore_opioid):
 
     return (
         baseline_label, explored_label, grid_children, rate_label,
-        bis_fig, map_fig, propofol_fig, remifentanil_fig, dose_response_fig,
+        bis_fig, map_fig, propofol_fig, remifentanil_fig, dose_response.figure,
+        dose_response.map_zone_text, dose_response.bis_zone_text, dose_response.dose_range_text,
     )
 
 
