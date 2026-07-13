@@ -2431,102 +2431,30 @@ def build_pr_explore_card():
     )
 
 
-def _pr_dose_response_axis_label(text: str, side: str, arrow_points_down: bool):
-    """
-    Vertical axis-title replacement for the Dose-Response Interaction
-    graph, standing in for Plotly's own yaxis/yaxis2 title (left empty on
-    purpose - see make_pr_induction_dose_rationale_figure in app.py).
-
-    Plain compact HTML/CSS, not the fixed-viewBox SVG image this used
-    originally - that approach non-uniformly stretched a fixed 32x480
-    canvas to whatever height the row actually rendered at, which is what
-    caused the clipped/misaligned arrows once the card's real height
-    diverged from that assumption. This version is just an arrow glyph
-    (plain text, not rotated) next to a `writing-mode: vertical-rl`
-    title (see style.css's own .pr-dose-response-axis-label rules) inside
-    a flex column that stretches to match the graph card's actual
-    rendered height - no fixed canvas size or aspect ratio to keep in
-    sync with anything, so it can't drift out of alignment.
-    """
-    arrow = html.Span("↓" if arrow_points_down else "↑", className="pr-dose-response-axis-arrow")
-    label = html.Span(text, className="pr-dose-response-axis-text")
-    # BIS's arrow points down, at the bottom of its label - order the
-    # children so the arrow always sits at the end the line is pointing
-    # toward (arrow last when pointing down, first when pointing up).
-    children = [label, arrow] if arrow_points_down else [arrow, label]
-    return html.Div(children, className=f"pr-dose-response-axis-label pr-dose-response-axis-label--{side}")
-
-
-def _pr_dose_response_legend_item(value_id: str, label: str, swatch_class: str):
-    """One of the three explanatory info boxes below the Dose-Response Interaction graph - a colored swatch, a static label, and a dynamically-populated value (see update_pr_results in app.py)."""
-    return html.Div(
-        [
-            html.Span(className=f"pr-dose-response-legend-swatch {swatch_class}"),
-            html.Div(
-                [
-                    html.Div(label, className="pr-dose-response-legend-label"),
-                    html.Div("-", id=value_id, className="pr-dose-response-legend-value"),
-                ],
-                className="pr-dose-response-legend-text",
-            ),
-        ],
-        className="pr-dose-response-legend-item",
-    )
-
-
 def build_pr_dose_response_card():
     """
-    Dose-Response Interaction - visually matches the Recommendation
-    page's own induction-dose rationale graph (MAP/BIS target bands,
-    green "both targets met" region, diamond markers, reversed BIS axis),
-    built from each regimen's own precomputed dose-sweep data (see
-    scripts/precompute_remi_cases.py's own _dose_sweep()). See
+    Dose-Response Interaction - shares the exact same figure builder and
+    visual styling as the Recommendation page's own induction-dose
+    rationale graph (dose-rationale-graph): same MAP/BIS target bands,
+    green "both targets met" region with its own Min=/Max= labels,
+    diamond markers, reversed BIS axis, top legend, and axis-title
+    arrows baked into the axis titles themselves - see
+    _build_dose_response_figure in app.py, the shared helper both pages'
+    figure-building functions now call. The only page-specific
+    difference is the data it plots - baseline (green "Baseline dose")
+    vs explored scenario (orange "Explored dose") from this case's own
+    precomputed dose-sweep arrays, never a live model call - see
     make_pr_induction_dose_rationale_figure in app.py.
 
-    Unlike that Plotly figure's own generic internals, three things around
-    it are plain Dash/HTML, not Plotly: the two vertical axis-title+arrow
-    labels (_pr_dose_response_axis_label, flanking the graph left/right -
-    Plotly can't thread an arrow through rotated axis-title text), and the
-    three explanatory info boxes below it (_pr_dose_response_legend_item -
-    MAP target zone / BIS target zone / Target dose range, replacing the
-    old in-plot legend and in-plot target-range numbers). The MAP/BIS
-    target-zone and dose-range *values* shown in those boxes are still
-    dynamic, populated by update_pr_results in app.py from the same
-    precomputed sweep data the graph itself uses - only their swatches
-    and labels are static markup.
+    No custom axis-label overlay or info boxes below the graph any more
+    (removed - the restored in-plot legend and axis titles already carry
+    that information, exactly as they do on the Recommendation page).
+    The id wrapper only exists so this one card can be sized to match
+    #dose-rationale-card-wrapper's own height in style.css.
     """
-    card = graph_card("Dose-Response Interaction", "pr-dose-response-graph", tall=True)
     return html.Div(
-        [
-            html.Div(
-                [
-                    _pr_dose_response_axis_label(
-                        "Minimal MAP (mmHg)", "left", arrow_points_down=False,
-                    ),
-                    card,
-                    _pr_dose_response_axis_label(
-                        "Maximal BIS", "right", arrow_points_down=True,
-                    ),
-                ],
-                className="pr-dose-response-plot-row",
-            ),
-            html.Div(
-                [
-                    _pr_dose_response_legend_item(
-                        "pr-dose-response-map-zone-value", "MAP target zone", "pr-dose-response-swatch--map",
-                    ),
-                    _pr_dose_response_legend_item(
-                        "pr-dose-response-bis-zone-value", "BIS target zone", "pr-dose-response-swatch--bis",
-                    ),
-                    _pr_dose_response_legend_item(
-                        "pr-dose-response-dose-range-value", "Target dose range", "pr-dose-response-swatch--dose",
-                    ),
-                ],
-                className="pr-dose-response-legend-row",
-            ),
-        ],
+        graph_card("Dose-Response Interaction", "pr-dose-response-graph", tall=True),
         id="pr-dose-response-card-wrapper",
-        className="pr-dose-response-wrapper",
     )
 
 

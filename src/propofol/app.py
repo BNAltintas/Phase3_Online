@@ -1412,6 +1412,79 @@ def make_induction_dose_rationale_figure(
     min_bis_values = np.asarray(min_bis_values, dtype=float)
     max_bis_values = np.asarray(max_bis_values, dtype=float)
 
+    manual_min_map = manual_max_bis = None
+    if manual_dose_mgkg is not None:
+        manual_idx = int(np.argmin(np.abs(dose_grid_mgkg - manual_dose_mgkg)))
+        manual_min_map = float(min_maps[manual_idx])
+        manual_max_bis = float(max_bis_values[manual_idx])
+
+    return _build_dose_response_figure(
+        dose_grid_mgkg=dose_grid_mgkg,
+        min_maps=min_maps,
+        min_bis_values=min_bis_values,
+        max_bis_values=max_bis_values,
+        selected_dose_mgkg=selected_dose_mgkg,
+        map_target=map_target,
+        map_target_upper=map_target_upper,
+        target_bis_low=rec.target_bis_low,
+        target_bis_high=rec.target_bis_high,
+        x_axis_min=x_axis_min,
+        x_axis_max=x_axis_max,
+        manual_dose_mgkg=manual_dose_mgkg,
+        manual_min_map=manual_min_map,
+        manual_max_bis=manual_max_bis,
+        compact=compact,
+    )
+
+
+def _build_dose_response_figure(
+    dose_grid_mgkg,
+    min_maps,
+    min_bis_values,
+    max_bis_values,
+    selected_dose_mgkg: float,
+    map_target: float,
+    map_target_upper: float,
+    target_bis_low: float,
+    target_bis_high: float,
+    x_axis_min: float,
+    x_axis_max: float,
+    manual_dose_mgkg: float | None = None,
+    manual_min_map: float | None = None,
+    manual_max_bis: float | None = None,
+    recommended_label: str = "Recommended dose",
+    recommended_hover_label: str = "Recommendation",
+    manual_label: str = "Manual dose",
+    manual_hover_label: str = "Manual dose",
+    compact: bool = False,
+):
+    """
+    Shared Plotly figure builder behind both the Recommendation page's
+    make_induction_dose_rationale_figure and Precomputed Remi's
+    make_pr_induction_dose_rationale_figure - every visual detail (MAP/
+    BIS target bands, the green "both targets met" region with its own
+    Min=/Max= labels, diamond markers, reversed BIS axis, top legend,
+    axis-title arrows) lives here exactly once, so the two pages can
+    never visually drift apart again.
+
+    Callers are responsible for producing their own (dose_grid_mgkg,
+    min_maps, min_bis_values, max_bis_values) sweep - live-simulated on
+    the Recommendation page, read from precomputed dose_sweep arrays on
+    Precomputed Remi - and their own manual/explored marker values
+    (manual_min_map/manual_max_bis), since the two pages sample those
+    from different places: the Recommendation page's manual override
+    only ever changes dose (so it reads off the same sweep via a
+    nearest-dose lookup), while Precomputed Remi's explored scenario is
+    an independently optimized regimen with its own dose_sweep.
+
+    recommended_label/manual_label (legend + annotation text) and
+    recommended_hover_label/manual_hover_label (hover-tooltip prefixes)
+    default to the Recommendation page's own wording ("Recommendation"/
+    "Recommended dose"/"Manual dose") - Precomputed Remi overrides them
+    to "Baseline"/"Baseline dose"/"Explored"/"Explored dose" wording,
+    the only page-specific difference; every color, position, size, and
+    margin below is identical for both callers.
+    """
     selected_idx = int(np.argmin(np.abs(dose_grid_mgkg - selected_dose_mgkg)))
     selected_min_map = float(min_maps[selected_idx])
     selected_min_bis = float(min_bis_values[selected_idx])
@@ -1462,11 +1535,11 @@ def make_induction_dose_rationale_figure(
     # Since the blue line is max BIS, the clinically relevant upper boundary is
     # the upper target. The lower boundary is still shown as context, but
     # excessive depth is checked using min_bis_values in both_targets_ok.
-    # Uses rec.target_bis_low/high (the actual targets used for this
-    # recommendation), not the module defaults.
+    # Uses the caller's own target_bis_low/high (the actual targets used for
+    # this recommendation), not the module defaults.
     bis_band = _target_rect_y_limits(
-        band_low=rec.target_bis_low,
-        band_high=rec.target_bis_high,
+        band_low=target_bis_low,
+        band_high=target_bis_high,
         axis_min=max_bis_axis_min,
         axis_max=max_bis_axis_max,
     )
@@ -1500,8 +1573,8 @@ def make_induction_dose_rationale_figure(
         & np.isfinite(max_bis_values)
         & (min_maps >= map_target)
         & (min_maps <= map_target_upper)
-        & (min_bis_values >= rec.target_bis_low)
-        & (max_bis_values <= rec.target_bis_high)
+        & (min_bis_values >= target_bis_low)
+        & (max_bis_values <= target_bis_high)
     )
 
     if np.any(both_targets_ok):
@@ -1602,7 +1675,7 @@ def make_induction_dose_rationale_figure(
             marker=dict(color="red", size=14, symbol="diamond"),
             showlegend=False,
             hovertemplate=(
-                "Recommendation %{x:.2f} mg/kg<br>"
+                f"{recommended_hover_label} %{{x:.2f}} mg/kg<br>"
                 "Minimal MAP %{y:.1f} mmHg<br>"
                 f"MAP target {map_target:.1f}-{map_target_upper:.1f} mmHg<extra></extra>"
             ),
@@ -1619,10 +1692,10 @@ def make_induction_dose_rationale_figure(
             marker=dict(color="blue", size=14, symbol="diamond"),
             showlegend=False,
             hovertemplate=(
-                "Recommendation %{x:.2f} mg/kg<br>"
+                f"{recommended_hover_label} %{{x:.2f}} mg/kg<br>"
                 "Maximal BIS %{y:.1f}<br>"
                 "Minimal BIS %{customdata[0]:.1f}<br>"
-                f"BIS target {rec.target_bis_low:.0f}-{rec.target_bis_high:.0f}<extra></extra>"
+                f"BIS target {target_bis_low:.0f}-{target_bis_high:.0f}<extra></extra>"
             ),
         ),
         secondary_y=True,
@@ -1664,7 +1737,7 @@ def make_induction_dose_rationale_figure(
         go.Scatter(
             x=[None], y=[None], mode="lines",
             line=dict(color="green", width=3, dash="dash"),
-            name="Recommended dose",
+            name=recommended_label,
             showlegend=True,
         ),
     )
@@ -1673,7 +1746,7 @@ def make_induction_dose_rationale_figure(
             go.Scatter(
                 x=[None], y=[None], mode="lines",
                 line=dict(color=MANUAL_OVERRIDE_COLOR, width=3, dash="dash"),
-                name="Manual dose",
+                name=manual_label,
                 showlegend=True,
             ),
         )
@@ -1714,34 +1787,33 @@ def make_induction_dose_rationale_figure(
         arrowsize=1,
         arrowwidth=2,
         arrowcolor="green",
-        text=f"<b>Recommended dose</b><br>{selected_dose_mgkg:.2f} mg/kg",
+        text=f"<b>{recommended_label}</b><br>{selected_dose_mgkg:.2f} mg/kg",
         align="center",
         yanchor="bottom",
         font=dict(color="green", size=rec_font_size),
     )
 
-    # Manual-override dose, shown in orange, when active.
+    # Manual-override (or explored-scenario) dose, shown in orange, when active.
     if manual_dose_mgkg is not None:
-        manual_idx = int(np.argmin(np.abs(dose_grid_mgkg - manual_dose_mgkg)))
         fig.add_trace(
             go.Scatter(
                 x=[manual_dose_mgkg],
-                y=[float(min_maps[manual_idx])],
+                y=[manual_min_map],
                 mode="markers",
                 marker=dict(color=MANUAL_OVERRIDE_COLOR, size=14, symbol="diamond"),
                 showlegend=False,
-                hovertemplate="Manual dose %{x:.2f} mg/kg<br>Minimal MAP %{y:.1f} mmHg<extra></extra>",
+                hovertemplate=f"{manual_hover_label} %{{x:.2f}} mg/kg<br>Minimal MAP %{{y:.1f}} mmHg<extra></extra>",
             ),
             secondary_y=False,
         )
         fig.add_trace(
             go.Scatter(
                 x=[manual_dose_mgkg],
-                y=[float(max_bis_values[manual_idx])],
+                y=[manual_max_bis],
                 mode="markers",
                 marker=dict(color=MANUAL_OVERRIDE_COLOR, size=14, symbol="diamond"),
                 showlegend=False,
-                hovertemplate="Manual dose %{x:.2f} mg/kg<br>Maximal BIS %{y:.1f}<extra></extra>",
+                hovertemplate=f"{manual_hover_label} %{{x:.2f}} mg/kg<br>Maximal BIS %{{y:.1f}}<extra></extra>",
             ),
             secondary_y=True,
         )
@@ -1782,7 +1854,7 @@ def make_induction_dose_rationale_figure(
             arrowsize=1,
             arrowwidth=2,
             arrowcolor=MANUAL_OVERRIDE_COLOR,
-            text=f"<b>Manual dose</b><br>{manual_dose_mgkg:.2f} mg/kg",
+            text=f"<b>{manual_label}</b><br>{manual_dose_mgkg:.2f} mg/kg",
             align="center",
             yanchor="bottom",
             font=dict(color=MANUAL_OVERRIDE_COLOR, size=manual_font_size),
@@ -4282,19 +4354,22 @@ def make_pr_remifentanil_pk_figure(baseline_ns, explored_ns):
 def make_pr_induction_dose_rationale_figure(baseline_ns, baseline_map: float, explored_ns=None):
     """
     Precomputed Remi's own version of the Recommendation page's
-    make_induction_dose_rationale_figure (that function itself is never
-    modified or called live from this page - see its own docstring
-    above). Reproduces the exact same visual structure - MAP target band
+    make_induction_dose_rationale_figure - both now delegate to the same
+    _build_dose_response_figure helper (see that function's own
+    docstring above make_induction_dose_rationale_figure), so this
+    page's graph is visually identical to the Recommendation page's own
+    induction-dose-rationale graph pixel-for-pixel: MAP target band
     (red), BIS target band (blue), the green "both targets met" dose
-    region with its own annotated bounds, diamond markers, reversed BIS
-    axis, green dashed Baseline / orange dashed Explored reference lines
-    - but reads the propofol induction-dose sweep from baseline_ns.
-    dose_sweep (and explored_ns.dose_sweep, when given) instead of
-    calling Su2023PropofolRemifentanilRecommender.simulate_regimen()
-    live: those arrays are precomputed once offline by
-    scripts/precompute_remi_cases.py's own _dose_sweep() - the exact same
-    forward-simulation logic, just run at precompute time - so nothing on
-    this page ever triggers a live model call.
+    region with its own Min=/Max= annotations, diamond markers, reversed
+    BIS axis, top legend, axis-title arrows, and green "Baseline dose" /
+    orange "Explored dose" reference lines. The only thing this function
+    does itself is read the propofol induction-dose sweep from
+    baseline_ns.dose_sweep (and explored_ns.dose_sweep, when given)
+    instead of calling Su2023PropofolRemifentanilRecommender.
+    simulate_regimen() live: those arrays are precomputed once offline
+    by scripts/precompute_remi_cases.py's own _dose_sweep() - the exact
+    same forward-simulation logic, just run at precompute time - so
+    nothing on this page ever triggers a live model call.
 
     The plotted MAP/BIS curves are the *baseline* regimen's own sweep
     (varying induction dose, baseline's own maintenance schedule held
@@ -4329,231 +4404,33 @@ def make_pr_induction_dose_rationale_figure(baseline_ns, baseline_map: float, ex
     explored_dose_mgkg = float(explored_ns.propofol_bolus_mgkg) if explored_ns is not None else None
     x_axis_min, x_axis_max = _dose_axis_limits_mgkg(selected_dose_mgkg, explored_dose_mgkg)
 
-    selected_idx = int(np.argmin(np.abs(dose_grid_mgkg - selected_dose_mgkg)))
-    selected_min_map = float(min_maps[selected_idx])
-    selected_min_bis = float(min_bis_values[selected_idx])
-    selected_max_bis = float(max_bis_values[selected_idx])
-
-    map_axis_min, map_axis_max = _strict_prediction_axis_range(
-        min_maps, lower_floor=0.0, upper_ceiling=None,
-        default_min=0.0, default_max=max(1.0, map_target_upper), min_span=1.0,
-    )
-    max_bis_axis_min, max_bis_axis_max = _strict_prediction_axis_range(
-        max_bis_values, lower_floor=0.0, upper_ceiling=100.0,
-        default_min=0.0, default_max=100.0, min_span=1.0,
-    )
-
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
-
-    map_band = _target_rect_y_limits(map_target, map_target_upper, map_axis_min, map_axis_max)
-    if map_band is not None:
-        fig.add_shape(
-            type="rect", xref="paper", x0=0, x1=1, yref="y", y0=map_band[0], y1=map_band[1],
-            fillcolor="rgba(220, 0, 0, 0.10)", line=dict(width=0), layer="below",
-        )
-
-    bis_band = _target_rect_y_limits(target_bis_low, target_bis_high, max_bis_axis_min, max_bis_axis_max)
-    if bis_band is not None:
-        fig.add_shape(
-            type="rect", xref="paper", x0=0, x1=1, yref="y2", y0=bis_band[0], y1=bis_band[1],
-            fillcolor="rgba(0, 85, 220, 0.10)", line=dict(width=0), layer="below",
-        )
-
-    both_targets_ok = (
-        np.isfinite(min_maps) & np.isfinite(min_bis_values) & np.isfinite(max_bis_values)
-        & (min_maps >= map_target) & (min_maps <= map_target_upper)
-        & (min_bis_values >= target_bis_low) & (max_bis_values <= target_bis_high)
-    )
-    # Text version of the target-dose-range boundaries, returned alongside
-    # the figure for the "Target dose range" info box below the graph
-    # (build_pr_dose_response_card in dashboard_layout.py) - no boundary
-    # numbers are drawn inside the plot itself any more (see the removed
-    # per-boundary annotations that used to sit just above the green
-    # band); "-" when no dose achieves both targets simultaneously.
-    dose_range_text = "–"
-    if np.any(both_targets_ok):
-        ok_doses = dose_grid_mgkg[both_targets_ok]
-        ok_start = float(np.min(ok_doses))
-        ok_end = float(np.max(ok_doses))
-        dose_range_text = f"{ok_start:.2f}–{ok_end:.2f} mg/kg"
-
-        if ok_end > ok_start:
-            band_x0, band_x1 = ok_start, ok_end
-        else:
-            local_step = float(np.nanmedian(np.diff(dose_grid_mgkg))) if len(dose_grid_mgkg) > 1 else 0.05
-            band_half_width = max(0.025, 0.5 * local_step)
-            band_x0 = max(x_axis_min, ok_start - band_half_width)
-            band_x1 = min(x_axis_max, ok_end + band_half_width)
-
-        fig.add_shape(
-            type="rect", xref="x", yref="paper", x0=band_x0, x1=band_x1, y0=0, y1=1,
-            fillcolor="rgba(0, 150, 0, 0.10)", line=dict(width=0), layer="below",
-        )
-
-    fig.add_trace(
-        go.Scatter(
-            x=dose_grid_mgkg, y=min_maps, mode="lines+markers",
-            line=dict(color="red", width=3), marker=dict(color="red", size=6),
-            name="MAP", showlegend=True,
-            hovertemplate="Dose %{x:.2f} mg/kg<br>Minimal MAP %{y:.1f} mmHg<extra></extra>",
-        ),
-        secondary_y=False,
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=dose_grid_mgkg, y=max_bis_values, customdata=np.stack([min_bis_values], axis=-1),
-            mode="lines+markers", line=dict(color="blue", width=3), marker=dict(color="blue", size=6),
-            name="BIS", showlegend=True,
-            hovertemplate=(
-                "Dose %{x:.2f} mg/kg<br>Maximal BIS %{y:.1f}<br>Minimal BIS %{customdata[0]:.1f}<extra></extra>"
-            ),
-        ),
-        secondary_y=True,
-    )
-
-    diamond = dict(symbol="diamond", size=14)
-    fig.add_trace(
-        go.Scatter(
-            x=[selected_dose_mgkg], y=[selected_min_map], mode="markers",
-            marker=dict(color="red", **diamond), showlegend=False,
-            hovertemplate=(
-                f"Baseline {selected_dose_mgkg:.2f} mg/kg<br>Minimal MAP %{{y:.1f}} mmHg<br>"
-                f"MAP target {map_target:.1f}-{map_target_upper:.1f} mmHg<extra></extra>"
-            ),
-        ),
-        secondary_y=False,
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=[selected_dose_mgkg], y=[selected_max_bis], customdata=[[selected_min_bis]], mode="markers",
-            marker=dict(color="blue", **diamond), showlegend=False,
-            hovertemplate=(
-                f"Baseline {selected_dose_mgkg:.2f} mg/kg<br>Maximal BIS %{{y:.1f}}<br>"
-                f"Minimal BIS %{{customdata[0]:.1f}}<br>BIS target {target_bis_low:.0f}-{target_bis_high:.0f}<extra></extra>"
-            ),
-        ),
-        secondary_y=True,
-    )
-
-    fig.add_shape(
-        type="line", xref="x", yref="paper", x0=selected_dose_mgkg, x1=selected_dose_mgkg, y0=0, y1=1,
-        line=dict(color=RECOMMENDED_COLOR, width=3, dash="dash"), layer="above",
-    )
-    # Two-line "<label>\n<dose>" annotations (label colored, dose value in
-    # a neutral dark color). Both normally sit at the same y, each
-    # centered above its own dose's x position - but when the baseline and
-    # explored doses are close together on the x-axis, same-y placement
-    # makes the two (2-line-tall) labels visually collide. baseline_y/
-    # explored_y are computed once below, as a fraction of the *actual*
-    # x-axis range (not a fixed pixel/dose threshold), so the labels never
-    # overlap regardless of the current dose values or how narrow/wide the
-    # rendered plot is - close doses stagger vertically instead, still
-    # each directly above its own dashed line (no horizontal shift).
-    dose_label_value_color = "#1f2330"
-
-    def _dose_label_annotation(x_value: float, y_value: float, label: str, color: str, value_text: str) -> None:
-        fig.add_annotation(
-            x=x_value, y=y_value, xref="x", yref="paper",
-            text=f'<span style="color:{color}"><b>{label}</b></span><br><b>{value_text}</b>',
-            showarrow=False, yanchor="bottom", align="center",
-            font=dict(color=dose_label_value_color, size=13),
-        )
-
-    baseline_y = 1.05
-    explored_y = 1.05
-    if explored_dose_mgkg is not None:
-        x_range = x_axis_max - x_axis_min
-        dose_gap_frac = abs(explored_dose_mgkg - selected_dose_mgkg) / x_range if x_range > 0 else 0.0
-        if dose_gap_frac < 0.22:
-            explored_y = 1.34
-
-    _dose_label_annotation(
-        selected_dose_mgkg, baseline_y, "Baseline dose", RECOMMENDED_COLOR, f"{selected_dose_mgkg:.2f} mg/kg",
-    )
-
+    manual_min_map = manual_max_bis = None
     if explored_ns is not None:
         explored_sweep = explored_ns.dose_sweep
         explored_dose_grid = np.asarray(explored_sweep["dose_grid_mgkg"], dtype=float)
         explored_idx = int(np.argmin(np.abs(explored_dose_grid - explored_dose_mgkg)))
-        explored_min_map = float(np.asarray(explored_sweep["min_map_mmhg"], dtype=float)[explored_idx])
-        explored_max_bis = float(np.asarray(explored_sweep["max_bis"], dtype=float)[explored_idx])
+        manual_min_map = float(np.asarray(explored_sweep["min_map_mmhg"], dtype=float)[explored_idx])
+        manual_max_bis = float(np.asarray(explored_sweep["max_bis"], dtype=float)[explored_idx])
 
-        fig.add_trace(
-            go.Scatter(
-                x=[explored_dose_mgkg], y=[explored_min_map], mode="markers",
-                marker=dict(color=MANUAL_OVERRIDE_COLOR, **diamond), showlegend=False,
-                hovertemplate=f"Explored {explored_dose_mgkg:.2f} mg/kg<br>Minimal MAP %{{y:.1f}} mmHg<extra></extra>",
-            ),
-            secondary_y=False,
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=[explored_dose_mgkg], y=[explored_max_bis], mode="markers",
-                marker=dict(color=MANUAL_OVERRIDE_COLOR, **diamond), showlegend=False,
-                hovertemplate=f"Explored {explored_dose_mgkg:.2f} mg/kg<br>Maximal BIS %{{y:.1f}}<extra></extra>",
-            ),
-            secondary_y=True,
-        )
-        fig.add_shape(
-            type="line", xref="x", yref="paper", x0=explored_dose_mgkg, x1=explored_dose_mgkg, y0=0, y1=1,
-            line=dict(color=MANUAL_OVERRIDE_COLOR, width=3, dash="dash"), layer="above",
-        )
-        _dose_label_annotation(
-            explored_dose_mgkg, explored_y, "Explored dose", MANUAL_OVERRIDE_COLOR, f"{explored_dose_mgkg:.2f} mg/kg",
-        )
-
-    # No more top legend (the old MAP/BIS/Target/Baseline/Explored legend
-    # row) - showlegend=False suppresses it regardless of any trace's own
-    # showlegend value, so the MAP/BIS data traces above (still name="MAP"
-    # /"BIS" for hover/debugging purposes) never render a legend either.
-    # yaxis/yaxis2 titles are intentionally empty: the axis-title text and
-    # its arrow are now drawn as a compact HTML/CSS overlay beside the
-    # graph (see build_pr_dose_response_card in dashboard_layout.py).
-    #
-    # Margins: yref="paper" annotation y-values above 1.0 only stay on
-    # canvas if the top margin (an absolute pixel count) covers that
-    # excess once translated through the plot area's own pixel height -
-    # and that pixel height grows with the card (#pr-dose-response-
-    # card-wrapper .graph-card--tall in style.css sets it to 620px), so
-    # the margin has to be sized for that card height, not guessed.
-    # Worked backwards from the actual rendered card: content area is
-    # roughly 560px tall, so with a 46px bottom margin the plot area
-    # (paper y 0-to-1) is (560 - t - 46) px tall; the staggered label's
-    # anchor at y=1.34 sits t - 0.34*(560-t-46) px below the figure's own
-    # top edge, and since the annotation is yanchor="bottom" its 2-line
-    # text then grows *upward* from that anchor by another ~35px - so
-    # t=185 leaves that whole 2-line block comfortably on-canvas instead
-    # of overlapping the card header above it. l/r=54 leaves room for
-    # the y tick labels next to the now much narrower (~22px) CSS
-    # arrow-label columns; b=46 fits the x-axis title without touching
-    # the bottom info boxes, which live outside the graph entirely.
-    fig.update_layout(
-        template="plotly_white",
-        showlegend=False,
-        margin=dict(t=185, b=46, l=54, r=54),
-        xaxis=dict(
-            title=dict(text="Propofol induction dose (mg/kg)", font=dict(color="green")),
-            tickfont=dict(color="green"), color="green",
-            range=[x_axis_min, x_axis_max],
-        ),
-        yaxis=dict(
-            title=dict(text=""),
-            tickfont=dict(color="red"), color="red",
-            range=[map_axis_min, map_axis_max],
-        ),
-        yaxis2=dict(
-            title=dict(text=""),
-            tickfont=dict(color="blue"), color="blue",
-            range=[max_bis_axis_max, max_bis_axis_min],
-            overlaying="y", side="right",
-        ),
-    )
-
-    return SimpleNamespace(
-        figure=fig,
-        map_zone_text=f"≥ {map_target:.0f} mmHg",
-        bis_zone_text=f"{target_bis_low:.0f}–{target_bis_high:.0f}",
-        dose_range_text=dose_range_text,
+    return _build_dose_response_figure(
+        dose_grid_mgkg=dose_grid_mgkg,
+        min_maps=min_maps,
+        min_bis_values=min_bis_values,
+        max_bis_values=max_bis_values,
+        selected_dose_mgkg=selected_dose_mgkg,
+        map_target=map_target,
+        map_target_upper=map_target_upper,
+        target_bis_low=target_bis_low,
+        target_bis_high=target_bis_high,
+        x_axis_min=x_axis_min,
+        x_axis_max=x_axis_max,
+        recommended_label="Baseline dose",
+        recommended_hover_label="Baseline",
+        manual_dose_mgkg=explored_dose_mgkg,
+        manual_min_map=manual_min_map,
+        manual_max_bis=manual_max_bis,
+        manual_label="Explored dose",
+        manual_hover_label="Explored",
     )
 
 
@@ -5029,9 +4906,6 @@ def render_pr_results_area(is_active):
     Output("pr-propofol-pk-graph", "figure"),
     Output("pr-remifentanil-pk-graph", "figure"),
     Output("pr-dose-response-graph", "figure"),
-    Output("pr-dose-response-map-zone-value", "children"),
-    Output("pr-dose-response-bis-zone-value", "children"),
-    Output("pr-dose-response-dose-range-value", "children"),
     Input("pr-rate-slider", "value"),
     Input("pr-selected-case-store", "data"),
     Input("pr-committed-baseline-store", "data"),
@@ -5041,7 +4915,7 @@ def render_pr_results_area(is_active):
 def update_pr_results(rate, case_id, baseline_choice, explore_opioid):
     """
     Everything shown for the committed case + committed baseline
-    reference + current grid rate - all 12 outputs are read straight from
+    reference + current grid rate - all 9 outputs are read straight from
     PRECOMPUTED_REMI_DATA (already loaded, module-level, at startup) and
     reused figure-building functions. No model call happens here or
     anywhere else on this page - the slider only ever selects among the
@@ -5070,7 +4944,7 @@ def update_pr_results(rate, case_id, baseline_choice, explore_opioid):
     """
     case = _pr_case(case_id)
     if case is None:
-        return (no_update,) * 12
+        return (no_update,) * 9
 
     grid = case.get("remifentanil_grid", {})
     rates = grid.get("rates_mcgkgmin") or []
@@ -5080,7 +4954,7 @@ def update_pr_results(rate, case_id, baseline_choice, explore_opioid):
 
     if not rates or not results or baseline_dict is None:
         empty = make_empty_figure("No precomputed data for this selection")
-        return "-", "-", [], "-", empty, empty, empty, empty, empty, "-", "-", "-"
+        return "-", "-", [], "-", empty, empty, empty, empty, empty
 
     baseline_ns = _store_dict_to_namespace(baseline_dict)
     baseline_label = _pr_remi_rate_display(baseline_ns)
@@ -5093,12 +4967,11 @@ def update_pr_results(rate, case_id, baseline_choice, explore_opioid):
         map_fig = make_map_figure(baseline_ns)
         propofol_fig = make_propofol_pk_figure(baseline_ns)
         remifentanil_fig = make_remifentanil_pk_figure(baseline_ns)
-        dose_response = make_pr_induction_dose_rationale_figure(baseline_ns, baseline_map)
+        dose_response_fig = make_pr_induction_dose_rationale_figure(baseline_ns, baseline_map)
         grid_children = _build_pr_result_grid_baseline_only(baseline_ns)
         return (
             baseline_label, "Not selected", grid_children, "-",
-            bis_fig, map_fig, propofol_fig, remifentanil_fig, dose_response.figure,
-            dose_response.map_zone_text, dose_response.bis_zone_text, dose_response.dose_range_text,
+            bis_fig, map_fig, propofol_fig, remifentanil_fig, dose_response_fig,
         )
 
     idx = _pr_rate_to_index(rates, rate)
@@ -5112,7 +4985,7 @@ def update_pr_results(rate, case_id, baseline_choice, explore_opioid):
         manual_cp_name="Explored Scenario (Cp)", manual_ce_name="Explored Scenario (Ce)",
     )
     remifentanil_fig = make_pr_remifentanil_pk_figure(baseline_ns, explored_ns)
-    dose_response = make_pr_induction_dose_rationale_figure(baseline_ns, baseline_map, explored_ns)
+    dose_response_fig = make_pr_induction_dose_rationale_figure(baseline_ns, baseline_map, explored_ns)
 
     explored_label = _pr_remi_rate_display(explored_ns)
     grid_children = _build_pr_result_grid(baseline_ns, explored_ns)
@@ -5120,8 +4993,7 @@ def update_pr_results(rate, case_id, baseline_choice, explore_opioid):
 
     return (
         baseline_label, explored_label, grid_children, rate_label,
-        bis_fig, map_fig, propofol_fig, remifentanil_fig, dose_response.figure,
-        dose_response.map_zone_text, dose_response.bis_zone_text, dose_response.dose_range_text,
+        bis_fig, map_fig, propofol_fig, remifentanil_fig, dose_response_fig,
     )
 
 
