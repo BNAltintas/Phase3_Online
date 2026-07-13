@@ -4625,25 +4625,57 @@ def _pr_induction_row(baseline_mgkg: float, baseline_mg: float, explored_mgkg: f
     )
 
 
-def _pr_maintenance_rows(baseline_ns, explored_ns) -> list:
+def _pr_maintenance_rows(baseline_ns, explored_ns, drug: str = "propofol") -> list:
     """
-    One row per compressed propofol-maintenance interval, using the
-    EXPLORED regimen's own compress_minute_schedule() boundaries (always
-    well-defined - every grid point is a fresh, complete optimization) and
-    sampling the baseline regimen's own rate at each interval's start
-    minute for direct comparison. Baseline and explored can have
-    different switch times, but propofol_inf_rates_ml_h/_mcgkgmin are
-    always exactly N_INTERVALS=15 minute-indexed entries for both, so
-    index-sampling baseline by minute is always safe, never a length
-    mismatch. Change column is a real colored percent-change (mirroring
-    Propofol Induction/Remifentanil rate) whenever both sides are
-    actually infusing; a Pause interval (rate 0 on either side) keeps the
-    static dash, since a percent change against/to zero isn't meaningful.
+    One row per compressed maintenance interval for the given drug
+    ("propofol" or "remifentanil"), using the EXPLORED regimen's own
+    compress_minute_schedule() boundaries (always well-defined - every
+    grid point is a fresh, complete optimization) and sampling the
+    baseline regimen's own rate at each interval's start minute for
+    direct comparison. Baseline and explored can have different switch
+    times, but each drug's own _inf_rates_ml_h/_secondary arrays are
+    always exactly N_INTERVALS=15 minute-indexed entries for both sides
+    (whenever that drug is present at all), so index-sampling baseline by
+    minute is always safe, never a length mismatch. Change column is a
+    real colored percent-change (mirroring Propofol Induction/
+    Remifentanil rate) whenever both sides are actually infusing; a Pause
+    interval (rate 0 on either side) keeps the static dash, since a
+    percent change against/to zero isn't meaningful.
+
+    Formatting - "Pause" / "{rate:.0f} mL/h ({secondary:.0f} {unit})" -
+    intentionally matches the Recommendation page's own _maintenance_rows()
+    exactly (same rounding, same "Pause" text, same mL/h + secondary-unit
+    pairing), so the two pages show identical numbers for identical
+    regimens; only the row shape differs here (this page's baseline/
+    explored comparison columns vs. that page's single interval/arrow/
+    rate schedule table) - _maintenance_rows() itself is not reused
+    because its DOM shape doesn't fit this page's comparison grid.
+
+    remifentanil_selected can differ between baseline and explored (e.g. a
+    "No opioid" baseline compared against a real remifentanil grid point)
+    - when the baseline has no schedule at all for this drug
+    (baseline_ml is None), every explored segment is shown against a flat
+    "No opioid" baseline cell instead of a sampled rate.
     """
-    intervals = compress_minute_schedule(explored_ns.propofol_inf_rates_ml_h)
-    explored_secondary = explored_ns.propofol_inf_rates_mcgkgmin
-    baseline_ml = baseline_ns.propofol_inf_rates_ml_h
-    baseline_secondary = baseline_ns.propofol_inf_rates_mcgkgmin
+    if drug == "propofol":
+        ml_field = "propofol_inf_rates_ml_h"
+        secondary_field = "propofol_inf_rates_mcgkgmin"
+        secondary_label = "µg/kg/min"
+    elif drug == "remifentanil":
+        ml_field = "remifentanil_inf_rates_ml_h"
+        secondary_field = "remifentanil_inf_rates_ngkgmin"
+        secondary_label = "ng/kg/min"
+    else:
+        raise ValueError(f"Unknown drug: {drug!r}")
+
+    explored_ml = getattr(explored_ns, ml_field)
+    if explored_ml is None:
+        return []
+
+    intervals = compress_minute_schedule(explored_ml)
+    explored_secondary = getattr(explored_ns, secondary_field)
+    baseline_ml = getattr(baseline_ns, ml_field)
+    baseline_secondary = getattr(baseline_ns, secondary_field)
 
     rows = []
     for interval in intervals:
@@ -4653,13 +4685,23 @@ def _pr_maintenance_rows(baseline_ns, explored_ns) -> list:
 
         explored_rate = float(interval["rate"])
         explored_secondary_rate = float(explored_secondary[min(start, len(explored_secondary) - 1)])
+        explored_paused = np.isclose(explored_rate, 0.0, atol=1e-8)
+        explored_text = (
+            "Pause" if explored_paused
+            else f"{explored_rate:.0f} mL/h ({explored_secondary_rate:.0f} {secondary_label})"
+        )
+
+        if baseline_ml is None:
+            rows.append(_pr_text_row(label, "No opioid", explored_text))
+            continue
+
         baseline_rate = float(baseline_ml[min(start, len(baseline_ml) - 1)])
         baseline_secondary_rate = float(baseline_secondary[min(start, len(baseline_secondary) - 1)])
-
         baseline_paused = np.isclose(baseline_rate, 0.0, atol=1e-8)
-        explored_paused = np.isclose(explored_rate, 0.0, atol=1e-8)
-        baseline_text = "Pause" if baseline_paused else f"{baseline_rate:.0f} mL/h ({baseline_secondary_rate:.0f} µg/kg/min)"
-        explored_text = "Pause" if explored_paused else f"{explored_rate:.0f} mL/h ({explored_secondary_rate:.0f} µg/kg/min)"
+        baseline_text = (
+            "Pause" if baseline_paused
+            else f"{baseline_rate:.0f} mL/h ({baseline_secondary_rate:.0f} {secondary_label})"
+        )
 
         if baseline_paused or explored_paused:
             rows.append(_pr_text_row(label, baseline_text, explored_text))
@@ -4680,25 +4722,13 @@ def _build_pr_result_grid(baseline_ns, explored_ns) -> list:
     rows.append(_te_result_section_header(
         "Propofol – Early maintenance (0–15 min)", "Infusion regimen relative to induction",
     ))
-    rows.extend(_pr_maintenance_rows(baseline_ns, explored_ns))
+    rows.extend(_pr_maintenance_rows(baseline_ns, explored_ns, drug="propofol"))
 
-    rows.append(_te_result_section_header("Selected Opioid Strategy", "Achieved remifentanil infusion rate"))
-    baseline_has_remi = baseline_ns.remifentanil_selected and baseline_ns.remifentanil_inf_rates_mcgkgmin is not None
-    explored_has_remi = explored_ns.remifentanil_selected and explored_ns.remifentanil_inf_rates_mcgkgmin is not None
-    if explored_has_remi and baseline_has_remi:
-        rows.append(_pr_result_row(
-            "Remifentanil rate (µg/kg/min)",
-            float(baseline_ns.remifentanil_inf_rates_mcgkgmin[-1]),
-            float(explored_ns.remifentanil_inf_rates_mcgkgmin[-1]),
-            fmt="{:.3f}",
-        ))
-    elif explored_has_remi:
-        rows.append(_pr_text_row(
-            "Remifentanil rate (µg/kg/min)", "No opioid",
-            f"{float(explored_ns.remifentanil_inf_rates_mcgkgmin[-1]):.3f}",
-        ))
-    else:
-        rows.append(_pr_text_row("Remifentanil rate (µg/kg/min)", "-", "-"))
+    rows.append(_te_result_section_header(
+        "Remifentanil – Early maintenance (0–15 min)", "Infusion regimen relative to induction",
+    ))
+    remi_rows = _pr_maintenance_rows(baseline_ns, explored_ns, drug="remifentanil")
+    rows.extend(remi_rows if remi_rows else [_pr_text_row("Remifentanil", "-", "-")])
 
     return rows
 
@@ -4733,12 +4763,25 @@ def _build_pr_result_grid_baseline_only(baseline_ns) -> list:
         )
         rows.append(_pr_text_row(f"{start}–{end} min", text, "-"))
 
-    rows.append(_te_result_section_header("Selected Opioid Strategy", "Achieved remifentanil infusion rate"))
-    baseline_has_remi = baseline_ns.remifentanil_selected and baseline_ns.remifentanil_inf_rates_mcgkgmin is not None
-    baseline_remi_text = (
-        f"{float(baseline_ns.remifentanil_inf_rates_mcgkgmin[-1]):.3f}" if baseline_has_remi else "No opioid"
-    )
-    rows.append(_pr_text_row("Remifentanil rate (µg/kg/min)", baseline_remi_text, "-"))
+    rows.append(_te_result_section_header(
+        "Remifentanil – Early maintenance (0–15 min)", "Infusion regimen relative to induction",
+    ))
+    baseline_has_remi = baseline_ns.remifentanil_selected and baseline_ns.remifentanil_inf_rates_ml_h is not None
+    if baseline_has_remi:
+        remi_intervals = compress_minute_schedule(baseline_ns.remifentanil_inf_rates_ml_h)
+        baseline_remi_secondary = baseline_ns.remifentanil_inf_rates_ngkgmin
+        for interval in remi_intervals:
+            start = int(interval["start_min"])
+            end = int(interval["end_min"])
+            rate = float(interval["rate"])
+            secondary_rate = float(baseline_remi_secondary[min(start, len(baseline_remi_secondary) - 1)])
+            text = (
+                "Pause" if np.isclose(rate, 0.0, atol=1e-8)
+                else f"{rate:.0f} mL/h ({secondary_rate:.0f} ng/kg/min)"
+            )
+            rows.append(_pr_text_row(f"{start}–{end} min", text, "-"))
+    else:
+        rows.append(_pr_text_row("Remifentanil", "No opioid", "-"))
 
     return rows
 
