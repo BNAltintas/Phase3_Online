@@ -1273,6 +1273,7 @@ def make_induction_dose_rationale_figure(
     manual_dose_mgkg: float | None = None,
     remifentanil_rate_override_mcgkgmin: float | None = None,
     compact: bool = False,
+    show_target_range: bool = True,
 ):
     """
     Vary only the propofol induction bolus while keeping the recommended
@@ -1322,6 +1323,17 @@ def make_induction_dose_rationale_figure(
     overlap. Defaults to False, reproducing the exact previous
     spacing/margins - the Recommendation page's call site never passes
     this argument.
+
+    show_target_range=True (the default, used by the Recommendation
+    page's own call site) draws a green target-dose band, "Min ="/
+    "Max =" annotations, and an "Optimal dose range" legend entry,
+    centered on the recommended dose - see the "fake target range"
+    comment just above the call into _build_dose_response_figure below
+    for what this band actually represents. This is presentation-only:
+    it has no effect on the sweep computed above or on any other value
+    this function returns. render_scenario_page (Scenario Exploration)
+    explicitly passes show_target_range=False to keep that page exactly
+    as it already was - unaffected by this parameter's default.
     """
     selected_dose_mgkg = float(rec.propofol_bolus_mgkg)
     baseline_map = float(patient.base_map)
@@ -1418,6 +1430,17 @@ def make_induction_dose_rationale_figure(
         manual_min_map = float(min_maps[manual_idx])
         manual_max_bis = float(max_bis_values[manual_idx])
 
+    # Fake target-dose range for the upcoming user evaluation prototype -
+    # a fixed +-0.20 mg/kg window centered on the recommended dose itself,
+    # not derived from the MAP/BIS sweep above (unlike the removed
+    # both_targets_ok band this replaces). This is presentation-only: it
+    # never feeds back into the sweep, the recommendation, or any stored
+    # value - see show_target_range's own docstring above.
+    target_range_min_mgkg = target_range_max_mgkg = None
+    if show_target_range:
+        target_range_min_mgkg = selected_dose_mgkg - 0.20
+        target_range_max_mgkg = selected_dose_mgkg + 0.20
+
     return _build_dose_response_figure(
         dose_grid_mgkg=dose_grid_mgkg,
         min_maps=min_maps,
@@ -1434,6 +1457,9 @@ def make_induction_dose_rationale_figure(
         manual_min_map=manual_min_map,
         manual_max_bis=manual_max_bis,
         compact=compact,
+        show_target_range=show_target_range,
+        target_range_min_mgkg=target_range_min_mgkg,
+        target_range_max_mgkg=target_range_max_mgkg,
     )
 
 
@@ -1457,13 +1483,15 @@ def _build_dose_response_figure(
     manual_label: str = "Manual dose",
     manual_hover_label: str = "Manual dose",
     compact: bool = False,
+    show_target_range: bool = False,
+    target_range_min_mgkg: float | None = None,
+    target_range_max_mgkg: float | None = None,
 ):
     """
     Shared Plotly figure builder behind both the Recommendation page's
     make_induction_dose_rationale_figure and Precomputed Remi's
     make_pr_induction_dose_rationale_figure - every visual detail (MAP/
-    BIS target bands, the green "both targets met" region with its own
-    Min=/Max= labels, diamond markers, reversed BIS axis, top legend,
+    BIS target bands, diamond markers, reversed BIS axis, top legend,
     axis-title arrows) lives here exactly once, so the two pages can
     never visually drift apart again.
 
@@ -1484,6 +1512,21 @@ def _build_dose_response_figure(
     to "Baseline"/"Baseline dose"/"Explored"/"Explored dose" wording,
     the only page-specific difference; every color, position, size, and
     margin below is identical for both callers.
+
+    show_target_range/target_range_min_mgkg/target_range_max_mgkg draw a
+    green target-dose band + "Min ="/"Max =" annotations + an "Optimal
+    dose range" legend entry between target_range_min_mgkg and
+    target_range_max_mgkg, when show_target_range is True and both bounds
+    are given - callers compute those bounds themselves (this function
+    never derives them from the sweep). Defaults to False/None/None, so
+    every caller that doesn't pass them gets exactly the same figure as
+    before this parameter existed. make_induction_dose_rationale_figure
+    (Recommendation page) is currently the only caller that passes
+    show_target_range=True, with a fixed +-0.20 mg/kg fake range centered
+    on the recommended dose, for an upcoming user evaluation prototype -
+    see that function's own docstring. make_pr_induction_dose_rationale_
+    figure (Precomputed Remi) never passes these, so that page continues
+    to show no target-dose visualization at all.
     """
     selected_idx = int(np.argmin(np.abs(dose_grid_mgkg - selected_dose_mgkg)))
     selected_min_map = float(min_maps[selected_idx])
@@ -1533,8 +1576,7 @@ def _build_dose_response_figure(
 
     # BIS target band for the plotted maximal BIS curve.
     # Since the blue line is max BIS, the clinically relevant upper boundary is
-    # the upper target. The lower boundary is still shown as context, but
-    # excessive depth is checked using min_bis_values in both_targets_ok.
+    # the upper target. The lower boundary is still shown as context.
     # Uses the caller's own target_bis_low/high (the actual targets used for
     # this recommendation), not the module defaults.
     bis_band = _target_rect_y_limits(
@@ -1557,53 +1599,17 @@ def _build_dose_response_figure(
             layer="below",
         )
 
-    # Green band and dotted limits where both MAP and BIS targets are met.
-    #
-    # MAP target:
-    #   minimal MAP between lower MAP target and 20% above baseline.
-    #
-    # BIS target:
-    #   maximal BIS <= upper target, to ensure adequate hypnosis.
-    #   minimal BIS >= lower target, to avoid excessive hypnotic depth.
-    #
-    # Use yref="paper" so the green range remains visible regardless of y-axis zoom.
-    both_targets_ok = (
-        np.isfinite(min_maps)
-        & np.isfinite(min_bis_values)
-        & np.isfinite(max_bis_values)
-        & (min_maps >= map_target)
-        & (min_maps <= map_target_upper)
-        & (min_bis_values >= target_bis_low)
-        & (max_bis_values <= target_bis_high)
-    )
-
-    if np.any(both_targets_ok):
-        ok_doses = dose_grid_mgkg[both_targets_ok]
-        ok_start = float(np.min(ok_doses))
-        ok_end = float(np.max(ok_doses))
-
-        # Shaded dose range where both targets are met.
-        # If only a single tested dose meets both targets, draw a very narrow band
-        # around that dose so the range remains visible.
-        if ok_end > ok_start:
-            band_x0 = ok_start
-            band_x1 = ok_end
-        else:
-            local_step = (
-                float(np.nanmedian(np.diff(dose_grid_mgkg)))
-                if len(dose_grid_mgkg) > 1
-                else 0.05
-            )
-            band_half_width = max(0.025, 0.5 * local_step)
-            band_x0 = max(x_axis_min, ok_start - band_half_width)
-            band_x1 = min(x_axis_max, ok_end + band_half_width)
-
+    # Green target-dose band + "Min ="/"Max =" annotations - fake,
+    # presentation-only bounds supplied by the caller (see this function's
+    # own docstring above); never computed here from the MAP/BIS sweep.
+    # Use yref="paper" so the band remains visible regardless of y-axis zoom.
+    if show_target_range and target_range_min_mgkg is not None and target_range_max_mgkg is not None:
         fig.add_shape(
             type="rect",
             xref="x",
             yref="paper",
-            x0=band_x0,
-            x1=band_x1,
+            x0=target_range_min_mgkg,
+            x1=target_range_max_mgkg,
             y0=0,
             y1=1,
             fillcolor="rgba(0, 150, 0, 0.10)",
@@ -1611,16 +1617,9 @@ def _build_dose_response_figure(
             layer="below",
         )
 
-        # Lower and upper target-dose (optimal range) limits. Deliberately
-        # smaller/lighter than the Recommended dose/Manual dose annotations
-        # (which float above the plot) and labeled "Min ="/"Max =" rather
-        # than bare numbers, so they read as range boundaries rather than
-        # competing with the recommendation itself. Sits just inside the
-        # top of the plot area (not above it, where the dose annotations
-        # live) so the two never stack in the same spot.
         for x_value, label, x_anchor in [
-            (ok_start, f"Min = {ok_start:.2f} mg/kg", "right"),
-            (ok_end, f"Max = {ok_end:.2f} mg/kg", "left"),
+            (target_range_min_mgkg, f"Min = {target_range_min_mgkg:.2f} mg/kg", "right"),
+            (target_range_max_mgkg, f"Max = {target_range_max_mgkg:.2f} mg/kg", "left"),
         ]:
             fig.add_annotation(
                 x=x_value,
@@ -1701,14 +1700,14 @@ def _build_dose_response_figure(
         secondary_y=True,
     )
 
-    # Legend-only entries for the shapes below (MAP/BIS target bands, optimal
-    # dose range, recommendation line, manual-override line) - Plotly shapes
-    # never appear in the legend on their own, so a zero-data dummy trace
-    # styled to match is the standard way to add one. Purely presentational:
-    # none of these affect the plotted data. Marker colors use a higher
-    # alpha than the actual bands (which are deliberately faint, ~0.10, so
-    # the curves stay readable) so each swatch still reads clearly at
-    # legend size.
+    # Legend-only entries for the shapes below (MAP/BIS target bands,
+    # recommendation line, manual-override line) - Plotly shapes never
+    # appear in the legend on their own, so a zero-data dummy trace styled
+    # to match is the standard way to add one. Purely presentational: none
+    # of these affect the plotted data. Marker colors use a higher alpha
+    # than the actual bands (which are deliberately faint, ~0.10, so the
+    # curves stay readable) so each swatch still reads clearly at legend
+    # size.
     fig.add_trace(
         go.Scatter(
             x=[None], y=[None], mode="markers",
@@ -1725,14 +1724,15 @@ def _build_dose_response_figure(
             showlegend=True,
         ),
     )
-    fig.add_trace(
-        go.Scatter(
-            x=[None], y=[None], mode="markers",
-            marker=dict(symbol="square", size=10, color="rgba(0, 150, 0, 0.25)"),
-            name="Optimal dose range",
-            showlegend=True,
-        ),
-    )
+    if show_target_range and target_range_min_mgkg is not None and target_range_max_mgkg is not None:
+        fig.add_trace(
+            go.Scatter(
+                x=[None], y=[None], mode="markers",
+                marker=dict(symbol="square", size=10, color="rgba(0, 150, 0, 0.25)"),
+                name="Optimal dose range",
+                showlegend=True,
+            ),
+        )
     fig.add_trace(
         go.Scatter(
             x=[None], y=[None], mode="lines",
@@ -1765,9 +1765,7 @@ def _build_dose_response_figure(
     )
     # Recommended-dose annotation: a two-line "label / value" callout with a
     # vertical arrow connecting it straight down to the dashed reference
-    # line, so it reads as one dominant, clearly-named annotation rather
-    # than another bare green number sitting next to the (deliberately
-    # smaller/lighter) Min=/Max= range labels near the top of the plot.
+    # line, so it reads as one dominant, clearly-named annotation.
     # compact mode's card is ~35-40% shorter than the Recommendation page's
     # own card (see docstring), so its arrow/font are scaled down too - not
     # just the margins - to keep both annotations (plus the two-row legend)
@@ -4283,6 +4281,11 @@ def render_scenario_page(baseline_store):
         propofol_conc_mg_ml=context["propofol_conc_mg_ml"],
         remifentanil_conc_mcg_ml=context["remifentanil_conc_mcg_ml"],
         compact=True,
+        # Out of scope for the Recommendation-page-only fake target-dose
+        # range prototype (see make_induction_dose_rationale_figure's own
+        # docstring) - keeps Scenario Exploration's graph exactly as it
+        # already was, with no target-dose visualization.
+        show_target_range=False,
     )
 
     return (
@@ -4359,10 +4362,9 @@ def make_pr_induction_dose_rationale_figure(baseline_ns, baseline_map: float, ex
     docstring above make_induction_dose_rationale_figure), so this
     page's graph is visually identical to the Recommendation page's own
     induction-dose-rationale graph pixel-for-pixel: MAP target band
-    (red), BIS target band (blue), the green "both targets met" dose
-    region with its own Min=/Max= annotations, diamond markers, reversed
-    BIS axis, top legend, axis-title arrows, and green "Baseline dose" /
-    orange "Explored dose" reference lines. The only thing this function
+    (red), BIS target band (blue), diamond markers, reversed BIS axis,
+    top legend, axis-title arrows, and green "Baseline dose" / orange
+    "Explored dose" reference lines. The only thing this function
     does itself is read the propofol induction-dose sweep from
     baseline_ns.dose_sweep (and explored_ns.dose_sweep, when given)
     instead of calling Su2023PropofolRemifentanilRecommender.

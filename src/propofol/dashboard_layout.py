@@ -2436,7 +2436,6 @@ def build_pr_dose_response_card():
     Dose-Response Interaction - shares the exact same figure builder and
     visual styling as the Recommendation page's own induction-dose
     rationale graph (dose-rationale-graph): same MAP/BIS target bands,
-    green "both targets met" region with its own Min=/Max= labels,
     diamond markers, reversed BIS axis, top legend, and axis-title
     arrows baked into the axis titles themselves - see
     _build_dose_response_figure in app.py, the shared helper both pages'
