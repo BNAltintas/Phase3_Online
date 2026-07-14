@@ -817,7 +817,7 @@ def build_sidebar():
                     html.Div(
                         [
                             html.I(className="fa-solid fa-bolt sidebar-nav-icon"),
-                            "Precomputed Remi",
+                            "Exploration",
                         ],
                         id="nav-precomputed-remi-btn",
                         n_clicks=0,
